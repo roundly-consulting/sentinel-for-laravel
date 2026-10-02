@@ -10,7 +10,9 @@ use RoundlyConsulting\Sentinel\Exceptions\InvalidSealDefinitionException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Support\Identifiers;
+use RoundlyConsulting\Sentinel\Support\SealingScope;
 use RoundlyConsulting\Sentinel\Support\Settings;
+use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\PlainRecord;
 
 it('reads now in UTC with microseconds and honours the test clock', function (): void {
     Carbon::setTestNow(CarbonImmutable::parse('2026-10-02 20:30:00.654321', 'Europe/Bratislava'));
@@ -87,4 +89,28 @@ it('lists every definition problem at once', function (): void {
     expect($exception->problems())->toBe(['no seals', 'bad ring'])
         ->and($exception->getMessage())->toContain('App\\Models\\Invoice')->toContain('- bad ring')
         ->and(InvalidSealDefinitionException::invalidScale(40, 30)->problems())->toBe(['scale 40 is outside 0..30']);
+});
+
+it('tracks nested sealed writes per model until the outermost one ends', function (): void {
+    $scope = new SealingScope;
+    $model = new PlainRecord;
+    $other = new PlainRecord;
+    $seen = [];
+
+    $scope->writing($model, function () use ($scope, $model, $other, &$seen): void {
+        $scope->writing($model, function () use ($scope, $model, $other, &$seen): void {
+            $seen[] = [$scope->isWriting($model), $scope->isWriting($other)];
+        });
+
+        $seen[] = [$scope->isWriting($model), $scope->isWriting($other)];
+    });
+
+    try {
+        $scope->writing($model, static fn (): never => throw new RuntimeException('write failed'));
+    } catch (RuntimeException) {
+        $seen[] = [$scope->isWriting($model), $scope->isWriting($other)];
+    }
+
+    expect($seen)->toBe([[true, false], [true, false], [false, false]])
+        ->and($scope->isWriting($model))->toBeFalse();
 });
