@@ -29,6 +29,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedNonce;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssueNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
+use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerVerifyOptions;
@@ -112,25 +113,42 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static SentinelFake fakeVerifiedSignature(VerifiedSignature|null $signature = null)
  * @method static SentinelFake rejectSignatures(SignatureRejection $reason)
  * @method static SentinelFake fakeStatusOnce(Model $model, VerificationStatus $status, string|null $seal = null, list<string>|null $changed = null)
+ * @method static SentinelFake fakeLedgerFindings(LedgerFinding ...$findings)
  * @method static void assertSealed(Model $model, string|null $seal = null, Closure|null $callback = null)
  * @method static void assertNotSealed(Model $model, string|null $seal = null)
  * @method static void assertNothingSealed()
  * @method static void assertVerified(Model $model, string|null $seal = null)
  * @method static void assertNothingVerified()
+ * @method static void assertNotVerified(Model $model, string|null $seal = null)
  * @method static void assertAcknowledged(Model $model, string|null $reason = null)
+ * @method static void assertNotAcknowledged(Model $model)
  * @method static void assertNothingAcknowledged()
  * @method static void assertUnsealed(Model $model, string|null $seal = null)
+ * @method static void assertNothingUnsealed()
  * @method static void assertSealingSuspended(string|null $reason = null)
+ * @method static void assertSealingNotSuspended()
+ * @method static void assertScanned(string|null $model = null)
  * @method static void assertKeyGenerated(string|null $ring = null)
  * @method static void assertKeyRotated(string|null $ring = null)
  * @method static void assertKeyRevoked(string $keyId)
+ * @method static void assertKeyRetired(string $keyId)
  * @method static void assertNoKeyChanges()
  * @method static void assertCheckpointed(int|null $times = null)
+ * @method static void assertLedgerVerified()
  * @method static void assertResealed(string $model, int|null $count = null)
+ * @method static void assertNothingResealed()
  * @method static void assertIdempotentRun(string $key, bool|null $replayed = null)
+ * @method static void assertNoIdempotentRuns()
+ * @method static void assertIdempotencyKeyForgotten(string $key)
  * @method static void assertNonceIssued(string $purpose)
  * @method static void assertNonceConsumed(string $purpose)
+ * @method static void assertNoNoncesIssued()
+ * @method static void assertNonceNotConsumed(string $purpose)
+ * @method static void assertSingleUseUrlIssued(string|null $route = null)
+ * @method static void assertPruned()
  * @method static void assertRequestSigned(string|null $keyId = null)
+ * @method static void assertNothingSigned()
+ * @method static void assertSignatureVerified(string|null $profile = null)
  * @method static list<RecordedCall> recorded(string|null $method = null)
  *
  * @see SentinelManager

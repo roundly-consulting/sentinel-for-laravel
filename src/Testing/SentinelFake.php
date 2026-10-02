@@ -40,6 +40,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedNonce;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssueNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
+use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerVerifyOptions;
@@ -109,6 +110,9 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class SentinelFake extends SentinelManager
 {
+    /** The bulk re-seal verbs. */
+    private const array BULK = ['reseal', 'resealWhere', 'updateAndReseal', 'sealMissing'];
+
     /** @var list<RecordedCall> */
     private array $calls = [];
 
@@ -125,6 +129,9 @@ final class SentinelFake extends SentinelManager
     private ?VerifiedSignature $signature = null;
 
     private ?SignatureRejection $rejection = null;
+
+    /** @var list<LedgerFinding> */
+    private array $ledgerFindings = [];
 
     public function __construct(Container $container)
     {
@@ -190,6 +197,18 @@ final class SentinelFake extends SentinelManager
     public function rejectSignatures(SignatureRejection $reason): static
     {
         $this->rejection = $reason;
+
+        return $this;
+    }
+
+    /**
+     * Every ledger verification reports these findings (with the real `clean()`,
+     * `violations()` and `throwIfViolated()` semantics) until called again — with none to
+     * go back to a clean ledger.
+     */
+    public function fakeLedgerFindings(LedgerFinding ...$findings): static
+    {
+        $this->ledgerFindings = array_values($findings);
 
         return $this;
     }
@@ -554,7 +573,7 @@ final class SentinelFake extends SentinelManager
     {
         $options ??= new LedgerVerifyOptions;
 
-        return $this->record('verifyLedger', $options, new LedgerReport(0, 0, 0, []));
+        return $this->record('verifyLedger', $options, new LedgerReport(0, 0, 0, $this->ledgerFindings));
     }
 
     public function ledgerHead(?string $connection = null): ?CheckpointRecord
@@ -759,6 +778,11 @@ final class SentinelFake extends SentinelManager
         PHPUnit::assertSame(0, $count, "Expected nothing to be verified, but {$count} verification(s) were recorded.");
     }
 
+    public function assertNotVerified(Model $model, ?string $seal = null): void
+    {
+        PHPUnit::assertEmpty($this->callsFor('verify', $model, $seal), $this->describe('not to be verified', $model, $seal, 'it was'));
+    }
+
     public function assertAcknowledged(Model $model, ?string $reason = null): void
     {
         $matching = array_filter(
@@ -768,6 +792,13 @@ final class SentinelFake extends SentinelManager
         );
 
         PHPUnit::assertNotEmpty($matching, $this->describe('to be acknowledged', $model, null).($reason === null ? '' : " with reason [{$reason}]"));
+    }
+
+    public function assertNotAcknowledged(Model $model): void
+    {
+        $matching = array_filter($this->callsFor('acknowledge', $model, null), static fn (RecordedCall $call): bool => $call->result instanceof AcknowledgementResult && $call->result->acknowledged);
+
+        PHPUnit::assertEmpty($matching, $this->describe('not to be acknowledged', $model, null, 'it was'));
     }
 
     public function assertNothingAcknowledged(): void
@@ -782,6 +813,13 @@ final class SentinelFake extends SentinelManager
         PHPUnit::assertNotEmpty($this->callsFor('unseal', $model, $seal), $this->describe('to be unsealed', $model, $seal));
     }
 
+    public function assertNothingUnsealed(): void
+    {
+        $count = count($this->recorded('unseal'));
+
+        PHPUnit::assertSame(0, $count, "Expected nothing to be unsealed, but {$count} seal removal(s) were recorded.");
+    }
+
     public function assertSealingSuspended(?string $reason = null): void
     {
         $matching = array_filter(
@@ -790,6 +828,29 @@ final class SentinelFake extends SentinelManager
         );
 
         PHPUnit::assertNotEmpty($matching, $reason === null ? 'Expected sealing to be suspended, but it was not.' : "Expected sealing to be suspended for [{$reason}], but it was not.");
+    }
+
+    public function assertSealingNotSuspended(): void
+    {
+        $count = count($this->recorded('withoutSealing'));
+
+        PHPUnit::assertSame(0, $count, "Expected sealing not to be suspended, but it was suspended {$count} time(s).");
+    }
+
+    /**
+     * A chunked scan ran (`Sentinel::scan()`, `Sentinel::model()->scan()`, `sentinel:verify`)
+     * — over this model class, when given.
+     *
+     * @param  class-string<Model>|null  $model
+     */
+    public function assertScanned(?string $model = null): void
+    {
+        $matching = array_filter(
+            $this->recorded('scan'),
+            static fn (RecordedCall $call): bool => $model === null || ($call->arguments instanceof ScanOptions && in_array($model, $call->arguments->models, true)),
+        );
+
+        PHPUnit::assertNotEmpty($matching, $model === null ? 'Expected a seal scan, but none ran.' : "Expected [{$model}] to be scanned, but it was not.");
     }
 
     public function assertKeyGenerated(?string $ring = null): void
@@ -818,6 +879,16 @@ final class SentinelFake extends SentinelManager
         PHPUnit::assertNotEmpty($matching, "Expected key [{$keyId}] to be revoked, but it was not.");
     }
 
+    public function assertKeyRetired(string $keyId): void
+    {
+        $matching = array_filter(
+            $this->recorded('retireKey'),
+            static fn (RecordedCall $call): bool => is_array($call->arguments) && ($call->arguments[1] ?? null) === $keyId,
+        );
+
+        PHPUnit::assertNotEmpty($matching, "Expected key [{$keyId}] to be retired, but it was not.");
+    }
+
     public function assertNoKeyChanges(): void
     {
         $changes = array_merge(...array_map($this->recorded(...), ['generateKey', 'rotateKey', 'revokeKey', 'retireKey']));
@@ -834,6 +905,11 @@ final class SentinelFake extends SentinelManager
             : PHPUnit::assertSame($times, $count, "Expected {$times} ledger checkpoint(s), but {$count} were made.");
     }
 
+    public function assertLedgerVerified(): void
+    {
+        PHPUnit::assertNotEmpty($this->recorded('verifyLedger'), 'Expected the ledger to be verified, but it was not.');
+    }
+
     /**
      * A bulk re-seal of the model happened (`reseal`, `resealWhere`, `updateAndReseal` or
      * `sealMissing`) — with `count` rows re-sealed or acknowledged in total, when given.
@@ -843,7 +919,7 @@ final class SentinelFake extends SentinelManager
     public function assertResealed(string $model, ?int $count = null): void
     {
         $calls = array_values(array_filter(
-            array_merge(...array_map($this->recorded(...), ['reseal', 'resealWhere', 'updateAndReseal', 'sealMissing'])),
+            array_merge(...array_map($this->recorded(...), self::BULK)),
             static fn (RecordedCall $call): bool => is_object($call->arguments) && property_exists($call->arguments, 'model') && $call->arguments->model === $model,
         ));
 
@@ -854,6 +930,16 @@ final class SentinelFake extends SentinelManager
 
             PHPUnit::assertSame($count, $total, "Expected {$count} [{$model}] row(s) to be re-sealed, but {$total} were.");
         }
+    }
+
+    /**
+     * No bulk re-seal of any model (`reseal`, `resealWhere`, `updateAndReseal`, `sealMissing`).
+     */
+    public function assertNothingResealed(): void
+    {
+        $count = count(array_merge(...array_map($this->recorded(...), self::BULK)));
+
+        PHPUnit::assertSame(0, $count, "Expected nothing to be re-sealed, but {$count} bulk re-seal(s) were recorded.");
     }
 
     /**
@@ -870,6 +956,27 @@ final class SentinelFake extends SentinelManager
         PHPUnit::assertNotEmpty($matching, "Expected an idempotent run with key [{$key}]".match ($replayed) {
             true => ' that replayed', false => ' that ran fresh', null => '',
         }.', but there was none.');
+    }
+
+    /**
+     * No programmatic idempotent run (`Sentinel::idempotency()->run()`, the `Idempotent` job
+     * middleware).
+     */
+    public function assertNoIdempotentRuns(): void
+    {
+        $count = count($this->recorded('runIdempotent'));
+
+        PHPUnit::assertSame(0, $count, "Expected no idempotent runs, but {$count} were recorded.");
+    }
+
+    public function assertIdempotencyKeyForgotten(#[SensitiveParameter] string $key): void
+    {
+        $matching = array_filter(
+            $this->recorded('forgetIdempotencyKey'),
+            static fn (RecordedCall $call): bool => is_array($call->arguments) && ($call->arguments[0] ?? null) === $key,
+        );
+
+        PHPUnit::assertNotEmpty($matching, 'Expected the idempotency key to be forgotten, but it was not.');
     }
 
     public function assertNonceIssued(string $purpose): void
@@ -890,6 +997,44 @@ final class SentinelFake extends SentinelManager
     }
 
     /**
+     * No nonce was issued (single-use URLs issue one too).
+     */
+    public function assertNoNoncesIssued(): void
+    {
+        $count = count($this->recorded('issueNonce'));
+
+        PHPUnit::assertSame(0, $count, "Expected no nonces to be issued, but {$count} were.");
+    }
+
+    /**
+     * No nonce of this purpose was consumed successfully.
+     */
+    public function assertNonceNotConsumed(string $purpose): void
+    {
+        $matching = array_filter($this->recorded('consumeNonce'), static fn (RecordedCall $call): bool => $call->arguments instanceof ConsumeNonceRequest && $call->arguments->purpose === $purpose && $call->result === true);
+
+        PHPUnit::assertEmpty($matching, "Expected no nonce for [{$purpose}] to be consumed, but one was.");
+    }
+
+    /**
+     * A single-use signed URL was issued — for this route name, when given.
+     */
+    public function assertSingleUseUrlIssued(?string $route = null): void
+    {
+        $matching = array_filter(
+            $this->recorded('signedRoute'),
+            static fn (RecordedCall $call): bool => $route === null || ($call->arguments instanceof SignedRouteRequest && $call->arguments->name === $route),
+        );
+
+        PHPUnit::assertNotEmpty($matching, $route === null ? 'Expected a single-use URL to be issued, but none was.' : "Expected a single-use URL for route [{$route}], but none was issued.");
+    }
+
+    public function assertPruned(): void
+    {
+        PHPUnit::assertNotEmpty($this->recorded('prune'), 'Expected expired idempotency keys and nonces to be pruned, but they were not.');
+    }
+
+    /**
      * An outgoing request was signed — with this key, when given.
      */
     public function assertRequestSigned(?string $keyId = null): void
@@ -900,6 +1045,28 @@ final class SentinelFake extends SentinelManager
         );
 
         PHPUnit::assertNotEmpty($matching, $keyId === null ? 'Expected a request to be signed, but none was.' : "Expected a request to be signed with key [{$keyId}], but none was.");
+    }
+
+    public function assertNothingSigned(): void
+    {
+        $count = count($this->recorded('signRequest'));
+
+        PHPUnit::assertSame(0, $count, "Expected nothing to be signed, but {$count} request(s) were.");
+    }
+
+    /**
+     * An inbound request or a received response verified — against this profile, when given
+     * (null verifies against the default profile). Scripted rejections do not count.
+     */
+    public function assertSignatureVerified(?string $profile = null): void
+    {
+        $matching = array_filter(
+            [...$this->recorded('verifyRequestSignature'), ...$this->recorded('verifyResponseSignature')],
+            static fn (RecordedCall $call): bool => $call->result instanceof VerifiedSignature
+                && ($profile === null || (is_array($call->arguments) && ($call->arguments[1] ?? null) === $profile)),
+        );
+
+        PHPUnit::assertNotEmpty($matching, $profile === null ? 'Expected a signature to be verified, but none was.' : "Expected a signature to be verified against profile [{$profile}], but none was.");
     }
 
     /**
@@ -1030,9 +1197,9 @@ final class SentinelFake extends SentinelManager
         return $model->getMorphClass().':'.$model->getKey().':'.($seal ?? '*');
     }
 
-    private function describe(string $expectation, Model $model, ?string $seal): string
+    private function describe(string $expectation, Model $model, ?string $seal, string $but = 'it was not'): string
     {
-        return "Expected [{$model->getMorphClass()}:{$model->getKey()}]".($seal === null ? '' : " seal [{$seal}]")." {$expectation}, but it was not.";
+        return "Expected [{$model->getMorphClass()}:{$model->getKey()}]".($seal === null ? '' : " seal [{$seal}]")." {$expectation}, but {$but}.";
     }
 
     /**
