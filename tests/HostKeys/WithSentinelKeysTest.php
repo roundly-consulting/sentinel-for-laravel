@@ -45,6 +45,7 @@ it('leaves a ring that already has a key alone', function (): void {
     config()->set('sentinel.keys.rings.default.key_id', 'pinned');
 
     SentinelTestKeys::install(app());
+    SentinelTestKeys::install(app(), rings: ['default']);
 
     expect(config('sentinel.keys.rings.default.key'))->toBe(TestCase::ROOT_KEY)
         ->and(config('sentinel.keys.rings.default.key_id'))->toBe('pinned');
