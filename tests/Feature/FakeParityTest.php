@@ -14,6 +14,7 @@ use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Testing\SentinelFake;
+use RoundlyConsulting\Sentinel\Tests\Fixtures\Jobs\ChargeJob;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Invoice;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\InvoiceLine;
 
@@ -225,6 +226,23 @@ it('behaves exactly like the real manager', function (Closure $scenario): void {
     }],
     'import a passphrase' => [static fn (): mixed => Sentinel::keys()->ring('http')->import('acme', Algorithm::HmacSha256, 'a passphrase')],
     'import an algorithm the ring refuses' => [static fn (): mixed => Sentinel::keys()->ring('http')->import('acme', Algorithm::HmacSha512, PARTNER_SECRET)],
+    'job middleware: a duplicate, a failure, a self-release' => [static function (): array {
+        ChargeJob::$runs = 0;
+        ChargeJob::$behaviour = ['complete', 'throw', 'release'];
+        ChargeJob::dispatch('parity-1');
+        ChargeJob::dispatch('parity-1');
+
+        try {
+            ChargeJob::dispatch('parity-2');
+        } catch (RuntimeException) {
+            // The job threw: the key is free for the retry.
+        }
+
+        ChargeJob::dispatch('parity-2');
+        ChargeJob::dispatch('parity-2');
+
+        return [ChargeJob::$runs];
+    }],
     'client nonce remembered twice' => [static fn (): array => [
         app(SentinelManager::class)->rememberNonce('http:partner', 'n-1', Clock::now()->addMinutes(5)),
         app(SentinelManager::class)->rememberNonce('http:partner', 'n-1', Clock::now()->addMinutes(5)),
