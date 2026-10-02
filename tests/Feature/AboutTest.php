@@ -10,15 +10,15 @@ use Illuminate\Support\Facades\Artisan;
  * first argument once the package reads any (API keys, signing keys, DSNs).
  */
 it('renders its about section', function (): void {
-    expect('package-template')->toLeakNoSecrets([], mustRender: ['Enabled', 'YES']);
+    expect('sentinel')->toLeakNoSecrets([], mustRender: ['Enabled', 'YES']);
 });
 
 it('reads the enabled flag the way an env string means it', function (string|bool $value, string $shown): void {
-    // env() only maps true/false/(true)/(false); `PACKAGE_TEMPLATE_ENABLED=off` arrives as the
+    // env() only maps true/false/(true)/(false); `SENTINEL_ENABLED=off` arrives as the
     // string 'off', which a bare truthiness check reported as YES.
-    config()->set('package-template.enabled', $value);
+    config()->set('sentinel.enabled', $value);
 
-    Artisan::call('about', ['--only' => 'package-template']);
+    Artisan::call('about', ['--only' => 'sentinel']);
 
     expect(Artisan::output())->toMatch('/Enabled\W+'.$shown.'\b/');
 })->with([

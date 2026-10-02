@@ -2,25 +2,25 @@
 
 declare(strict_types=1);
 
-namespace RoundlyConsulting\PackageTemplate\Testing;
+namespace RoundlyConsulting\Sentinel\Testing;
 
 use Closure;
 use Illuminate\Contracts\Container\Container;
 use PHPUnit\Framework\Assert as PHPUnit;
-use RoundlyConsulting\PackageTemplate\DataTransferObjects\ExamplePackageTemplateData;
-use RoundlyConsulting\PackageTemplate\PackageTemplateManager;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ExampleSentinelData;
+use RoundlyConsulting\Sentinel\SentinelManager;
 
 /**
- * Test double installed by `PackageTemplate::fake()`. It extends the manager, so injected
+ * Test double installed by `Sentinel::fake()`. It extends the manager, so injected
  * managers keep type-checking, and it records every call instead of running the action.
  *
  * Grow it with the manager: override every mutating method (including the ones sub-accessors
  * and model traits reach), record the call, and ship an `assert<Verb>()` plus an
  * `assertNothing<Verb>()` for each.
  */
-final class PackageTemplateFake extends PackageTemplateManager
+final class SentinelFake extends SentinelManager
 {
-    /** @var list<ExamplePackageTemplateData> */
+    /** @var list<ExampleSentinelData> */
     private array $examples = [];
 
     public function __construct(Container $container)
@@ -28,7 +28,7 @@ final class PackageTemplateFake extends PackageTemplateManager
         parent::__construct($container);
     }
 
-    public function example(ExamplePackageTemplateData $data): string
+    public function example(ExampleSentinelData $data): string
     {
         $this->examples[] = $data;
 
@@ -37,13 +37,13 @@ final class PackageTemplateFake extends PackageTemplateManager
     }
 
     /**
-     * @param  (Closure(ExamplePackageTemplateData): bool)|null  $callback
+     * @param  (Closure(ExampleSentinelData): bool)|null  $callback
      */
     public function assertExampleCalled(?Closure $callback = null): void
     {
         $matching = array_filter(
             $this->examples,
-            static fn (ExamplePackageTemplateData $data): bool => $callback === null || $callback($data),
+            static fn (ExampleSentinelData $data): bool => $callback === null || $callback($data),
         );
 
         PHPUnit::assertNotEmpty($matching, $callback === null

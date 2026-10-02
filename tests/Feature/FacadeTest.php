@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-use Illuminate\Support\Facades\Facade;
 use PHPUnit\Framework\ExpectationFailedException;
-use RoundlyConsulting\PackageTemplate\Actions\ExamplePackageTemplateAction;
-use RoundlyConsulting\PackageTemplate\DataTransferObjects\ExamplePackageTemplateData;
-use RoundlyConsulting\PackageTemplate\Facades\PackageTemplate;
-use RoundlyConsulting\PackageTemplate\PackageTemplateManager;
-use RoundlyConsulting\PackageTemplate\Testing\PackageTemplateFake;
+use RoundlyConsulting\Sentinel\Actions\ExampleSentinelAction;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ExampleSentinelData;
+use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\SentinelManager;
+use RoundlyConsulting\Sentinel\SentinelServiceProvider;
+use RoundlyConsulting\Sentinel\Testing\SentinelFake;
 
 /**
  * The public API contract — Actions → Manager → Facade (+ fake) — pinned from day one.
@@ -17,85 +17,81 @@ use RoundlyConsulting\PackageTemplate\Testing\PackageTemplateFake;
  * for every fake assert.
  */
 it('pins the facade contract', function (): void {
-    expect(PackageTemplate::class)
+    expect(Sentinel::class)
         ->toDocumentItsRoot()
         ->toBeFakeable()
         ->toReachEveryAction(__DIR__.'/../../src/Actions');
 });
 
 it('runs the example through the facade', function (): void {
-    expect(PackageTemplate::example(new ExamplePackageTemplateData('Ada')))->toBe('Hello, Ada!');
+    expect(Sentinel::example(new ExampleSentinelData('Ada')))->toBe('Hello, Ada!');
 });
 
 it('runs the example through an injected manager', function (): void {
-    $manager = app(PackageTemplateManager::class);
+    $manager = app(SentinelManager::class);
 
-    expect($manager)->toBe(app(PackageTemplateManager::class))
-        ->and($manager->example(new ExamplePackageTemplateData('Ada')))->toBe('Hello, Ada!');
+    expect($manager)->toBe(app(SentinelManager::class))
+        ->and($manager->example(new ExampleSentinelData('Ada')))->toBe('Hello, Ada!');
 });
 
 it('runs the example action directly', function (): void {
-    expect(app(ExamplePackageTemplateAction::class)->execute(new ExamplePackageTemplateData('Ada')))
+    expect(app(ExampleSentinelAction::class)->execute(new ExampleSentinelData('Ada')))
         ->toBe('Hello, Ada!');
 });
 
 it('resolves the action through the container so a host override applies', function (): void {
-    app()->bind(ExamplePackageTemplateAction::class, static fn (): never => throw new RuntimeException('overridden'));
+    app()->bind(ExampleSentinelAction::class, static fn (): never => throw new RuntimeException('overridden'));
 
-    PackageTemplate::example(new ExamplePackageTemplateData('Ada'));
+    Sentinel::example(new ExampleSentinelData('Ada'));
 })->throws(RuntimeException::class, 'overridden');
 
 it('records facade and injected calls under the fake without running the action', function (): void {
-    app()->bind(ExamplePackageTemplateAction::class, static fn (): never => throw new RuntimeException('ran'));
+    app()->bind(ExampleSentinelAction::class, static fn (): never => throw new RuntimeException('ran'));
 
-    $fake = PackageTemplate::fake();
+    $fake = Sentinel::fake();
 
-    PackageTemplate::example(new ExamplePackageTemplateData('Ada'));
-    app(PackageTemplateManager::class)->example(new ExamplePackageTemplateData('Grace'));
+    Sentinel::example(new ExampleSentinelData('Ada'));
+    app(SentinelManager::class)->example(new ExampleSentinelData('Grace'));
 
-    expect(app(PackageTemplateManager::class))->toBeInstanceOf(PackageTemplateFake::class);
+    expect(app(SentinelManager::class))->toBeInstanceOf(SentinelFake::class);
 
     $fake->assertExampleCalled();
-    $fake->assertExampleCalled(static fn (ExamplePackageTemplateData $data): bool => $data->name === 'Ada');
-    PackageTemplate::assertExampleCalled(static fn (ExamplePackageTemplateData $data): bool => $data->name === 'Grace');
+    $fake->assertExampleCalled(static fn (ExampleSentinelData $data): bool => $data->name === 'Ada');
+    Sentinel::assertExampleCalled(static fn (ExampleSentinelData $data): bool => $data->name === 'Grace');
 });
 
 it('fails assertExampleCalled when nothing was called', function (): void {
-    PackageTemplate::fake()->assertExampleCalled();
+    Sentinel::fake()->assertExampleCalled();
 })->throws(ExpectationFailedException::class, 'Expected example() to be called, but it was not.');
 
 it('fails assertExampleCalled when no call matches', function (): void {
-    $fake = PackageTemplate::fake();
+    $fake = Sentinel::fake();
 
-    PackageTemplate::example(new ExamplePackageTemplateData('Ada'));
+    Sentinel::example(new ExampleSentinelData('Ada'));
 
-    $fake->assertExampleCalled(static fn (ExamplePackageTemplateData $data): bool => $data->name === 'Grace');
+    $fake->assertExampleCalled(static fn (ExampleSentinelData $data): bool => $data->name === 'Grace');
 })->throws(ExpectationFailedException::class, 'no call matched');
 
 it('passes assertNothingCalled on an untouched fake', function (): void {
-    PackageTemplate::fake()->assertNothingCalled();
+    Sentinel::fake()->assertNothingCalled();
 });
 
 it('fails assertNothingCalled after a call', function (): void {
-    $fake = PackageTemplate::fake();
+    $fake = Sentinel::fake();
 
-    PackageTemplate::example(new ExamplePackageTemplateData('Ada'));
+    Sentinel::example(new ExampleSentinelData('Ada'));
 
     $fake->assertNothingCalled();
 })->throws(ExpectationFailedException::class, 'example() was called 1 time(s)');
 
-it('declares the global alias for the facade and never a core facade name', function (): void {
-    /** @var array{extra: array{laravel: array{aliases: array<string, string>}}} $composer */
+it('declares no global alias, so a host using cartalyst/sentinel keeps its own Sentinel', function (): void {
+    // cartalyst/sentinel registers the global alias `Sentinel`; a package-discovered alias of
+    // ours would silently replace it. laravel/sentinel ships Laravel\Sentinel\Sentinel (no
+    // alias). Hosts import RoundlyConsulting\Sentinel\Facades\Sentinel explicitly.
+    /** @var array{extra: array{laravel: array<string, mixed>}} $composer */
     $composer = json_decode((string) file_get_contents(__DIR__.'/../../composer.json'), true, flags: JSON_THROW_ON_ERROR);
 
-    $aliases = $composer['extra']['laravel']['aliases'];
-    $alias = (string) array_key_first($aliases);
-
-    // Both halves: a facade class Laravel ships, and a global alias it registers without one
-    // there (`Str`, `Number`, `Js`, …). Compared case-insensitively, as PHP resolves class names.
-    $coreAliases = array_map(strtolower(...), array_keys(Facade::defaultAliases()->all()));
-
-    expect($aliases)->toBe([class_basename(PackageTemplate::class) => PackageTemplate::class])
-        ->and(class_exists('Illuminate\\Support\\Facades\\'.$alias))->toBeFalse()
-        ->and($coreAliases)->not->toContain(strtolower($alias));
+    expect($composer['extra']['laravel'])->not->toHaveKey('aliases')
+        ->and($composer['extra']['laravel']['providers'] ?? null)->toBe([SentinelServiceProvider::class])
+        ->and(class_exists('Sentinel'))->toBeFalse();
 });
