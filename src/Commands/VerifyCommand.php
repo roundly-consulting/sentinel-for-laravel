@@ -87,7 +87,7 @@ final class VerifyCommand extends Command implements Isolatable
      */
     private function models(): array
     {
-        $given = array_values($this->argument('model'));
+        $given = $this->listInput('model', argument: true);
 
         return $given !== [] ? $given : Settings::models();
     }
@@ -99,8 +99,8 @@ final class VerifyCommand extends Command implements Isolatable
     {
         $statuses = [];
         $kinds = [];
-        foreach ($this->option('fail-on') as $value) {
-            foreach (explode(',', (string) $value) as $name) {
+        foreach ($this->listInput('fail-on') as $value) {
+            foreach (explode(',', $value) as $name) {
                 $name = trim($name);
                 $status = VerificationStatus::tryFrom($name);
                 $kind = LedgerFindingKind::tryFrom($name);

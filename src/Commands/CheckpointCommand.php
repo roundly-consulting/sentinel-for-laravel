@@ -92,7 +92,7 @@ final class CheckpointCommand extends Command implements Isolatable
      */
     private function connections(): array
     {
-        $given = array_values(array_filter($this->option('connection'), static fn (?string $name): bool => $name !== null && $name !== ''));
+        $given = $this->listInput('connection');
 
         return $given !== [] ? $given : Settings::ledgerConnections();
     }

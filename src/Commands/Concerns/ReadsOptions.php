@@ -114,4 +114,24 @@ trait ReadsOptions
 
         return (int) $value;
     }
+
+    /**
+     * The non-empty string values of an array option or argument (read untyped, so the result
+     * does not depend on how a static analyser infers the signature).
+     *
+     * @return list<string>
+     */
+    protected function listInput(string $name, bool $argument = false): array
+    {
+        $raw = $argument ? $this->input->getArgument($name) : $this->input->getOption($name);
+        $values = [];
+
+        foreach (is_array($raw) ? $raw : [$raw] as $value) {
+            if (is_string($value) && $value !== '') {
+                $values[] = $value;
+            }
+        }
+
+        return $values;
+    }
 }
