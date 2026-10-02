@@ -73,7 +73,7 @@ final readonly class Signers
         try {
             return $algorithm === Algorithm::Ed25519
                 ? $this->eddsa($key)->verify($message, $signature)
-                : (new Es($key->material()->ecPublic()))->verify($message, $signature);
+                : (new Es($key->material()->ec()))->verify($message, $signature);
         } catch (UnsupportedAlgorithmException $exception) {
             throw InvalidKeyMaterialException::unsupported($algorithm, $exception);
         }

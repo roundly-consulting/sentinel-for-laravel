@@ -7,6 +7,9 @@ use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidKeyMaterialException;
 use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\Keys\MaterialCodec;
+use RoundlyConsulting\Sentinel\Keys\Purpose;
+use RoundlyConsulting\Sentinel\Keys\SealingKey;
+use RoundlyConsulting\Sentinel\Keys\Signers;
 
 function encoded(string $bytes): string
 {
@@ -104,12 +107,22 @@ it('exposes only the accessor that matches its algorithm', function (): void {
     expect(strlen($hmac->hmacRoot()))->toBe(32)
         ->and($ed->okp()->secretKey)->not->toBeNull()
         ->and($ec->ec()->isPrivate)->toBeTrue()
-        ->and($ec->ecPublic()->isPrivate)->toBeFalse()
         ->and(fn () => $hmac->okp())->toThrow(LogicException::class)
         ->and(fn () => $hmac->ec())->toThrow(LogicException::class)
-        ->and(fn () => $hmac->ecPublic())->toThrow(LogicException::class)
         ->and(fn () => $ed->hmacRoot())->toThrow(LogicException::class);
 });
+
+it('verifies ECDSA signatures through the private key it signs with', function (Algorithm $algorithm): void {
+    // Pins crypto-for-laravel a778e2e: Es::verify() through a private EcKey (it used to return
+    // false, which Sentinel worked around by deriving the public key at load time).
+    $key = new SealingKey('default', 'ec', KeyMaterial::generate($algorithm));
+    $signers = new Signers;
+    $signature = $signers->sign($key, Purpose::Seal, 'message');
+
+    expect($key->material()->ec()->isPrivate)->toBeTrue()
+        ->and($signers->verify($key, Purpose::Seal, 'message', $signature))->toBeTrue()
+        ->and($signers->verify($key, Purpose::Seal, 'tampered', $signature))->toBeFalse();
+})->with([Algorithm::EcdsaP256Sha256, Algorithm::EcdsaP384Sha384]);
 
 it('never reveals material through var_dump, print_r or serialize', function (Algorithm $algorithm): void {
     $material = KeyMaterial::generate($algorithm);

@@ -42,7 +42,6 @@ final readonly class KeyMaterial
         #[SensitiveParameter] private ?HmacSecret $secret = null,
         private ?OkpKey $okp = null,
         private ?EcKey $ec = null,
-        private ?EcKey $ecPublic = null,
     ) {}
 
     /**
@@ -71,9 +70,9 @@ final readonly class KeyMaterial
             return match ($algorithm) {
                 Algorithm::HmacSha256, Algorithm::HmacSha384, Algorithm::HmacSha512 => new self($algorithm, secret: HmacSecret::generate($algorithm->hashLength())),
                 Algorithm::Ed25519 => new self($algorithm, okp: OkpKey::generate()),
-                Algorithm::EcdsaP256Sha256, Algorithm::EcdsaP384Sha384 => self::withPublic(
+                Algorithm::EcdsaP256Sha256, Algorithm::EcdsaP384Sha384 => new self(
                     $algorithm,
-                    EcKey::generate($algorithm === Algorithm::EcdsaP256Sha256 ? 'P-256' : 'P-384'),
+                    ec: EcKey::generate($algorithm === Algorithm::EcdsaP256Sha256 ? 'P-256' : 'P-384'),
                 ),
             };
         } catch (UnsupportedAlgorithmException $exception) {
@@ -109,21 +108,11 @@ final readonly class KeyMaterial
     }
 
     /**
-     * The EC key to sign with (private when held, else public).
+     * The EC key to sign and verify with (private when held, else public).
      */
     public function ec(): EcKey
     {
         return $this->ec ?? throw new LogicException("A {$this->algorithm->value} key is not an EC key.");
-    }
-
-    /**
-     * The public EC key to verify with. OpenSSL cannot verify through a private-key object
-     * (crypto's `Es::verify()` returns false for one), so the public half is always derived
-     * at load time.
-     */
-    public function ecPublic(): EcKey
-    {
-        return $this->ecPublic ?? throw new LogicException("A {$this->algorithm->value} key is not an EC key.");
     }
 
     /**
@@ -261,11 +250,6 @@ final readonly class KeyMaterial
             throw InvalidKeyMaterialException::wrongType($algorithm, 'the public key does not belong to the private key');
         }
 
-        return self::withPublic($algorithm, $key);
-    }
-
-    private static function withPublic(Algorithm $algorithm, #[SensitiveParameter] EcKey $key): self
-    {
-        return new self($algorithm, ec: $key, ecPublic: $key->isPrivate ? EcKey::public($key->publicPem()) : $key);
+        return new self($algorithm, ec: $key);
     }
 }
