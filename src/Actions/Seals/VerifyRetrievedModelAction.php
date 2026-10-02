@@ -41,11 +41,9 @@ final readonly class VerifyRetrievedModelAction
             return;
         }
 
+        // HasSeals hooks only classes that declare a retrieve seal (I-5); the filter keeps the
+        // others' seals out.
         $seals = array_values(array_filter($this->registry->for($model)->all(), static fn (CompiledSeal $seal): bool => $seal->verifiesOnRetrieve));
-
-        if ($seals === []) {
-            return;
-        }
 
         $this->scope->withoutVerification(function () use ($model, $seals): void {
             foreach ($seals as $seal) {
