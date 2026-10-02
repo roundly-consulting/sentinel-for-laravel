@@ -775,8 +775,8 @@ app(AcknowledgeTamperingAction::class)->execute(new AcknowledgeRequest(
 
 Every facade method that seals, verifies or changes state (`seal`, `verify`, `acknowledge`,
 `scan`, `reseal`, `checkpoint`, `generateKey`, `runIdempotent`, `issueNonce`, `signRequest`, …)
-resolves one action from the container, so binding your own action class overrides it
-everywhere — the handles, sub-accessors and model trait go through the same manager.
+resolves one action from the container on each call; the handles, sub-accessors and model
+trait all go through the same manager — which is also why `Sentinel::fake()` sees every call.
 
 ## Testing your application
 
