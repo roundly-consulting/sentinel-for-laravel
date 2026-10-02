@@ -71,7 +71,7 @@ it('verifies the ledger and compares a manual anchor', function (): void {
     [$clean, $output] = runArtisan('sentinel:verify', ['--ledger' => true, '--anchor' => $anchor]);
 
     expect($clean)->toBe(0)
-        ->and($output)->toContain('The ledger is intact')->toContain('No anchor is configured')->toContain('No models to scan');
+        ->and($output)->toContain('The ledger is intact')->toContain('No anchor is configured');
 
     DB::table('sentinel_checkpoints')->update(['root' => str_repeat('x', 43)]);
     [$dirty, $output] = runArtisan('sentinel:verify', ['--ledger' => true, '--anchor' => $anchor]);

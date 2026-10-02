@@ -22,7 +22,7 @@ it('renders its about section without leaking key material', function (): void {
         mustRender: [
             'Default ring / driver', 'default (config)', 'Rings', 'default, http', 'Auto-seal', 'ON',
             'Tampered writes', 'refuse', 'Ledger', 'Anchors', 'none (whole-database rollback undetectable)',
-            'Registered models', 'Idempotency store', 'database', 'Nonce store', 'Signature profiles', 'Manager', SentinelManager::class,
+            'Sealable models', '0 configured, 0 discovered', 'Idempotency store', 'database', 'Nonce store', 'Signature profiles', 'Manager', SentinelManager::class,
         ],
     );
 });
@@ -38,7 +38,7 @@ it('reports flags the way the environment means them', function (): void {
     Artisan::call('about', ['--only' => 'sentinel']);
 
     expect(Artisan::output())->toMatch('/Auto-seal\W+OFF/')->toMatch('/Ledger\W+OFF/')->toMatch('/Tampered writes\W+reseal/')
-        ->toMatch('/Anchors\W+cache, log/')->toMatch('/Registered models\W+1/');
+        ->toMatch('/Anchors\W+cache, log/')->toMatch('/Sealable models\W+1 configured, 0 discovered/');
 });
 
 it('reports invalid configuration instead of failing about', function (): void {

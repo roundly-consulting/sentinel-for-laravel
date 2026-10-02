@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Sentinel;
 
 use Illuminate\Contracts\Container\Container;
+use Illuminate\Database\QueryException;
 use Illuminate\Log\LogManager;
 use RoundlyConsulting\PackageToolkit\Concerns\RegistersBlueprintMacros;
 use RoundlyConsulting\PackageToolkit\Package;
@@ -50,6 +51,7 @@ use RoundlyConsulting\Sentinel\Ledger\AnchorManager;
 use RoundlyConsulting\Sentinel\Nonces\Stores\CacheNonceStore;
 use RoundlyConsulting\Sentinel\Nonces\Stores\DatabaseNonceStore;
 use RoundlyConsulting\Sentinel\Support\GateAcknowledgementPolicy;
+use RoundlyConsulting\Sentinel\Support\ModelDiscovery;
 use RoundlyConsulting\Sentinel\Support\SealingScope;
 use RoundlyConsulting\Sentinel\Support\Settings;
 
@@ -160,6 +162,23 @@ final class SentinelServiceProvider extends PackageServiceProvider
     }
 
     /**
+     * "N configured, M discovered" — discovery reads the seal and ledger tables, so an
+     * unreachable or unmigrated database is reported, never fatal.
+     */
+    private static function sealableModels(): string
+    {
+        $configured = count(Settings::models());
+
+        try {
+            $discovery = ModelDiscovery::run();
+        } catch (QueryException) {
+            return "{$configured} configured, discovery unavailable (database)";
+        }
+
+        return sprintf('%d configured, %d discovered', $discovery->configured, count($discovery->models) - $discovery->configured);
+    }
+
+    /**
      * @return array<string, string>
      */
     private static function about(): array
@@ -176,7 +195,7 @@ final class SentinelServiceProvider extends PackageServiceProvider
                 'Idempotency store' => Settings::idempotencyStore(),
                 'Nonce store' => Settings::nonceStore(),
                 'Signature profiles' => (string) count(is_array(config('sentinel.signatures.profiles')) ? config('sentinel.signatures.profiles') : []),
-                'Registered models' => (string) count(Settings::models()),
+                'Sealable models' => self::sealableModels(),
             ];
         } catch (SentinelException) {
             $rows = ['Default ring / driver' => 'invalid configuration'];

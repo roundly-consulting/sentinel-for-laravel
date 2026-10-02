@@ -103,6 +103,7 @@ use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Ledger\AnchorManager;
 use RoundlyConsulting\Sentinel\Support\Clock;
+use RoundlyConsulting\Sentinel\Support\ModelDiscovery;
 use RoundlyConsulting\Sentinel\Support\Reasons;
 use RoundlyConsulting\Sentinel\Support\Runtime;
 use RoundlyConsulting\Sentinel\Support\SealingScope;
@@ -147,6 +148,18 @@ class SentinelManager
     public function model(string $class): ModelSeals
     {
         return new ModelSeals($this, $class, $this->container->make(DefinitionRegistry::class)->for($class));
+    }
+
+    /**
+     * Every sealable model class: `sentinel.models` first, then each class that has seal rows
+     * or ledger entries (discovered, alphabetically). `sentinel:verify` scans these when it
+     * is given no model.
+     *
+     * @return list<class-string<Model>>
+     */
+    public function sealables(): array
+    {
+        return ModelDiscovery::run()->models;
     }
 
     /**

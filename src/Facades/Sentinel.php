@@ -65,6 +65,7 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  *
  * @method static SealHandle for(Model $model, string|null $seal = null)
  * @method static ModelSeals model(string $class)
+ * @method static list<class-string<Model>> sealables()
  * @method static SealResult seal(Model $model, string|null $seal = null, string|null $reason = null, Model|null $actor = null)
  * @method static VerificationResult verify(Model $model, string|null $seal = null)
  * @method static VerificationResult verifyOrFail(Model $model, string|null $seal = null)

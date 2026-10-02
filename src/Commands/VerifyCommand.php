@@ -20,10 +20,14 @@ use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\SentinelException;
 use RoundlyConsulting\Sentinel\Ledger\AnchorCodec;
 use RoundlyConsulting\Sentinel\SentinelManager;
+use RoundlyConsulting\Sentinel\Support\ModelDiscovery;
 use RoundlyConsulting\Sentinel\Support\Settings;
 
 /**
- * Scan sealed models (and, with --ledger, the ledger itself) for cron or CI. Exits 1 when a
+ * Scan sealed models (and, with --ledger, the ledger itself) for cron or CI. Without model
+ * arguments it scans every sealable model Sentinel knows (`Sentinel::sealables()`: the
+ * configured ones, then every class that has seals); with nothing at all to scan it exits 2
+ * unless `--allow-empty` — a green run over nothing is not a verification. Exits 1 when a
  * failing status (`--fail-on`, default: every failure) or a ledger integrity violation is
  * found; a checkpoint backlog or an unreachable anchor fails the run only when named in
  * `--fail-on`. Prints identifiers, statuses and attribute names — never values.
@@ -33,7 +37,7 @@ final class VerifyCommand extends Command implements Isolatable
     use ReadsOptions;
 
     protected $signature = 'sentinel:verify
-        {model?* : Model classes or morph aliases (none: sentinel.models)}
+        {model?* : Model classes or morph aliases (none: every sealable model — sentinel.models, then every class that has seals)}
         {--seal= : Only this seal}
         {--chunk=500 : Rows per chunk}
         {--limit= : At most this many rows in total}
@@ -42,15 +46,33 @@ final class VerifyCommand extends Command implements Isolatable
         {--check-schema : Check that every sealed column exists before scanning}
         {--json : Print the report as JSON}
         {--fail-on=* : Statuses or ledger findings that fail the run (default: every failure and violation)}
-        {--max-findings=1000 : List at most this many findings}';
+        {--max-findings=1000 : List at most this many findings}
+        {--allow-empty : Exit 0 (with a warning) when there is nothing to scan}';
 
     protected $description = 'Verify sealed models and the Sentinel ledger';
 
     public function handle(SentinelManager $sentinel): int
     {
+        $unresolved = [];
+
         try {
             [$statuses, $kinds] = $this->failOn();
-            $models = array_map($this->sealableClass(...), $this->models());
+            $given = $this->listInput('model', argument: true);
+
+            if ($given !== []) {
+                $models = array_map($this->sealableClass(...), $given);
+            } else {
+                $discovery = ModelDiscovery::run();
+                $models = $discovery->models;
+                $unresolved = $discovery->unresolved;
+            }
+
+            if ($models === [] && ! $this->option('allow-empty')) {
+                $this->components->error('Nothing to verify: pass model classes, list them in sentinel.models, or seal rows first (--allow-empty accepts an empty run).');
+
+                return self::INVALID;
+            }
+
             $chunk = $this->intOption('chunk', 1, 100000) ?? 500;
             $anchor = $this->stringOption('anchor');
 
@@ -68,11 +90,17 @@ final class VerifyCommand extends Command implements Isolatable
             return self::INVALID;
         }
 
-        if ($models === [] && ! $this->option('json')) {
-            $this->components->warn('No models to scan: pass model classes or list them in sentinel.models.');
+        if (! $this->option('json')) {
+            foreach ($unresolved as $type) {
+                $this->components->warn(sprintf('Seals of [%s] are not verified: it is no longer a sealable model class (check the morph map).', self::shown($type)));
+            }
+
+            if ($models === []) {
+                $this->components->warn('No models to scan: pass model classes, list them in sentinel.models, or seal rows first.');
+            }
         }
 
-        $this->option('json') ? $this->json($scan, $ledger) : $this->human($scan, $ledger);
+        $this->option('json') ? $this->json($models, $unresolved, $scan, $ledger) : $this->human($scan, $ledger);
 
         $failed = $scan->hasFindings(...$statuses) || ($ledger !== null && array_filter(
             $ledger->findings,
@@ -80,16 +108,6 @@ final class VerifyCommand extends Command implements Isolatable
         ) !== []);
 
         return $failed ? self::FAILURE : self::SUCCESS;
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function models(): array
-    {
-        $given = $this->listInput('model', argument: true);
-
-        return $given !== [] ? $given : Settings::models();
     }
 
     /**
@@ -164,9 +182,15 @@ final class VerifyCommand extends Command implements Isolatable
         $ledger->clean() ? $this->components->info('The ledger is intact.') : $this->components->error('The ledger has integrity violations.');
     }
 
-    private function json(ScanReport $scan, ?LedgerReport $ledger): void
+    /**
+     * @param  list<class-string>  $models
+     * @param  list<string>  $unresolved
+     */
+    private function json(array $models, array $unresolved, ScanReport $scan, ?LedgerReport $ledger): void
     {
         $this->line((string) json_encode([
+            'models' => $models,
+            'unresolved_types' => array_map(self::shown(...), $unresolved),
             'scanned' => $scan->scanned,
             'counts' => array_map(static fn (StatusCount $count): array => ['status' => $count->status->value, 'count' => $count->count], $scan->counts),
             'findings' => array_map(static fn (VerificationResult $result): array => $result->toArray(), $scan->findings),
@@ -179,6 +203,14 @@ final class VerifyCommand extends Command implements Isolatable
                 'findings' => array_map(static fn (LedgerFinding $finding): array => $finding->toArray(), $ledger->findings),
             ],
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * A stored morph type as it may be printed (a database value: printable ASCII only).
+     */
+    private static function shown(string $type): string
+    {
+        return preg_match('/^[\x20-\x7E]{1,255}$/D', $type) === 1 ? $type : '(invalid)';
     }
 
     private static function label(VerificationStatus $status): string

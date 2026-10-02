@@ -51,10 +51,9 @@ function readme(): string
 }
 
 it('runs the quick start', function (): void {
-    $class = definedBy(static fn ($seals) => $seals->seal('financial')->attributes('customer_id', 'currency', 'amount', 'status'));
-    $existing = Sentinel::withoutSealing(static fn () => $class::query()->create(['customer_id' => 1, 'amount' => '5.00']), reason: 'existing rows');
+    $existing = Sentinel::withoutSealing(static fn () => Invoice::query()->create(['customer_id' => 1, 'amount' => '5.00']), reason: 'existing rows');
 
-    expect(Artisan::call('sentinel:seal-missing', ['model' => $class, '--reason' => 'Initial baseline']))->toBe(0)
+    expect(Artisan::call('sentinel:seal-missing', ['model' => Invoice::class, '--reason' => 'Initial baseline']))->toBe(0)
         ->and(Sentinel::verify($existing)->isIntact())->toBeTrue();
 
     $invoice = invoice();
