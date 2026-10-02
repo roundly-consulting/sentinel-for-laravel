@@ -20,6 +20,11 @@
             <directory>tests</directory>
         </testsuite>
     </testsuites>
+    <groups>
+        <exclude>
+            <group>perf</group>
+        </exclude>
+    </groups>
     <source>
         <include>
             <directory>src</directory>

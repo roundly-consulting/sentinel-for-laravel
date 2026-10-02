@@ -125,7 +125,8 @@
         "test-coverage": [
             "vendor/bin/pest --coverage --min=95 --coverage-clover=build/coverage.xml",
             "@php tests/Support/critical-coverage.php build/coverage.xml"
-        ]
+        ],
+        "perf": "vendor/bin/pest --group=perf"
     },
     "config": {
         "sort-packages": true,
