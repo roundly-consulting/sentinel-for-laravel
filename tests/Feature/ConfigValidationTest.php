@@ -63,3 +63,15 @@ it('uses the default chain order and algorithm when a ring omits them', function
         ->and($ring->previous)->toBe('')
         ->and(print_r($ring, true))->toContain('[redacted]');
 });
+
+it('refuses an invalid outbound signing configuration with the key name', function (string $key, mixed $value, Closure $read): void {
+    config()->set("sentinel.signatures.outbound.{$key}", $value);
+
+    expect($read)->toThrow(InvalidSentinelConfigurationException::class, "signatures.outbound.{$key}");
+})->with([
+    'unknown ring' => ['ring', 'partners', static fn () => Settings::outboundRing()],
+    'non-string ring' => ['ring', ['http'], static fn () => Settings::outboundRing()],
+    'invalid label' => ['label', 'Sig 1', static fn () => Settings::outboundLabel()],
+    'non-printable tag' => ['tag', "app\n", static fn () => Settings::outboundTag()],
+    'non-string tag' => ['tag', 7, static fn () => Settings::outboundTag()],
+]);

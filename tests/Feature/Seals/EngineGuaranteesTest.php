@@ -46,6 +46,37 @@ it('locks the model row before the seal rows, inside the write transaction', fun
 })->skip(fn (): bool => DriverMatrix::driver() !== 'sqlite', 'the recording grammar is SQLite-only; the real-engine legs lock for real');
 
 /**
+ * The same lock order on every path that writes a seal, so two of them can never deadlock:
+ * the model row is always locked before any seal row, inside the path's own transaction.
+ */
+it('locks the model row before its seal rows on every sealing path', function (Closure $operation): void {
+    $invoice = invoice();
+    $connection = DB::connection();
+    $connection->setQueryGrammar(new LockRecordingGrammar($connection));
+    LockRecorder::flush();
+    LockRecorder::listenForMarkers();
+
+    $operation($invoice);
+
+    $locks = LockRecorder::recorded();
+    $tables = array_map(static fn (array $lock): string => str_contains($lock['sql'], 'sentinel_seals') ? 'seal' : (str_contains($lock['sql'], '"invoices"') ? 'model' : 'other'), $locks);
+
+    expect($tables)->toContain('seal')
+        ->and($tables[0])->toBe('model')
+        ->and($tables)->not->toContain('other')
+        ->and(min(array_map(static fn (array $lock): int => $lock['transactionDepth'], $locks)))->toBeGreaterThanOrEqual(1);
+})->with([
+    'acknowledge' => [static function (Invoice $invoice): void {
+        DB::table('invoices')->where('id', $invoice->id)->update(['amount' => '0.00']);
+        Sentinel::acknowledge($invoice, 'INC-3');
+    }],
+    'explicit seal' => [static fn (Invoice $invoice) => Sentinel::seal($invoice)],
+    'unseal' => [static fn (Invoice $invoice) => Sentinel::unseal($invoice, 'archived', seal: 'identity')],
+    'mass update' => [static fn (Invoice $invoice) => Sentinel::model(Invoice::class)->updateAndReseal(fn ($query) => $query->whereKey($invoice->id), ['note' => 'n'], 'FIN-1')],
+    'delete' => [static fn (Invoice $invoice) => $invoice->forceDelete()],
+])->skip(fn (): bool => DriverMatrix::driver() !== 'sqlite', 'the recording grammar is SQLite-only; the real-engine legs lock for real');
+
+/**
  * §10 item 55: every stored datetime and every datetime inside a MAC is UTC.
  */
 it('stores and seals UTC regardless of the process and app time zones', function (): void {
