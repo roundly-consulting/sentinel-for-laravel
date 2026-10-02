@@ -23,7 +23,7 @@ use RoundlyConsulting\Testing\Database\DriverMatrix;
 // Explicit paths, not ->in(__DIR__): the KeyTypes directory runs on its own base case (the
 // morph key type is fixed at migrate time), and Pest binds one test case per directory.
 // Pure/ needs no application at all (thousands of codec cases), so it binds none.
-uses(TestCase::class)->in('ArchTest.php', 'ConfigContractTest.php', 'Feature', 'Unit', 'RealEngine');
+uses(TestCase::class)->in('ArchTest.php', 'ConfigContractTest.php', 'Feature', 'Unit', 'RealEngine', 'Property');
 uses(UuidKeyTestCase::class)->in('KeyTypes');
 
 /**
