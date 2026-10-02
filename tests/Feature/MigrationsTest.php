@@ -14,25 +14,32 @@ it('never auto-loads its migrations — the host publishes them', function (): v
 });
 
 it('publishes its migrations timestamp-injected into the host', function (): void {
-    expect(SentinelServiceProvider::class)->toPublishMigrationsTimestamped('sentinel-migrations', 1);
+    expect(SentinelServiceProvider::class)->toPublishMigrationsTimestamped('sentinel-migrations', 4);
+});
+
+it('orders its migrations so every foreign key target exists first', function () use ($migrations): void {
+    // ledger.checkpoint_id → checkpoints, seals.ledger_entry_id → ledger.
+    expect($migrations)->toHaveRunnableMigrationOrder(foreignKeys: 2);
 });
 
 it('migrates forward only — no migration defines down()', function () use ($migrations): void {
     $files = glob($migrations.'/*.php') ?: [];
 
-    expect($files)->toHaveCount(1);
+    expect($files)->toHaveCount(4);
 
     foreach ($files as $file) {
         expect((string) file_get_contents($file))->not->toContain('function down(');
     }
 });
 
-it('applies its migrations on postgres', function () use ($migrations): void {
-    expect($migrations)->toApplyOnConnection('pgsql', migrations: 1);
+it('applies its migrations on postgres and refuses a broken order', function () use ($migrations): void {
+    expect($migrations)->toApplyOnConnection('pgsql', migrations: 4)
+        ->toRejectBrokenOrderOnConnection(static fn (array $files): array => array_reverse($files), 'pgsql');
 })->skip(fn (): bool => ! test()->connectionAvailable('pgsql'), 'no postgres connection available');
 
-it('applies its migrations on mysql', function () use ($migrations): void {
-    expect($migrations)->toApplyOnConnection('mysql', migrations: 1);
+it('applies its migrations on mysql and refuses a broken order', function () use ($migrations): void {
+    expect($migrations)->toApplyOnConnection('mysql', migrations: 4)
+        ->toRejectBrokenOrderOnConnection(static fn (array $files): array => array_reverse($files), 'mysql');
 })->skip(fn (): bool => ! test()->connectionAvailable('mysql'), 'no mysql connection available');
 
 it('runs the suite on the engine the leg names', function (): void {
