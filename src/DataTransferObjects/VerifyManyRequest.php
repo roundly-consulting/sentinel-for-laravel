@@ -8,7 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 use RoundlyConsulting\Sentinel\Enums\VerificationContext;
 
 /**
- * @internal built by the manager for `VerifyModelsAction` (null seal = every seal)
+ * Verify many models — the input of `VerifyModelsAction` (`Sentinel::verifyMany()`): one seal
+ * each, or every declared seal when `seal` is null.
  */
 final readonly class VerifyManyRequest
 {

@@ -8,7 +8,6 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use RoundlyConsulting\Crypto\Codec\Base64Url;
-use RoundlyConsulting\Sentinel\Actions\Signatures\VerifyRequestSignatureAction;
 use RoundlyConsulting\Sentinel\Contracts\Anchor;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPayload;
 use RoundlyConsulting\Sentinel\DataTransferObjects\PruneOptions;
@@ -23,6 +22,7 @@ use RoundlyConsulting\Sentinel\Http\Messages\SymfonyRequestView;
 use RoundlyConsulting\Sentinel\Http\Signatures\ComponentResolver;
 use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
 use RoundlyConsulting\Sentinel\Http\Signatures\SignatureProfile;
+use RoundlyConsulting\Sentinel\Http\Signatures\SignatureVerifier;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Ledger\LedgerVerifier;
 use RoundlyConsulting\Sentinel\Models\Checkpoint;
@@ -108,7 +108,7 @@ it('rejects a hand-built signature profile whose ring is not configured as an un
         $default->requireContentDigest, $default->requireNonce, $default->maxAge, $default->clockSkew, $default->algorithms,
     );
 
-    expect(fn () => app(VerifyRequestSignatureAction::class)->execute(received(signedPartnerRequest()), $ghost))
+    expect(fn () => app(SignatureVerifier::class)->verify(new SymfonyRequestView(received(signedPartnerRequest())), $ghost, static fn (): bool => true))
         ->toThrow(fn (HttpSignatureException $exception) => expect($exception->reason())->toBe(SignatureRejection::UnknownKey));
 });
 

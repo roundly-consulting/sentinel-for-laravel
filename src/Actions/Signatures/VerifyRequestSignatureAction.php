@@ -11,12 +11,13 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\VerifiedSignature;
 use RoundlyConsulting\Sentinel\Events\HttpSignatureRejected;
 use RoundlyConsulting\Sentinel\Exceptions\HttpSignatureException;
 use RoundlyConsulting\Sentinel\Http\Messages\SymfonyRequestView;
-use RoundlyConsulting\Sentinel\Http\Signatures\SignatureProfile;
+use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
 use RoundlyConsulting\Sentinel\Http\Signatures\SignatureVerifier;
 use RoundlyConsulting\Sentinel\SentinelManager;
 
 /**
- * Verify an incoming request's RFC 9421 signature against a profile. A rejection fires
+ * Verify an incoming request's RFC 9421 signature against a profile (by name, null = the
+ * default; an unknown name throws `InvalidSentinelConfigurationException`). A rejection fires
  * `HttpSignatureRejected` (with the precise reason) and throws `HttpSignatureException`
  * (401); a nonce is remembered only after the signature verified.
  */
@@ -28,12 +29,12 @@ final readonly class VerifyRequestSignatureAction
         private Dispatcher $events,
     ) {}
 
-    public function execute(Request $request, SignatureProfile $profile): VerifiedSignature
+    public function execute(Request $request, ?string $profile = null): VerifiedSignature
     {
         try {
             return $this->verifier->verify(
                 new SymfonyRequestView($request),
-                $profile,
+                ProfileResolver::resolve($profile),
                 fn (string $purpose, string $nonce, int $until): bool => $this->manager->rememberNonce($purpose, $nonce, CarbonImmutable::createFromTimestampUTC($until)),
             );
         } catch (HttpSignatureException $exception) {

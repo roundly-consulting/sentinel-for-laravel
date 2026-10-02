@@ -100,7 +100,6 @@ use RoundlyConsulting\Sentinel\Events\SealingSuspended;
 use RoundlyConsulting\Sentinel\Exceptions\CorruptRecordException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
-use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Ledger\AnchorManager;
 use RoundlyConsulting\Sentinel\Support\Clock;
@@ -517,7 +516,7 @@ class SentinelManager
      */
     public function verifyRequestSignature(Request $request, ?string $profile = null): VerifiedSignature
     {
-        return $this->container->make(VerifyRequestSignatureAction::class)->execute($request, ProfileResolver::resolve($profile));
+        return $this->container->make(VerifyRequestSignatureAction::class)->execute($request, $profile);
     }
 
     /**
@@ -525,7 +524,7 @@ class SentinelManager
      */
     public function verifyResponseSignature(ResponseInterface|ClientResponse $response, ?string $profile = null): VerifiedSignature
     {
-        return $this->container->make(VerifyResponseSignatureAction::class)->execute($response, ProfileResolver::resolve($profile));
+        return $this->container->make(VerifyResponseSignatureAction::class)->execute($response, $profile);
     }
 
     /**
