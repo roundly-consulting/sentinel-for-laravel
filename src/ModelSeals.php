@@ -7,6 +7,7 @@ namespace RoundlyConsulting\Sentinel;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use RoundlyConsulting\Sentinel\DataTransferObjects\BaselineOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ResealOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ResealReport;
@@ -114,6 +115,26 @@ final readonly class ModelSeals
     public function sealMissing(string $reason, ?string $seal = null, int $chunk = 500, ?Model $actor = null, ?Closure $progress = null): ResealReport
     {
         return $this->manager->sealMissing(new BaselineOptions($this->model, $this->name($seal), $reason, $chunk, $actor, $progress));
+    }
+
+    /**
+     * Load a row with verify-on-retrieve suspended (global scopes kept) — for the screen
+     * that acknowledges a tampered model, which a `Throw` retrieve seal would otherwise
+     * refuse to load: `Route::bind('tamperedInvoice', fn (string $id) => Sentinel::model(Invoice::class)->findOrFail($id))`.
+     */
+    public function find(int|string $id): ?Model
+    {
+        return $this->manager->withoutVerification(fn (): ?Model => $this->model::query()->whereKey($id)->first());
+    }
+
+    /**
+     * `find()`, or `ModelNotFoundException` (a 404 in a route) like Eloquent's `findOrFail()`.
+     *
+     * @throws ModelNotFoundException<Model>
+     */
+    public function findOrFail(int|string $id): Model
+    {
+        return $this->find($id) ?? throw (new ModelNotFoundException)->setModel($this->model, [$id]);
     }
 
     /**
