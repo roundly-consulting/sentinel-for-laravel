@@ -7,7 +7,6 @@ use GuzzleHttp\Psr7\Response as PsrResponse;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
-use PHPUnit\Framework\ExpectationFailedException;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
 use RoundlyConsulting\Sentinel\Enums\LedgerFindingKind;
 use RoundlyConsulting\Sentinel\Enums\SignatureRejection;
@@ -23,11 +22,6 @@ use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\PlainRecord;
  * `assertNot<Verb>`, each passing and failing — through the facade, a sub-accessor and, where
  * the verb has one, the model trait.
  */
-function fails(Closure $assertion, string $message): void
-{
-    expect($assertion)->toThrow(ExpectationFailedException::class, $message);
-}
-
 it('asserts verifications that did not happen — through the facade and the trait', function (): void {
     $fake = Sentinel::fake();
     $invoice = Invoice::query()->create(['number' => 'A-1']);

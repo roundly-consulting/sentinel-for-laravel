@@ -26,6 +26,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentCall;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ImportKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedNonce;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssueNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
@@ -85,6 +86,7 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static mixed withoutVerification(Closure $callback)
  * @method static KeysAccessor keys()
  * @method static GeneratedKey generateKey(GenerateKeyRequest $request)
+ * @method static KeyInfo importKey(ImportKeyRequest $request)
  * @method static RotationResult rotateKey(RotateKeyRequest $request)
  * @method static KeyInfo revokeKey(RevokeKeyRequest $request)
  * @method static KeyInfo retireKey(string $ring, string $keyId)
@@ -130,6 +132,7 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static void assertSealingNotSuspended()
  * @method static void assertScanned(string|null $model = null)
  * @method static void assertKeyGenerated(string|null $ring = null)
+ * @method static void assertKeyImported(string|null $ring = null, string|null $keyId = null)
  * @method static void assertKeyRotated(string|null $ring = null)
  * @method static void assertKeyRevoked(string $keyId)
  * @method static void assertKeyRetired(string $keyId)

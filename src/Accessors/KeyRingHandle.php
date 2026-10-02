@@ -9,6 +9,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Model;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ImportKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RevokeKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotateKeyRequest;
@@ -16,6 +17,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\RotationResult;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyDestination;
 use RoundlyConsulting\Sentinel\SentinelManager;
+use SensitiveParameter;
 
 /**
  * `Sentinel::keys()->ring('financial')` — one ring. Scoped: a kid of another ring is unknown
@@ -65,6 +67,25 @@ final readonly class KeyRingHandle
     ): GeneratedKey {
         return $this->manager->generateKey(new GenerateKeyRequest(
             $this->ring, $algorithm, $keyId, $destination,
+            $activatesAt === null ? null : CarbonImmutable::instance($activatesAt), $owner, $label,
+        ));
+    }
+
+    /**
+     * Import a key — PEM or `base64:` material — into this ring's database store, bound to
+     * its owner (e.g. the partner model). Verify-only unless `signing` is true.
+     */
+    public function import(
+        string $keyId,
+        Algorithm $algorithm,
+        #[SensitiveParameter] string $material,
+        bool $signing = false,
+        ?CarbonInterface $activatesAt = null,
+        ?Model $owner = null,
+        ?string $label = null,
+    ): KeyInfo {
+        return $this->manager->importKey(new ImportKeyRequest(
+            $this->ring, $keyId, $algorithm, $material, $signing,
             $activatesAt === null ? null : CarbonImmutable::instance($activatesAt), $owner, $label,
         ));
     }

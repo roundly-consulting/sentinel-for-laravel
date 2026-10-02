@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Artisan;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Models\Key;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\User;
@@ -126,4 +127,69 @@ it('refuses to retire a key that seals still use, unless forced', function (): v
     $this->artisan('sentinel:key:retire', ['kid' => 'in-use'])->expectsOutputToContain('2 seal(s) still use key [default:in-use]')->assertFailed();
     $this->artisan('sentinel:key:list')->expectsOutputToContain('in-use')->assertSuccessful();
     $this->artisan('sentinel:key:retire', ['kid' => 'in-use', '--force' => true])->expectsOutputToContain('Retired key [default:in-use]')->assertSuccessful();
+});
+
+/**
+ * I-1: sentinel:key:import — material from a file or a hidden prompt, never an argument.
+ */
+it('imports a partner key from a PEM file, bound to its owner, printing no material', function (): void {
+    $owner = User::query()->create(['name' => 'Acme']);
+    $material = KeyMaterial::generate(Algorithm::EcdsaP256Sha256);
+    $pem = (string) base64_decode(substr((string) $material->encodedPublic(), 7), true);
+    $file = tempnam(sys_get_temp_dir(), 'sentinel-import-');
+    file_put_contents((string) $file, $pem);
+
+    try {
+        $this->artisan('sentinel:key:import', [
+            'kid' => 'acme-2026-10', '--ring' => 'http', '--algorithm' => 'ecdsa-p256-sha256', '--file' => $file,
+            '--owner-type' => User::class, '--owner-id' => (string) $owner->getKey(), '--label' => 'Acme', '--activate-at' => '2026-10-02 10:00:00',
+        ])
+            ->expectsOutputToContain('Imported key [http:acme-2026-10] (ecdsa-p256-sha256)')
+            ->expectsOutputToContain('verify_only')
+            ->expectsOutputToContain(User::class.':'.$owner->getKey())
+            ->doesntExpectOutputToContain('BEGIN PUBLIC KEY')
+            ->doesntExpectOutputToContain('base64:')
+            ->assertExitCode(0);
+    } finally {
+        unlink((string) $file);
+    }
+
+    expect(Sentinel::keys()->ring('http')->find('acme-2026-10')?->label)->toBe('Acme');
+});
+
+it('reads the material from a hidden prompt, and imports a signing key with --signing', function (): void {
+    $this->artisan('sentinel:key:import', ['kid' => 'own-http', '--ring' => 'http', '--algorithm' => 'hmac-sha256', '--signing' => true])
+        ->expectsQuestion('Key material (base64:…; use --file for PEM)', PARTNER_SECRET)
+        ->expectsOutputToContain('Imported key [http:own-http] (hmac-sha256)')
+        ->expectsOutputToContain('active')
+        ->doesntExpectOutputToContain(substr(PARTNER_SECRET, 7, 20))
+        ->assertExitCode(0);
+
+    expect(Sentinel::keys()->ring('http')->find('own-http')?->status)->toBe(KeyStatus::Active);
+});
+
+it('refuses bad import input with exit 2, and a refused import with exit 1', function (): void {
+    $this->artisan('sentinel:key:import', ['kid' => 'k', '--ring' => 'http', '--algorithm' => 'hmac-sha256', '--no-interaction' => true])
+        ->expectsOutputToContain('Pass the material with --file')
+        ->assertExitCode(2);
+
+    $this->artisan('sentinel:key:import', ['kid' => 'k', '--ring' => 'http'])->expectsOutputToContain('A valid --algorithm is required')->assertExitCode(2);
+    $this->artisan('sentinel:key:import', ['kid' => 'k', '--ring' => 'http', '--algorithm' => 'rsa'])->assertExitCode(2);
+    $this->artisan('sentinel:key:import', ['kid' => 'k', '--ring' => 'http', '--algorithm' => 'hmac-sha256', '--file' => '/nonexistent/sentinel.pem'])
+        ->expectsOutputToContain('The --file is missing, unreadable, empty or larger than 64 KB')
+        ->assertExitCode(2);
+    $this->artisan('sentinel:key:import', ['kid' => 'k', '--ring' => 'http', '--algorithm' => 'hmac-sha256', '--owner-type' => User::class, '--owner-id' => '999'])
+        ->expectsOutputToContain('model was not found')
+        ->assertExitCode(2);
+    $this->artisan('sentinel:key:import', ['kid' => 'k', '--ring' => 'http', '--algorithm' => 'hmac-sha256'])
+        ->expectsQuestion('Key material (base64:…; use --file for PEM)', '')
+        ->expectsOutputToContain('No key material was given')
+        ->assertExitCode(2);
+    $this->artisan('sentinel:key:import', ['kid' => 'k', '--ring' => 'http', '--algorithm' => 'hmac-sha256'])
+        ->expectsQuestion('Key material (base64:…; use --file for PEM)', 'a passphrase, never key material')
+        ->expectsOutputToContain('must be a PEM block or "base64:')
+        ->doesntExpectOutputToContain('a passphrase, never key material')
+        ->assertExitCode(1);
+
+    expect(Key::query()->count())->toBe(0);
 });

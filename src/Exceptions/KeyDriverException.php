@@ -11,7 +11,14 @@ final class KeyDriverException extends SentinelException
 {
     public static function readOnly(string $ring): self
     {
-        return new self("Key ring [{$ring}] has no database driver to write keys to; config keys are managed in the environment (see `sentinel:key:generate`).");
+        // The env variables of the rings the shipped config/sentinel.php declares.
+        $env = match ($ring) {
+            'default' => ' (SENTINEL_PREVIOUS_KEYS in the shipped config)',
+            'http' => ' (SENTINEL_HTTP_KEYS in the shipped config)',
+            default => '',
+        };
+
+        return new self("Key ring [{$ring}] has no database driver to write keys to; its keys are managed in the environment. Generate one with `sentinel:key:generate`, list verify-only keys in sentinel.keys.rings.{$ring}.previous as kid|algorithm|base64:…{$env}, or set the ring's driver to database or chain.");
     }
 
     public static function notStoredInDatabase(string $ring, string $keyId): self

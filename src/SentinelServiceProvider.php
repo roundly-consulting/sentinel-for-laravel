@@ -15,6 +15,7 @@ use RoundlyConsulting\Sentinel\Canonical\FieldTagger;
 use RoundlyConsulting\Sentinel\Commands\CheckpointCommand;
 use RoundlyConsulting\Sentinel\Commands\InspectCommand;
 use RoundlyConsulting\Sentinel\Commands\KeyGenerateCommand;
+use RoundlyConsulting\Sentinel\Commands\KeyImportCommand;
 use RoundlyConsulting\Sentinel\Commands\KeyListCommand;
 use RoundlyConsulting\Sentinel\Commands\KeyRetireCommand;
 use RoundlyConsulting\Sentinel\Commands\KeyRevokeCommand;
@@ -76,6 +77,7 @@ final class SentinelServiceProvider extends PackageServiceProvider
                 InspectCommand::class,
                 PruneCommand::class,
                 KeyGenerateCommand::class,
+                KeyImportCommand::class,
                 KeyRotateCommand::class,
                 KeyRevokeCommand::class,
                 KeyRetireCommand::class,

@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use RoundlyConsulting\Sentinel\Accessors\KeyRingHandle;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ImportKeyRequest;
+use RoundlyConsulting\Sentinel\Keys\ImportedMaterial;
 use RoundlyConsulting\Sentinel\Tests\Support\SourceScan;
 
 /**
@@ -39,3 +42,17 @@ it('marks every material-bearing parameter in Keys and Accessors as sensitive', 
 
     expect($checked)->toBeGreaterThan(10)->and($offenders)->toBe([]);
 });
+
+it('marks imported key material as sensitive on every path into the import', function (string $class, string $method): void {
+    $parameter = array_values(array_filter(
+        (new ReflectionMethod($class, $method))->getParameters(),
+        static fn (ReflectionParameter $parameter): bool => $parameter->getName() === 'material',
+    ));
+
+    expect($parameter)->toHaveCount(1)
+        ->and($parameter[0]->getAttributes(SensitiveParameter::class))->toHaveCount(1);
+})->with([
+    [ImportKeyRequest::class, '__construct'],
+    [KeyRingHandle::class, 'import'],
+    [ImportedMaterial::class, 'parse'],
+]);

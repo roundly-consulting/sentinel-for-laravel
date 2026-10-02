@@ -24,6 +24,7 @@ use RoundlyConsulting\Sentinel\Actions\Idempotency\ForgetIdempotencyKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\ReleaseIdempotentRequestAction;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\RunIdempotentAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\GenerateKeyAction;
+use RoundlyConsulting\Sentinel\Actions\Keys\ImportKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\RetireKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\RevokeKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\RotateKeyAction;
@@ -64,6 +65,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotencyDecision;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentCall;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ImportKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedNonce;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssueNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
@@ -586,6 +588,15 @@ class SentinelManager
     public function generateKey(GenerateKeyRequest $request): GeneratedKey
     {
         return $this->container->make(GenerateKeyAction::class)->execute($request);
+    }
+
+    /**
+     * Import existing key material (a partner's public key or shared secret, or your own key
+     * pair) into a ring's database store; verify-only unless imported with `signing: true`.
+     */
+    public function importKey(ImportKeyRequest $request): KeyInfo
+    {
+        return $this->container->make(ImportKeyAction::class)->execute($request);
     }
 
     public function rotateKey(RotateKeyRequest $request): RotationResult

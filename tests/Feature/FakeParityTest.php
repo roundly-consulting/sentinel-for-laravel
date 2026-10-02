@@ -5,10 +5,12 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
+use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyKeyReusedException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Testing\SentinelFake;
@@ -205,6 +207,24 @@ it('behaves exactly like the real manager', function (Closure $scenario): void {
             Sentinel::nonces()->consume('another-purpose', Sentinel::nonces()->issue('password-reset')->value),
         ];
     }],
+    'import a partner key, verify-only' => [static function (): array {
+        $info = Sentinel::keys()->ring('http')->import('acme', Algorithm::Ed25519, (string) KeyMaterial::generate(Algorithm::Ed25519)->encodedPublic(), label: 'Acme');
+
+        return [$info->ring, $info->keyId, $info->algorithm->value, $info->status->value, $info->driver, $info->canSign, $info->label];
+    }],
+    'import a signing key' => [static function (): array {
+        $info = Sentinel::keys()->ring('http')->import('own', Algorithm::HmacSha256, PARTNER_SECRET, signing: true);
+
+        return [$info->status->value, $info->canSign];
+    }],
+    'import private material without signing' => [static fn (): mixed => Sentinel::keys()->ring('http')->import('own', Algorithm::Ed25519, (string) KeyMaterial::generate(Algorithm::Ed25519)->encodedPrivate())],
+    'import into a config-only ring' => [static function (): mixed {
+        partnerRing();
+
+        return Sentinel::keys()->ring('http')->import('acme', Algorithm::HmacSha256, PARTNER_SECRET);
+    }],
+    'import a passphrase' => [static fn (): mixed => Sentinel::keys()->ring('http')->import('acme', Algorithm::HmacSha256, 'a passphrase')],
+    'import an algorithm the ring refuses' => [static fn (): mixed => Sentinel::keys()->ring('http')->import('acme', Algorithm::HmacSha512, PARTNER_SECRET)],
     'client nonce remembered twice' => [static fn (): array => [
         app(SentinelManager::class)->rememberNonce('http:partner', 'n-1', Clock::now()->addMinutes(5)),
         app(SentinelManager::class)->rememberNonce('http:partner', 'n-1', Clock::now()->addMinutes(5)),

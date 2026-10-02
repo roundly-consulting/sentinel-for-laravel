@@ -37,6 +37,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotencyDecision;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentCall;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ImportKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedNonce;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssueNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
@@ -85,6 +86,7 @@ use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
+use RoundlyConsulting\Sentinel\Keys\ImportedMaterial;
 use RoundlyConsulting\Sentinel\Keys\KeyIds;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\BulkQuery;
@@ -700,6 +702,39 @@ final class SentinelFake extends SentinelManager
         return $this->record('generateKey', $request, $result);
     }
 
+    /**
+     * The production validation and parsing (pure — nothing stored): an import that would be
+     * refused in production is refused here with the same exception.
+     */
+    public function importKey(ImportKeyRequest $request): KeyInfo
+    {
+        $config = Settings::ring($request->ring);
+
+        if (! $config->allows($request->algorithm)) {
+            throw AlgorithmNotAllowedException::forRing($request->ring, $request->algorithm);
+        }
+
+        if (! Identifiers::isKeyId($request->keyId)) {
+            throw KeyDriverException::invalidKeyId($request->ring);
+        }
+
+        if ($request->label !== null && mb_strlen($request->label) > 191) {
+            throw KeyDriverException::invalidLabel();
+        }
+
+        if (! in_array('database', $config->driver === 'chain' ? $config->drivers : [$config->driver], true)) {
+            throw KeyDriverException::readOnly($request->ring);
+        }
+
+        $material = ImportedMaterial::parse($request->algorithm, $request->material, $request->signing);
+        $signing = $request->signing && $material->canSign();
+
+        return $this->record('importKey', $request, new KeyInfo(
+            $request->ring, $request->keyId, $request->algorithm, $signing ? KeyStatus::Active : KeyStatus::VerifyOnly, 'database', $signing,
+            $request->activatesAt ?? Clock::now(), label: $request->label, ownerType: $request->owner?->getMorphClass(), ownerId: $request->owner?->getKey(),
+        ));
+    }
+
     public function rotateKey(RotateKeyRequest $request): RotationResult
     {
         $config = Settings::ring($request->ring);
@@ -861,6 +896,24 @@ final class SentinelFake extends SentinelManager
         );
     }
 
+    /**
+     * A key was imported — into this ring, with this kid, when given.
+     */
+    public function assertKeyImported(?string $ring = null, ?string $keyId = null): void
+    {
+        $matching = array_filter(
+            $this->recorded('importKey'),
+            static fn (RecordedCall $call): bool => $call->arguments instanceof ImportKeyRequest
+                && ($ring === null || $call->arguments->ring === $ring) && ($keyId === null || $call->arguments->keyId === $keyId),
+        );
+
+        PHPUnit::assertNotEmpty($matching, sprintf(
+            'Expected a key to be imported%s%s, but none was.',
+            $ring === null ? '' : " into ring [{$ring}]",
+            $keyId === null ? '' : " as [{$keyId}]",
+        ));
+    }
+
     public function assertKeyRotated(?string $ring = null): void
     {
         PHPUnit::assertNotEmpty(
@@ -891,7 +944,7 @@ final class SentinelFake extends SentinelManager
 
     public function assertNoKeyChanges(): void
     {
-        $changes = array_merge(...array_map($this->recorded(...), ['generateKey', 'rotateKey', 'revokeKey', 'retireKey']));
+        $changes = array_merge(...array_map($this->recorded(...), ['generateKey', 'importKey', 'rotateKey', 'revokeKey', 'retireKey']));
 
         PHPUnit::assertEmpty($changes, sprintf('Expected no key changes, but %d were recorded.', count($changes)));
     }

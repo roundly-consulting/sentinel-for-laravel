@@ -105,16 +105,17 @@ final class DatabaseKeyStore implements KeyStore
     }
 
     /**
-     * Store a new key (its envelope and query columns together).
+     * Store a new key (its envelope and query columns together). The manual status is bound
+     * into the envelope: an imported partner key stays verify-only.
      */
-    public function insert(string $keyId, #[SensitiveParameter] KeyMaterial $material, CarbonImmutable $activatesAt, ?Model $owner, ?string $label): SealingKey
+    public function insert(string $keyId, #[SensitiveParameter] KeyMaterial $material, CarbonImmutable $activatesAt, ?Model $owner, ?string $label, KeyStatus $status = KeyStatus::Active): SealingKey
     {
         $row = new Key;
         $row->label = $label;
 
         $this->envelope->apply($row, new EnvelopeData(
             $this->ring, $keyId, $material->algorithm->value, $material->encodedPrivate(), $material->encodedPublic(),
-            KeyStatus::Active->value, $activatesAt, owner: $owner === null ? null : $owner->getMorphClass().':'.$owner->getKey(),
+            $status->value, $activatesAt, owner: $owner === null ? null : $owner->getMorphClass().':'.$owner->getKey(),
         ));
 
         try {

@@ -12,18 +12,6 @@ use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Tests\Support\Forks;
 
 /**
- * @param  list<string>  $outcomes
- * @return array<string, int>
- */
-function tally(array $outcomes): array
-{
-    $counts = array_count_values($outcomes);
-    ksort($counts);
-
-    return $counts;
-}
-
-/**
  * Plan §12.5 items 3, 4 and 8 on the real engines: of eight concurrent first requests for a
  * key exactly one owns it, of eight attempts to use a nonce exactly one succeeds, and
  * `INSERT … ON CONFLICT DO NOTHING` reports what it did on every driver.

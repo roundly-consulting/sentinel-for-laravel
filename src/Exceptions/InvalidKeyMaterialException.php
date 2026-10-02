@@ -17,6 +17,16 @@ final class InvalidKeyMaterialException extends SentinelException
         return new self('Key material must be encoded as "base64:<standard base64>"; raw strings (passphrases) are refused.');
     }
 
+    public static function pemOrBase64Required(): self
+    {
+        return new self('Imported key material must be a PEM block or "base64:<standard base64>"; raw strings (passphrases) are refused.');
+    }
+
+    public static function privateNotExpected(): self
+    {
+        return new self('The material is a private key; import it with signing enabled (--signing) to move your own key pair, or import only the public key.');
+    }
+
     public static function malformedEncoding(): self
     {
         return new self('Key material after "base64:" is not canonical, padded standard base64.');

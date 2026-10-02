@@ -6,6 +6,7 @@ use GuzzleHttp\Psr7\Request as PsrRequest;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
+use PHPUnit\Framework\ExpectationFailedException;
 use Psr\Http\Message\RequestInterface;
 use RoundlyConsulting\Sentinel\Concerns\HasSeals;
 use RoundlyConsulting\Sentinel\Contracts\Sealable;
@@ -143,4 +144,26 @@ function received(RequestInterface $psr, array $server = []): Request
 function signedPartnerRequest(?SigningOptions $options = null, string $uri = 'https://api.example.com/events?b=2&a=1', string $body = '{"event":"paid"}', array $headers = ['Content-Type' => 'application/json']): RequestInterface
 {
     return Sentinel::signatures()->sign(new PsrRequest('POST', $uri, $headers, $body), 'partner', $options);
+}
+
+/**
+ * A fake assertion fails with this message.
+ */
+function fails(Closure $assertion, string $message): void
+{
+    expect($assertion)->toThrow(ExpectationFailedException::class, $message);
+}
+
+/**
+ * How often each outcome of a race occurred, by outcome.
+ *
+ * @param  list<string>  $outcomes
+ * @return array<string, int>
+ */
+function tally(array $outcomes): array
+{
+    $counts = array_count_values($outcomes);
+    ksort($counts);
+
+    return $counts;
 }
