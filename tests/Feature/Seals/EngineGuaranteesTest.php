@@ -123,6 +123,7 @@ it('reads every boolean switch the way an env string means it', function (string
     ['sentinel.signatures.profiles.default.require_query', fn () => ProfileResolver::resolve()->requireQuery],
     ['sentinel.signatures.profiles.default.require_content_digest', fn () => ProfileResolver::resolve()->requireContentDigest],
     ['sentinel.signatures.profiles.default.require_nonce', fn () => ProfileResolver::resolve()->requireNonce],
+    ['sentinel.schedule.enabled', fn () => Settings::scheduleEnabled()],
 ])->with([
     ['off', false], ['no', false], ['0', false], ['false', false], ['', false], [false, false],
     ['on', true], ['yes', true], ['1', true], ['true', true], [true, true],

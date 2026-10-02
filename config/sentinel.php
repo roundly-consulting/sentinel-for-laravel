@@ -370,4 +370,33 @@ return [
         'advertise' => env('SENTINEL_ADVERTISE_SIGNATURE', true),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Scheduling
+    |--------------------------------------------------------------------------
+    |
+    | Sentinel registers its upkeep on the Laravel scheduler (run
+    | `php artisan schedule:run` every minute, as for any scheduled task), each
+    | task without overlapping and on one server:
+    |
+    | checkpoint — `sentinel:checkpoint` (only while the ledger is on); how
+    |              often decides the window in which a rollback goes unseen
+    | verify     — `sentinel:verify --allow-empty` (+ `--ledger`): a full scan;
+    |              daily keeps the load low, hourly suits small tables
+    | prune      — `sentinel:prune` (expired idempotency keys and nonces)
+    |
+    | Frequencies: everyMinute, everyTwoMinutes, everyFiveMinutes,
+    | everyTenMinutes, everyFifteenMinutes, everyThirtyMinutes, hourly,
+    | everyTwoHours, everyThreeHours, everyFourHours, everySixHours, daily,
+    | weekly — or off. Set `enabled` to false to schedule the commands yourself.
+    |
+    */
+
+    'schedule' => [
+        'enabled' => env('SENTINEL_SCHEDULE', true),
+        'checkpoint' => env('SENTINEL_SCHEDULE_CHECKPOINT', 'everyMinute'),
+        'verify' => env('SENTINEL_SCHEDULE_VERIFY', 'daily'),
+        'prune' => env('SENTINEL_SCHEDULE_PRUNE', 'daily'),
+    ],
+
 ];

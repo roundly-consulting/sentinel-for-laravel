@@ -675,4 +675,43 @@ final class Settings
     {
         return Config::boolean('sentinel.signatures.advertise', true);
     }
+
+    /**
+     * Whether Sentinel registers its upkeep tasks on the scheduler.
+     */
+    public static function scheduleEnabled(): bool
+    {
+        return Config::boolean('sentinel.schedule.enabled', true);
+    }
+
+    /**
+     * The scheduler frequency method of one upkeep task (`checkpoint`, `verify`, `prune`), or
+     * null when the task is off.
+     */
+    public static function scheduleFrequency(string $task): ?string
+    {
+        // Literal keys: each one is read (and pinned by the config contract) on its own.
+        $value = match ($task) {
+            'checkpoint' => config('sentinel.schedule.checkpoint'),
+            'verify' => config('sentinel.schedule.verify'),
+            'prune' => config('sentinel.schedule.prune'),
+            default => throw InvalidSentinelConfigurationException::invalidValue('schedule', "has no task [{$task}]"),
+        };
+
+        if ($value === null || $value === '' || $value === 'off') {
+            return null;
+        }
+
+        if (! is_string($value) || ! in_array($value, self::FREQUENCIES, true)) {
+            throw InvalidSentinelConfigurationException::invalidValue("schedule.{$task}", 'must be off or one of '.implode(', ', self::FREQUENCIES));
+        }
+
+        return $value;
+    }
+
+    /** The scheduler frequencies an upkeep task may run at. */
+    public const array FREQUENCIES = [
+        'everyMinute', 'everyTwoMinutes', 'everyFiveMinutes', 'everyTenMinutes', 'everyFifteenMinutes', 'everyThirtyMinutes',
+        'hourly', 'everyTwoHours', 'everyThreeHours', 'everyFourHours', 'everySixHours', 'daily', 'weekly',
+    ];
 }

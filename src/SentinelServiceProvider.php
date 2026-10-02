@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Sentinel;
 
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\QueryException;
 use Illuminate\Log\LogManager;
@@ -140,6 +141,39 @@ final class SentinelServiceProvider extends PackageServiceProvider
 
         if (Settings::nonceStore() === 'cache') {
             $this->app->make(NonceStore::class);
+        }
+
+        $this->callAfterResolving(Schedule::class, static function (Schedule $schedule): void {
+            self::schedule($schedule);
+        });
+    }
+
+    /**
+     * The upkeep tasks (`sentinel.schedule`): checkpoint (with the ledger on), a full verify
+     * that tolerates an empty install, prune — each without overlapping, on one server.
+     */
+    private static function schedule(Schedule $schedule): void
+    {
+        if (! Settings::scheduleEnabled()) {
+            return;
+        }
+
+        $ledger = Settings::ledgerEnabled();
+        $tasks = [
+            'checkpoint' => $ledger ? ['sentinel:checkpoint', [], 'Sentinel: checkpoint and anchor the ledger'] : null,
+            'verify' => ['sentinel:verify', $ledger ? ['--allow-empty', '--ledger'] : ['--allow-empty'], 'Sentinel: verify every sealed model'],
+            'prune' => ['sentinel:prune', [], 'Sentinel: prune expired idempotency keys and nonces'],
+        ];
+
+        foreach ($tasks as $task => $command) {
+            $frequency = Settings::scheduleFrequency($task);
+
+            if ($frequency === null || $command === null) {
+                continue;
+            }
+
+            [$name, $parameters, $description] = $command;
+            $schedule->command($name, $parameters)->{$frequency}()->withoutOverlapping()->onOneServer()->description($description);
         }
     }
 
