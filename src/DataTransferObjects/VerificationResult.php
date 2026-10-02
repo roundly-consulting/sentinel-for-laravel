@@ -8,6 +8,7 @@ use Carbon\CarbonImmutable;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\VerificationContext;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
+use RoundlyConsulting\Sentinel\Support\ChangedFields;
 
 /**
  * The verdict on one seal of one model. Carries names, never values: `changedAttributes`
@@ -43,6 +44,26 @@ final readonly class VerificationResult
     public function failed(): bool
     {
         return ! $this->isIntact();
+    }
+
+    /**
+     * The changed columns, without the `a:` tag prefix (`['amount']`); empty when unknown.
+     *
+     * @return list<string>
+     */
+    public function changedColumns(): array
+    {
+        return ChangedFields::columns($this->changedAttributes);
+    }
+
+    /**
+     * The changed computed fields, without the `c:` tag prefix (`['lines']`).
+     *
+     * @return list<string>
+     */
+    public function changedComputed(): array
+    {
+        return ChangedFields::computed($this->changedAttributes);
     }
 
     /**
