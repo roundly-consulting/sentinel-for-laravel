@@ -24,6 +24,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ConsumeNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\HealthReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentCall;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ImportKeyRequest;
@@ -67,6 +68,7 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static SealHandle for(Model $model, string|null $seal = null)
  * @method static ModelSeals model(string $class)
  * @method static list<class-string<Model>> sealables()
+ * @method static HealthReport check()
  * @method static SealResult seal(Model $model, string|null $seal = null, string|null $reason = null, Model|null $actor = null)
  * @method static VerificationResult verify(Model $model, string|null $seal = null)
  * @method static VerificationResult verifyOrFail(Model $model, string|null $seal = null)

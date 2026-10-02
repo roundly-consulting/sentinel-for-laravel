@@ -12,6 +12,7 @@ use RoundlyConsulting\PackageToolkit\Concerns\RegistersBlueprintMacros;
 use RoundlyConsulting\PackageToolkit\Package;
 use RoundlyConsulting\PackageToolkit\PackageServiceProvider;
 use RoundlyConsulting\Sentinel\Canonical\FieldTagger;
+use RoundlyConsulting\Sentinel\Commands\CheckCommand;
 use RoundlyConsulting\Sentinel\Commands\CheckpointCommand;
 use RoundlyConsulting\Sentinel\Commands\InspectCommand;
 use RoundlyConsulting\Sentinel\Commands\KeyGenerateCommand;
@@ -35,6 +36,7 @@ use RoundlyConsulting\Sentinel\Engine\ReadBack;
 use RoundlyConsulting\Sentinel\Engine\Sealer;
 use RoundlyConsulting\Sentinel\Engine\Verifier;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
+use RoundlyConsulting\Sentinel\Exceptions\NoSigningKeyException;
 use RoundlyConsulting\Sentinel\Exceptions\SentinelException;
 use RoundlyConsulting\Sentinel\Http\ClientMacros;
 use RoundlyConsulting\Sentinel\Http\CollectionMacros;
@@ -56,6 +58,7 @@ use RoundlyConsulting\Sentinel\Support\GateAcknowledgementPolicy;
 use RoundlyConsulting\Sentinel\Support\ModelDiscovery;
 use RoundlyConsulting\Sentinel\Support\SealingScope;
 use RoundlyConsulting\Sentinel\Support\Settings;
+use Throwable;
 
 final class SentinelServiceProvider extends PackageServiceProvider
 {
@@ -70,6 +73,7 @@ final class SentinelServiceProvider extends PackageServiceProvider
             ->hasMigrations()
             ->hasTranslations()
             ->hasCommands([
+                CheckCommand::class,
                 VerifyCommand::class,
                 CheckpointCommand::class,
                 ResealCommand::class,
@@ -198,6 +202,22 @@ final class SentinelServiceProvider extends PackageServiceProvider
     }
 
     /**
+     * Presence only — never the key id or material.
+     */
+    private static function signingKey(string $ring): string
+    {
+        try {
+            app(KeyStoreManager::class)->signingKey($ring);
+
+            return 'present';
+        } catch (NoSigningKeyException) {
+            return 'missing';
+        } catch (Throwable) {
+            return 'unusable';
+        }
+    }
+
+    /**
      * "N configured, M discovered" — discovery reads the seal and ledger tables, so an
      * unreachable or unmigrated database is reported, never fatal.
      */
@@ -223,6 +243,7 @@ final class SentinelServiceProvider extends PackageServiceProvider
             $ring = Settings::defaultRing();
             $rows = [
                 'Default ring / driver' => sprintf('%s (%s)', $ring, Settings::ring($ring)->driver),
+                'Signing key (default ring)' => self::signingKey($ring),
                 'Rings' => implode(', ', Settings::rings()),
                 'Auto-seal' => Settings::autoSeal() ? 'ON' : 'OFF',
                 'Tampered writes' => Settings::onTamperedWrite()->value,
@@ -232,6 +253,7 @@ final class SentinelServiceProvider extends PackageServiceProvider
                 'Nonce store' => Settings::nonceStore(),
                 'Signature profiles' => (string) count(is_array(config('sentinel.signatures.profiles')) ? config('sentinel.signatures.profiles') : []),
                 'Sealable models' => self::sealableModels(),
+                'Schedule' => Settings::scheduleEnabled() ? 'auto' : 'manual',
             ];
         } catch (SentinelException) {
             $rows = ['Default ring / driver' => 'invalid configuration'];

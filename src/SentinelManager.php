@@ -18,6 +18,7 @@ use RoundlyConsulting\Sentinel\Accessors\KeysAccessor;
 use RoundlyConsulting\Sentinel\Accessors\LedgerAccessor;
 use RoundlyConsulting\Sentinel\Accessors\NoncesAccessor;
 use RoundlyConsulting\Sentinel\Accessors\SignaturesAccessor;
+use RoundlyConsulting\Sentinel\Actions\CheckInstallationAction;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\BeginIdempotentRequestAction;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\CompleteIdempotentRequestAction;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\ForgetIdempotencyKeyAction;
@@ -61,6 +62,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ConsumeNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\HealthReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotencyDecision;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentCall;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentRequest;
@@ -152,6 +154,15 @@ class SentinelManager
     public function model(string $class): ModelSeals
     {
         return new ModelSeals($this, $class, $this->container->make(DefinitionRegistry::class)->for($class));
+    }
+
+    /**
+     * The installation health check: signing keys, APP_KEY, tables, models, anchors,
+     * checkpoint backlog, scheduling, seals on retired keys and stores (`sentinel:check`).
+     */
+    public function check(): HealthReport
+    {
+        return $this->container->make(CheckInstallationAction::class)->execute();
     }
 
     /**
