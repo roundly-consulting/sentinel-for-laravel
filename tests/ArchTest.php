@@ -2,36 +2,202 @@
 
 declare(strict_types=1);
 
+use RoundlyConsulting\Sentinel\Canonical\FieldTagger;
+use RoundlyConsulting\Sentinel\Keys\Hkdf;
+use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
+use RoundlyConsulting\Sentinel\Keys\SealingKey;
+use RoundlyConsulting\Sentinel\Keys\Signers;
 use RoundlyConsulting\Sentinel\SentinelManager;
+use RoundlyConsulting\Sentinel\Support\Clock;
+use RoundlyConsulting\Sentinel\Tests\Support\SourceScan;
 use RoundlyConsulting\Testing\Arch\ArchPresets;
 
 /**
- * The seven arch presets every roundly package adopts, scoped to what a fresh package
- * actually has. Two are deliberately NOT registered here, for the same reason metrics and
- * enums skip them: this package ships no Eloquent model and no `*_model` config key, so
- * both would be green on the first run and stay green forever — vacuous rather than
- * adopted. Add them back the moment the package gains a swappable model:
+ * The arch presets this package's shape qualifies for, plus the bespoke pins of plan §12.1.
  *
- *   - `swappableModelsAreNotFinal` — needs a `Model::class => 'handle.model'` map.
- *   - `modelsResolveThroughSeam` — needs a real model resolved through a Support seam.
- *
- * `morphColumnsUseTheSeam` is likewise skipped until the package ships migrations with
- * polymorphic columns.
+ * Not adopted, because they would be vacuous: `swappableModelsAreNotFinal` and
+ * `modelsResolveThroughSeam` — Sentinel's models are deliberately not swappable (D26).
+ * `morphColumnsUseTheSeam` and `modelsGoThroughTheFacade` join once migrations and models
+ * exist (Phases C/D).
  */
 ArchPresets::strictTypes('RoundlyConsulting\Sentinel');
-// The manager is the one deliberate non-final class: SentinelFake extends it, so an
-// injected manager still type-checks under Sentinel::fake().
+// The manager is the one deliberate non-final class: SentinelFake extends it, so an injected
+// manager still type-checks under Sentinel::fake().
 ArchPresets::finalByDefault('RoundlyConsulting\Sentinel', [SentinelManager::class]);
+// No exemptions: every primitive goes through crypto-for-laravel (hash_hkdf is not on the
+// list — it is pinned to Keys\Hkdf below instead).
 ArchPresets::noLocalCryptoPrimitives('RoundlyConsulting\Sentinel');
-
-/**
- * The Dependency Policy as a test. No `alsoAllow`: this template's `require` ships only
- * php/illuminate/roundly. If this goes red the graph is wrong — never widen the allow-list
- * to quiet it.
- */
 ArchPresets::runtimeRequireIsWhitelisted(__DIR__.'/../composer.json');
-
 ArchPresets::noDebuggingLeftovers();
 
-// Enable once the package has Models/Concerns/Traits — the preset fails on an empty namespace.
-// ArchPresets::modelsGoThroughTheFacade('RoundlyConsulting\Sentinel');
+/**
+ * @param  Closure(string $class, string $file): void  $check
+ */
+function eachSourceClass(Closure $check): int
+{
+    $classes = SourceScan::classes();
+
+    expect($classes)->not->toBeEmpty();
+
+    foreach ($classes as $class => $file) {
+        $check($class, $file);
+    }
+
+    return count($classes);
+}
+
+it('(a) calls hash_hkdf only from Keys\Hkdf', function (): void {
+    $calls = [];
+
+    eachSourceClass(function (string $class, string $file) use (&$calls): void {
+        $count = SourceScan::functionCalls($file, 'hash_hkdf');
+
+        if ($count > 0) {
+            $calls[$class] = $count;
+        }
+    });
+
+    expect($calls)->toBe([Hkdf::class => 1]);
+});
+
+it('(b) reads the time only through Support\Clock', function (): void {
+    $offenders = [];
+    $clockReads = 0;
+
+    eachSourceClass(function (string $class, string $file) use (&$offenders, &$clockReads): void {
+        $reads = SourceScan::functionCalls($file, 'now') + SourceScan::functionCalls($file, 'time')
+            + SourceScan::functionCalls($file, 'microtime') + SourceScan::functionCalls($file, 'date')
+            + SourceScan::staticCalls($file, ['Date', 'Carbon', 'CarbonImmutable', 'Facades\\Date'], 'now');
+
+        if ($class === Clock::class) {
+            $clockReads = $reads;
+        } elseif ($reads > 0) {
+            $offenders[] = $class;
+        }
+    });
+
+    expect($clockReads)->toBe(1)->and($offenders)->toBe([]);
+});
+
+it('(c) declares no static properties anywhere (Octane-safe)', function (): void {
+    $offenders = [];
+
+    $scanned = eachSourceClass(function (string $class) use (&$offenders): void {
+        if (! class_exists($class) && ! trait_exists($class) && ! interface_exists($class) && ! enum_exists($class)) {
+            return;
+        }
+
+        foreach ((new ReflectionClass($class))->getProperties(ReflectionProperty::IS_STATIC) as $property) {
+            if ($property->getDeclaringClass()->getName() === $class) {
+                $offenders[] = $class.'::$'.$property->getName();
+            }
+        }
+    });
+
+    expect($scanned)->toBeGreaterThan(20)->and($offenders)->toBe([]);
+});
+
+it('(d) imports neither the DB facade nor Illuminate\Foundation', function (): void {
+    $offenders = [];
+
+    eachSourceClass(function (string $class, string $file) use (&$offenders): void {
+        foreach (SourceScan::imports($file) as $import) {
+            if ($import === 'Illuminate\Support\Facades\DB' || str_starts_with($import, 'Illuminate\Foundation\\')) {
+                $offenders[] = "{$class} imports {$import}";
+            }
+        }
+    });
+
+    expect($offenders)->toBe([]);
+});
+
+it('(e) keeps Canonical free of Illuminate\Database', function (): void {
+    $canonical = 0;
+    $offenders = [];
+
+    eachSourceClass(function (string $class, string $file) use (&$canonical, &$offenders): void {
+        if (! str_starts_with($class, 'RoundlyConsulting\Sentinel\Canonical\\') && ! str_starts_with($class, 'RoundlyConsulting\Sentinel\Http\StructuredFields\\')) {
+            return;
+        }
+
+        $canonical++;
+
+        foreach (SourceScan::imports($file) as $import) {
+            if (str_starts_with($import, 'Illuminate\Database\\')) {
+                $offenders[] = "{$class} imports {$import}";
+            }
+        }
+    });
+
+    expect($canonical)->toBeGreaterThan(5)->and($offenders)->toBe([]);
+});
+
+it('(f) marks every Canonical, Keys, Engine and Ledger class @internal', function (): void {
+    // The custom key-store extension surface stays public: a driver builds SealingKeys from
+    // KeyMaterial.
+    $public = [SealingKey::class, KeyMaterial::class];
+    $checked = 0;
+    $offenders = [];
+
+    eachSourceClass(function (string $class) use ($public, &$checked, &$offenders): void {
+        if (preg_match('/^RoundlyConsulting\\\\Sentinel\\\\(Canonical|Keys|Engine|Ledger)\\\\/', $class) !== 1 || in_array($class, $public, true)) {
+            return;
+        }
+
+        $checked++;
+
+        if (! str_contains((string) (new ReflectionClass($class))->getDocComment(), '@internal')) {
+            $offenders[] = $class;
+        }
+    });
+
+    expect($checked)->toBeGreaterThan(10)->and($offenders)->toBe([]);
+});
+
+it('(g) touches crypto Hmac, Hs, EdDSA and Es only from FieldTagger, Signers and KeyMaterial', function (): void {
+    // KeyMaterial needs EdDSA for one thing: proving an Ed25519 secret key embeds its own
+    // public key (a sign/verify probe) before it is ever accepted.
+    $allowed = [FieldTagger::class, Signers::class, KeyMaterial::class];
+    $primitives = ['RoundlyConsulting\Crypto\Hash\Hmac', 'RoundlyConsulting\Crypto\Signature\Hs', 'RoundlyConsulting\Crypto\Signature\EdDSA', 'RoundlyConsulting\Crypto\Signature\Es'];
+    $users = [];
+
+    eachSourceClass(function (string $class, string $file) use ($primitives, &$users): void {
+        if (array_intersect(SourceScan::imports($file), $primitives) !== []) {
+            $users[] = $class;
+        }
+    });
+
+    sort($users);
+    sort($allowed);
+
+    expect($users)->toBe($allowed);
+});
+
+it('(h) never calls hash_equals (ConstantTime::equals instead)', function (): void {
+    $offenders = [];
+
+    eachSourceClass(function (string $class, string $file) use (&$offenders): void {
+        if (SourceScan::functionCalls($file, 'hash_equals') > 0) {
+            $offenders[] = $class;
+        }
+    });
+
+    expect($offenders)->toBe([]);
+});
+
+it('(i) passes JSON_THROW_ON_ERROR to every json_decode', function (): void {
+    $calls = 0;
+    $offenders = [];
+
+    eachSourceClass(function (string $class, string $file) use (&$calls, &$offenders): void {
+        foreach (SourceScan::callArguments($file, 'json_decode') as $arguments) {
+            $calls++;
+
+            if (! str_contains($arguments, 'JSON_THROW_ON_ERROR')) {
+                $offenders[] = $class;
+            }
+        }
+    });
+
+    expect($calls)->toBeGreaterThan(0)->and($offenders)->toBe([]);
+});
