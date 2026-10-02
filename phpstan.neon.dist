@@ -8,6 +8,8 @@ parameters:
         # what makes PHPStan analyse the trait at all.
         - tests/Fixtures/Models
         - tests/Fixtures/Definitions
+        # The host test case is the only user of the WithSentinelKeys trait.
+        - tests/HostKeys/HostKeysTestCase.php
     # This package ships its own config/ dir; env() is correct there.
     configDirectories:
         - config

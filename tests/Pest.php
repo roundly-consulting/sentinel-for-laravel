@@ -17,6 +17,7 @@ use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Invoice;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\PlainRecord;
+use RoundlyConsulting\Sentinel\Tests\HostKeys\HostKeysTestCase;
 use RoundlyConsulting\Sentinel\Tests\KeyTypes\UuidKeyTestCase;
 use RoundlyConsulting\Sentinel\Tests\TestCase;
 use RoundlyConsulting\Testing\Database\DriverMatrix;
@@ -26,6 +27,7 @@ use RoundlyConsulting\Testing\Database\DriverMatrix;
 // Pure/ needs no application at all (thousands of codec cases), so it binds none.
 uses(TestCase::class)->in('ArchTest.php', 'ConfigContractTest.php', 'Feature', 'Unit', 'RealEngine', 'Property', 'Perf');
 uses(UuidKeyTestCase::class)->in('KeyTypes');
+uses(HostKeysTestCase::class)->in('HostKeys');
 
 /**
  * A sealed invoice (financial + identity seals).
