@@ -49,9 +49,17 @@ final readonly class CacheIdempotencyStore implements IdempotencyStore
     public function begin(IdempotentRequest $request): IdempotencyDecision
     {
         return $this->locked($request->keyDigest, function () use ($request): IdempotencyDecision {
+            try {
+                $record = $this->load($request->keyDigest);
+            } catch (CorruptRecordException) {
+                // An edited entry fails closed, as in the database store: never run the handler
+                // twice on a guess.
+                return new IdempotencyDecision(IdempotencyOutcome::Unavailable);
+            }
+
             $now = Clock::now();
             $transition = StateMachine::begin(
-                $this->load($request->keyDigest), $request, $now, $this->random->token(43), Settings::idempotencyLockSeconds(), $this->vault->open(...),
+                $record, $request, $now, $this->random->token(43), Settings::idempotencyLockSeconds(), $this->vault->open(...),
             );
 
             if ($transition->record !== null) {
@@ -65,7 +73,7 @@ final readonly class CacheIdempotencyStore implements IdempotencyStore
     public function complete(IdempotentRequest $request, ResponseSnapshot $snapshot): bool
     {
         $completed = $this->locked($request->keyDigest, function () use ($request, $snapshot): bool {
-            $record = $this->load($request->keyDigest);
+            $record = $this->loadOrNull($request->keyDigest);
 
             if ($record === null || ! StateMachine::owns($record, $request)) {
                 return false;
@@ -89,7 +97,7 @@ final readonly class CacheIdempotencyStore implements IdempotencyStore
     public function release(IdempotentRequest $request): void
     {
         $this->locked($request->keyDigest, function () use ($request): bool {
-            return StateMachine::owns($this->load($request->keyDigest), $request) && $this->cache->forget(self::key($request->keyDigest));
+            return StateMachine::owns($this->loadOrNull($request->keyDigest), $request) && $this->cache->forget(self::key($request->keyDigest));
         });
     }
 
@@ -121,29 +129,47 @@ final readonly class CacheIdempotencyStore implements IdempotencyStore
         }
     }
 
+    /**
+     * The stored record, null when there is none.
+     *
+     * @throws CorruptRecordException when an entry exists but is not a readable record
+     */
     private function load(string $digest): ?IdempotencyRecord
     {
         $stored = $this->cache->get(self::key($digest));
 
-        if (! is_array($stored)) {
+        if ($stored === null) {
             return null;
+        }
+
+        if (! is_array($stored)) {
+            throw CorruptRecordException::idempotency('not a record');
         }
 
         $cast = new UtcDateTime;
         $model = new IdempotencyKey;
 
+        return new IdempotencyRecord(
+            (string) ($stored['scope'] ?? ''), (string) ($stored['fingerprint'] ?? ''), ($stored['completed'] ?? false) === true,
+            (string) ($stored['owner_token'] ?? ''),
+            $cast->get($model, 'locked_until', $stored['locked_until'] ?? null, []) ?? throw CorruptRecordException::idempotency('no lease'),
+            isset($stored['response']) && is_string($stored['response']) ? $stored['response'] : null,
+            isset($stored['response_status']) && is_int($stored['response_status']) ? $stored['response_status'] : null,
+            ($stored['replayable'] ?? true) === true,
+            $cast->get($model, 'completed_at', $stored['completed_at'] ?? null, []),
+            $cast->get($model, 'expires_at', $stored['expires_at'] ?? null, []) ?? throw CorruptRecordException::idempotency('no expiry'),
+            $cast->get($model, 'created_at', $stored['created_at'] ?? null, []) ?? throw CorruptRecordException::idempotency('no creation time'),
+        );
+    }
+
+    /**
+     * The stored record when it is readable: an edited entry is owned by nobody, so it can be
+     * neither completed nor released (it expires with its TTL).
+     */
+    private function loadOrNull(string $digest): ?IdempotencyRecord
+    {
         try {
-            return new IdempotencyRecord(
-                (string) ($stored['scope'] ?? ''), (string) ($stored['fingerprint'] ?? ''), ($stored['completed'] ?? false) === true,
-                (string) ($stored['owner_token'] ?? ''),
-                $cast->get($model, 'locked_until', $stored['locked_until'] ?? null, []) ?? throw CorruptRecordException::idempotency('no lease'),
-                isset($stored['response']) && is_string($stored['response']) ? $stored['response'] : null,
-                isset($stored['response_status']) && is_int($stored['response_status']) ? $stored['response_status'] : null,
-                ($stored['replayable'] ?? true) === true,
-                $cast->get($model, 'completed_at', $stored['completed_at'] ?? null, []),
-                $cast->get($model, 'expires_at', $stored['expires_at'] ?? null, []) ?? throw CorruptRecordException::idempotency('no expiry'),
-                $cast->get($model, 'created_at', $stored['created_at'] ?? null, []) ?? throw CorruptRecordException::idempotency('no creation time'),
-            );
+            return $this->load($digest);
         } catch (CorruptRecordException) {
             return null;
         }

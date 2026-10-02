@@ -156,6 +156,26 @@ it('fails closed on an edited database record', function (): void {
     expect($store->begin(idempotentRequest())->outcome)->toBe(IdempotencyOutcome::Unavailable);
 });
 
+it('fails closed on an edited cache entry, like the database store', function (mixed $edited): void {
+    $store = new CacheIdempotencyStore(cache()->store('array'), app(ResponseVault::class), app('log'));
+    $owner = $store->begin(idempotentRequest());
+    cache()->store('array')->put('sentinel:idem:digest-k', $edited, 3600);
+
+    $owned = new IdempotentRequest('digest-k', 'scope', 'fp', 3600, $owner->ownerToken);
+
+    // Never run the handler twice on a guess; the owner can no longer complete or release it.
+    expect($store->begin(idempotentRequest())->outcome)->toBe(IdempotencyOutcome::Unavailable)
+        ->and($store->complete($owned, new ResponseSnapshot(201, [], 'created', true)))->toBeFalse();
+
+    $store->release($owned);
+
+    expect(cache()->store('array')->get('sentinel:idem:digest-k'))->toBe($edited);
+})->with([
+    'garbled lease' => [['scope' => 'scope', 'fingerprint' => 'fp', 'owner_token' => 't', 'locked_until' => '2026-13-45 99:99:99', 'expires_at' => '2030-01-01 00:00:00.000000', 'created_at' => '2026-01-01 00:00:00.000000']],
+    'no expiry' => [['scope' => 'scope', 'fingerprint' => 'fp', 'owner_token' => 't', 'locked_until' => '2026-01-01 00:00:00.000000', 'created_at' => '2026-01-01 00:00:00.000000']],
+    'not a record' => ['completed'],
+]);
+
 it('counts expired keys and keeps the rest', function (): void {
     IdempotencyKey::factory()->count(2)->expired()->create();
     IdempotencyKey::factory()->completed()->create();
