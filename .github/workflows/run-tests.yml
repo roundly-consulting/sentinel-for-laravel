@@ -43,7 +43,12 @@ jobs:
         run: composer show -D
 
       - name: Execute tests
-        run: vendor/bin/pest --coverage --min=90
+        run: vendor/bin/pest --coverage --min=95 --coverage-clover=build/coverage.xml
+
+      # Security-critical namespaces (Actions, Canonical, Engine, Http/Signatures,
+      # Http/StructuredFields, Keys, Ledger) must be fully covered.
+      - name: Check critical coverage
+        run: php tests/Support/critical-coverage.php build/coverage.xml
 
   test-pgsql:
     runs-on: ubuntu-latest
