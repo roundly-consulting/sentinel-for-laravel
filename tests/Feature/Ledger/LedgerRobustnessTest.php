@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -70,6 +71,50 @@ it('gives up after repeated conflicts', function (): void {
         ->where('id', LedgerEntry::query()->min('id'))->update(['checkpoint_id' => Checkpoint::query()->max('id')]), always: true);
 
     expect(fn () => Sentinel::checkpoint())->toThrow(ConcurrentSealException::class, 'Another checkpoint run raced');
+})->skip(fn (): bool => DriverMatrix::driver() !== 'sqlite', 'interleaves on the one SQLite connection');
+
+/**
+ * A deadlock victim (MySQL picks one when two runs' gap locks cross) rolls back whole; the
+ * framework retries it `transaction_attempts` times, the builder keeps going after that.
+ */
+function deadlockAfter(string $sql, int $times): void
+{
+    $thrown = 0;
+
+    DB::listen(static function (QueryExecuted $query) use ($sql, $times, &$thrown): void {
+        if ($thrown < $times && str_contains($query->sql, $sql)) {
+            $thrown++;
+
+            throw new QueryException($query->connectionName, $query->sql, [], new PDOException('SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock; try restarting transaction'));
+        }
+    });
+}
+
+it('retries a checkpoint run chosen as a deadlock victim', function (): void {
+    invoice();
+    config()->set('sentinel.sealing.transaction_attempts', 2);
+    deadlockAfter('insert into "sentinel_checkpoints"', 5);
+
+    expect(Sentinel::checkpoint()?->seq)->toBe(1)
+        ->and(Checkpoint::query()->count())->toBe(1)
+        ->and(Sentinel::verifyLedger()->clean())->toBeTrue();
+})->skip(fn (): bool => DriverMatrix::driver() !== 'sqlite', 'interleaves on the one SQLite connection');
+
+it('gives up after repeated deadlocks and rethrows anything that is not a race', function (): void {
+    invoice();
+    config()->set('sentinel.sealing.transaction_attempts', 1);
+    deadlockAfter('insert into "sentinel_checkpoints"', PHP_INT_MAX);
+
+    expect(fn () => Sentinel::checkpoint())->toThrow(ConcurrentSealException::class, 'Another checkpoint run raced')
+        ->and(Checkpoint::query()->count())->toBe(0);
+
+    DB::listen(static function (QueryExecuted $query): void {
+        if (str_contains($query->sql, 'from "sentinel_ledger"')) {
+            throw new QueryException($query->connectionName, $query->sql, [], new PDOException('disk I/O error'));
+        }
+    });
+
+    expect(fn () => Sentinel::checkpoint())->toThrow(QueryException::class, 'disk I/O error');
 })->skip(fn (): bool => DriverMatrix::driver() !== 'sqlite', 'interleaves on the one SQLite connection');
 
 it('checkpoints entries too damaged to read, and reports them', function (): void {

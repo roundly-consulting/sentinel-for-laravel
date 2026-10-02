@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Sentinel\Ledger;
 
+use Illuminate\Database\DetectsConcurrencyErrors;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use RoundlyConsulting\Crypto\Codec\Base64Url;
 use RoundlyConsulting\Sentinel\Canonical\CheckpointMessage;
@@ -23,14 +25,17 @@ use RoundlyConsulting\Sentinel\Support\Tables;
  * claim the entries with a conditional UPDATE. Lock order: checkpoint tail → entries — never
  * a model or seal row, so it cannot deadlock against sealing.
  *
- * Races between two runs end in the unique `seq` index or a short claim (fewer rows updated
- * than selected); the loser rolls back and retries from a fresh tail. Late-committing
+ * Races between two runs end in the unique `seq` index, a short claim (fewer rows updated
+ * than selected) or a deadlock / serialization failure (InnoDB gap locks under REPEATABLE
+ * READ); the loser rolls back and retries from a fresh tail. Late-committing
  * entries (an id lower than one already checkpointed) simply join a later checkpoint.
  *
  * @internal
  */
 final readonly class CheckpointBuilder
 {
+    use DetectsConcurrencyErrors;
+
     private const int ATTEMPTS = 25;
 
     public function __construct(
@@ -49,7 +54,13 @@ final readonly class CheckpointBuilder
         for ($attempt = 1; ; $attempt++) {
             try {
                 return $database->transaction(fn (): ?Checkpoint => $this->batch($connection, $batchSize), Settings::transactionAttempts());
-            } catch (UniqueConstraintViolationException|ConcurrentSealException $exception) {
+            } catch (UniqueConstraintViolationException|ConcurrentSealException|QueryException $exception) {
+                // A deadlock victim was rolled back whole and another run committed; anything
+                // else that is not a race is a real failure.
+                if (! $exception instanceof ConcurrentSealException && ! $exception instanceof UniqueConstraintViolationException && ! $this->causedByConcurrencyError($exception)) {
+                    throw $exception;
+                }
+
                 if ($attempt >= self::ATTEMPTS) {
                     throw $exception instanceof ConcurrentSealException ? $exception : ConcurrentSealException::checkpointConflict(Tables::connectionName($connection));
                 }
