@@ -8,7 +8,6 @@ use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
-use ReflectionMethod;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgementResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
@@ -16,6 +15,7 @@ use RoundlyConsulting\Sentinel\Enums\PersistOperation;
 use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Models\Seal;
 use RoundlyConsulting\Sentinel\SentinelManager;
+use RoundlyConsulting\Sentinel\Support\SealingScope;
 
 /**
  * Seals on an Eloquent model (implement `Sealable` alongside). Every Eloquent write path —
@@ -34,30 +34,29 @@ use RoundlyConsulting\Sentinel\SentinelManager;
 trait HasSeals
 {
     /**
-     * A model that overrides save() or delete() must route the write through
-     * `persistSealed()`, or its writes would skip sealing. Every retrieved model passes the
-     * manager's verify-on-retrieve hook (a no-op unless a seal declares verifyOnRetrieve()).
+     * A `saving` / `deleting` guard: every Eloquent save and delete of the model must run
+     * inside `persistSealed()` — HasSeals' own save() and delete() do, and so does an override
+     * that calls `persistSealed()` or (in a subclass) `parent::save()`. An override that skips
+     * it is refused before anything is written. Every retrieved model passes the manager's
+     * verify-on-retrieve hook (a no-op unless a seal declares verifyOnRetrieve()).
      */
     public static function bootHasSeals(): void
     {
+        static::saving(static function (Model $model): void {
+            if (! app(SealingScope::class)->isWriting($model)) {
+                throw SealingMisconfiguredException::saveOverridden($model::class, 'save');
+            }
+        });
+
+        static::deleting(static function (Model $model): void {
+            if (! app(SealingScope::class)->isWriting($model)) {
+                throw SealingMisconfiguredException::saveOverridden($model::class, 'delete');
+            }
+        });
+
         static::retrieved(static function (Model $model): void {
             app(SentinelManager::class)->retrieved($model);
         });
-
-        foreach (['save', 'delete'] as $method) {
-            $declared = new ReflectionMethod(static::class, $method);
-
-            // __TRAIT__, not self::class: inside a trait, self is the class using it.
-            if ($declared->getFileName() === (new ReflectionMethod(__TRAIT__, $method))->getFileName()) {
-                continue;
-            }
-
-            $lines = array_slice(file((string) $declared->getFileName()) ?: [], (int) $declared->getStartLine() - 1, (int) $declared->getEndLine() - (int) $declared->getStartLine() + 1);
-
-            if (! str_contains(implode('', $lines), 'persistSealed(')) {
-                throw SealingMisconfiguredException::saveOverridden(static::class, $method);
-            }
-        }
     }
 
     /**
@@ -65,23 +64,24 @@ trait HasSeals
      */
     public function save(array $options = []): bool
     {
-        return app(SentinelManager::class)->persist($this, fn (): bool => parent::save($options), PersistOperation::Save) === true;
+        return $this->persistSealed(fn (): bool => parent::save($options)) === true;
     }
 
     public function delete(): ?bool
     {
-        $deleted = app(SentinelManager::class)->persist($this, fn (): ?bool => parent::delete(), PersistOperation::Delete);
+        $deleted = $this->persistSealed(fn (): ?bool => parent::delete(), PersistOperation::Delete);
 
         return is_bool($deleted) ? $deleted : null;
     }
 
     /**
-     * For a host that must override save() / delete(): wrap the parent call so it stays
-     * sealed — `return $this->persistSealed(fn () => parent::save($options));`.
+     * The sealed write path. A host that must override save() / delete() in the class using
+     * this trait wraps the parent call — `return $this->persistSealed(fn () => parent::save($options));`
+     * — while a subclass simply calls `parent::save($options)`.
      */
     public function persistSealed(Closure $write, PersistOperation $operation = PersistOperation::Save): mixed
     {
-        return app(SentinelManager::class)->persist($this, $write, $operation);
+        return app(SealingScope::class)->writing($this, fn (): mixed => app(SentinelManager::class)->persist($this, $write, $operation));
     }
 
     /**
@@ -163,8 +163,7 @@ trait HasSeals
      */
     protected function incrementOrDecrement($column, $amount, $extra, $method)
     {
-        return app(SentinelManager::class)->persist(
-            $this,
+        return $this->persistSealed(
             fn () => parent::incrementOrDecrement($column, $amount, $extra, $method),
             PersistOperation::Increment,
         );
@@ -179,8 +178,7 @@ trait HasSeals
      */
     protected function incrementOrDecrementEach(array $columns, array $extra, string $method)
     {
-        return app(SentinelManager::class)->persist(
-            $this,
+        return $this->persistSealed(
             fn () => parent::incrementOrDecrementEach($columns, $extra, $method),
             PersistOperation::Increment,
         );

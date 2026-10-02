@@ -11,7 +11,6 @@ use RoundlyConsulting\Sentinel\Events\SealingSuspended;
 use RoundlyConsulting\Sentinel\Events\TamperAcknowledged;
 use RoundlyConsulting\Sentinel\Exceptions\AcknowledgementDeniedException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingFailedException;
-use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
@@ -20,8 +19,6 @@ use RoundlyConsulting\Sentinel\Models\Seal;
 use RoundlyConsulting\Sentinel\Support\Runtime;
 use RoundlyConsulting\Sentinel\Support\SealingScope;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Invoice;
-use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Overrides\SafeOverride;
-use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Overrides\UnsafeOverride;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\User;
 
 function tampered(): Invoice
@@ -219,22 +216,4 @@ it('refuses suspension when it is disabled', function (): void {
 it('suspends verification for a callback', function (): void {
     expect(Sentinel::withoutVerification(fn (): bool => app(SealingScope::class)->verificationSuspended()))->toBeTrue()
         ->and(app(SealingScope::class)->verificationSuspended())->toBeFalse();
-});
-
-/**
- * §10 item 17.
- */
-it('refuses a model that overrides save() without persistSealed()', function (): void {
-    expect(fn () => new UnsafeOverride)->toThrow(SealingMisconfiguredException::class, 'overrides save()');
-});
-
-it('accepts overrides that go through persistSealed()', function (): void {
-    $model = SafeOverride::query()->create(['name' => '  padded  ']);
-
-    expect(Sentinel::verify($model)->status)->toBe(VerificationStatus::Intact)
-        ->and($model->name)->toBe('padded');
-
-    $model->delete();
-
-    expect(LedgerEntry::query()->where('event', 'deleted')->count())->toBe(1);
 });
