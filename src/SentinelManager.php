@@ -102,10 +102,12 @@ use RoundlyConsulting\Sentinel\Events\SealingSuspended;
 use RoundlyConsulting\Sentinel\Exceptions\CorruptRecordException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
+use RoundlyConsulting\Sentinel\Http\Middleware\VerifyHttpSignature;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Ledger\AnchorManager;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Support\ModelDiscovery;
+use RoundlyConsulting\Sentinel\Support\MorphedModel;
 use RoundlyConsulting\Sentinel\Support\Reasons;
 use RoundlyConsulting\Sentinel\Support\Runtime;
 use RoundlyConsulting\Sentinel\Support\SealingScope;
@@ -532,6 +534,28 @@ class SentinelManager
     public function verifyRequestSignature(Request $request, ?string $profile = null): VerifiedSignature
     {
         return $this->container->make(VerifyRequestSignatureAction::class)->execute($request, $profile);
+    }
+
+    /**
+     * The signature `sentinel.signed` verified on this request, or null.
+     */
+    public function verifiedSignature(Request $request): ?VerifiedSignature
+    {
+        $signature = $request->attributes->get(VerifyHttpSignature::ATTRIBUTE);
+
+        return $signature instanceof VerifiedSignature ? $signature : null;
+    }
+
+    /**
+     * The model that owns the key a request was signed with (e.g. the partner) — database
+     * keys imported or generated with an owner; null for config keys, unsigned requests and
+     * owners that no longer exist.
+     */
+    public function signatureOwner(Request|VerifiedSignature $from): ?Model
+    {
+        $signature = $from instanceof Request ? $this->verifiedSignature($from) : $from;
+
+        return $signature === null ? null : MorphedModel::find($signature->ownerType, $signature->ownerId);
     }
 
     /**

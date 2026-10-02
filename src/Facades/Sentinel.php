@@ -112,6 +112,8 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static RequestInterface signRequest(RequestInterface $request, string $keyId, SigningOptions|null $options = null)
  * @method static VerifiedSignature verifyRequestSignature(Request $request, string|null $profile = null)
  * @method static VerifiedSignature verifyResponseSignature(ResponseInterface|ClientResponse $response, string|null $profile = null)
+ * @method static VerifiedSignature|null verifiedSignature(Request $request)
+ * @method static Model|null signatureOwner(Request|VerifiedSignature $from)
  * @method static SentinelFake fakeStatus(Model $model, VerificationStatus $status, string|null $seal = null, list<string>|null $changed = null)
  * @method static SentinelFake fakeVerifiedSignature(VerifiedSignature|null $signature = null)
  * @method static SentinelFake rejectSignatures(SignatureRejection $reason)

@@ -19,13 +19,17 @@ use Symfony\Component\HttpFoundation\Response;
 
 /**
  * `sentinel.signed[:profile]` — require a valid RFC 9421 HTTP message signature. The
- * verified signature is available as `$request->attributes->get('sentinel.signature')`. A
- * rejection answers 401 problem details (a generic code unless `app.debug`) with an
- * `Accept-Signature` advertisement of what this request needed. Place it before `auth` when
- * signatures authenticate API clients.
+ * verified signature is available as `Sentinel::signatures()->current($request)` (the
+ * `sentinel.signature` request attribute), its key's owner as
+ * `Sentinel::signatures()->owner($request)`. A rejection answers 401 problem details (a
+ * generic code unless `app.debug`) with an `Accept-Signature` advertisement of what this
+ * request needed. Place it before `auth` when signatures authenticate API clients.
  */
 final readonly class VerifyHttpSignature
 {
+    /** The request attribute holding the VerifiedSignature. */
+    public const string ATTRIBUTE = 'sentinel.signature';
+
     public function __construct(private Container $container) {}
 
     public function handle(Request $request, Closure $next, ?string $profile = null): Response
@@ -36,7 +40,7 @@ final readonly class VerifyHttpSignature
             throw $exception->advertising(Settings::advertisesSignatures() ? self::advertisement($request, $profile) : null);
         }
 
-        $request->attributes->set('sentinel.signature', $signature);
+        $request->attributes->set(self::ATTRIBUTE, $signature);
 
         $response = $next($request);
 

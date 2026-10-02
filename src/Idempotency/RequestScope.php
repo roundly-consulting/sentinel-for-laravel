@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
 use RoundlyConsulting\Sentinel\Contracts\IdempotencyScopeResolver;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerifiedSignature;
+use RoundlyConsulting\Sentinel\Http\Middleware\VerifyHttpSignature;
 
 /**
  * The default idempotency scope: `user:<guard>:<id>` for an authenticated user, else
@@ -31,7 +32,7 @@ final readonly class RequestScope implements IdempotencyScopeResolver
             return 'user:'.$guard.':'.(string) $user->getAuthIdentifier();
         }
 
-        $signature = $request->attributes->get('sentinel.signature');
+        $signature = $request->attributes->get(VerifyHttpSignature::ATTRIBUTE);
 
         if ($signature instanceof VerifiedSignature) {
             return 'sig:'.$signature->ring.':'.$signature->keyId;

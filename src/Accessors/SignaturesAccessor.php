@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Sentinel\Accessors;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Client\Response as ClientResponse;
 use Illuminate\Http\Request;
 use Psr\Http\Message\RequestInterface;
@@ -38,6 +39,22 @@ final readonly class SignaturesAccessor
     public function verifyResponse(ResponseInterface|ClientResponse $response, ?string $profile = null): VerifiedSignature
     {
         return $this->manager->verifyResponseSignature($response, $profile);
+    }
+
+    /**
+     * The signature `sentinel.signed` verified on this request, or null.
+     */
+    public function current(Request $request): ?VerifiedSignature
+    {
+        return $this->manager->verifiedSignature($request);
+    }
+
+    /**
+     * The model owning the signing key (e.g. the partner), or null.
+     */
+    public function owner(Request|VerifiedSignature $from): ?Model
+    {
+        return $this->manager->signatureOwner($from);
     }
 
     /**
