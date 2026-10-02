@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Artisan;
 use RoundlyConsulting\Sentinel\SentinelManager;
+use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Invoice;
 use RoundlyConsulting\Sentinel\Tests\TestCase;
 
 /**
@@ -20,7 +21,8 @@ it('renders its about section without leaking key material', function (): void {
         [substr(TestCase::ROOT_KEY, 7), TestCase::ROOT_KEY, base64_decode(substr(TestCase::ROOT_KEY, 7)), base64_encode($edSecret)],
         mustRender: [
             'Default ring / driver', 'default (config)', 'Rings', 'default, http', 'Auto-seal', 'ON',
-            'Tampered writes', 'refuse', 'Ledger', 'Manager', SentinelManager::class,
+            'Tampered writes', 'refuse', 'Ledger', 'Anchors', 'none (whole-database rollback undetectable)',
+            'Registered models', 'Manager', SentinelManager::class,
         ],
     );
 });
@@ -30,9 +32,13 @@ it('reports flags the way the environment means them', function (): void {
     config()->set('sentinel.ledger.enabled', 'no');
     config()->set('sentinel.sealing.on_tampered_write', 'reseal');
 
+    config()->set('sentinel.ledger.anchors', 'cache,log');
+    config()->set('sentinel.models', [Invoice::class]);
+
     Artisan::call('about', ['--only' => 'sentinel']);
 
-    expect(Artisan::output())->toMatch('/Auto-seal\W+OFF/')->toMatch('/Ledger\W+OFF/')->toMatch('/Tampered writes\W+reseal/');
+    expect(Artisan::output())->toMatch('/Auto-seal\W+OFF/')->toMatch('/Ledger\W+OFF/')->toMatch('/Tampered writes\W+reseal/')
+        ->toMatch('/Anchors\W+cache, log/')->toMatch('/Registered models\W+1/');
 });
 
 it('reports invalid configuration instead of failing about', function (): void {

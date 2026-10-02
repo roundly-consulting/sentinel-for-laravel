@@ -107,6 +107,8 @@ final readonly class Sealer
         ];
 
         $this->write($model, $seal, $sealRow, $rowVersion, $attributes);
+        // An eager-loaded copy of the seal rows is stale now.
+        $model->unsetRelation('sentinelSeals');
 
         $this->events->dispatch(new ModelSealed(
             $model->getMorphClass(), $model->getKey(), $seal->name, $version, $key->keyId, $event, $actor?->getMorphClass(), $actor?->getKey(),
@@ -151,6 +153,7 @@ final readonly class Sealer
 
         if ($sealRow !== null) {
             Tables::seals($model, $seal->name)->whereKey($sealRow->getKey())->delete();
+            $model->unsetRelation('sentinelSeals');
         }
 
         $this->events->dispatch(new SealRemoved($model->getMorphClass(), $model->getKey(), $seal->name, $event, $previousStatus));

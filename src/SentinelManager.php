@@ -9,30 +9,52 @@ use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Model;
 use RoundlyConsulting\Sentinel\Accessors\KeysAccessor;
+use RoundlyConsulting\Sentinel\Accessors\LedgerAccessor;
 use RoundlyConsulting\Sentinel\Actions\Keys\GenerateKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\RetireKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\RevokeKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\RotateKeyAction;
+use RoundlyConsulting\Sentinel\Actions\Ledger\CreateCheckpointAction;
+use RoundlyConsulting\Sentinel\Actions\Ledger\VerifyLedgerAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\AcknowledgeTamperingAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\PersistSealedModelAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\ReadLedgerHistoryAction;
+use RoundlyConsulting\Sentinel\Actions\Seals\ResealModelsAction;
+use RoundlyConsulting\Sentinel\Actions\Seals\ResealWhereAction;
+use RoundlyConsulting\Sentinel\Actions\Seals\ScanSealsAction;
+use RoundlyConsulting\Sentinel\Actions\Seals\SealMissingAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\SealModelAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\UnsealModelAction;
+use RoundlyConsulting\Sentinel\Actions\Seals\UpdateAndResealAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\VerifyModelAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\VerifyModelsAction;
+use RoundlyConsulting\Sentinel\Actions\Seals\VerifyRetrievedModelAction;
+use RoundlyConsulting\Sentinel\Casts\UtcDateTime;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgementResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgeRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\BaselineOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointRecord;
+use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerRecord;
+use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerReport;
+use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerVerifyOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ResealOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ResealReport;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ResealWhereRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RevokeKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotationResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ScanOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ScanReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\UnsealRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\UpdateAndResealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerifyManyRequest;
@@ -40,10 +62,14 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\VerifyRequest;
 use RoundlyConsulting\Sentinel\Definition\DefinitionRegistry;
 use RoundlyConsulting\Sentinel\Enums\PersistOperation;
 use RoundlyConsulting\Sentinel\Enums\SealEvent;
+use RoundlyConsulting\Sentinel\Enums\VerificationContext;
 use RoundlyConsulting\Sentinel\Events\SealingSuspended;
+use RoundlyConsulting\Sentinel\Exceptions\CorruptRecordException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
+use RoundlyConsulting\Sentinel\Ledger\AnchorManager;
+use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Support\Reasons;
 use RoundlyConsulting\Sentinel\Support\Runtime;
 use RoundlyConsulting\Sentinel\Support\SealingScope;
@@ -85,7 +111,7 @@ class SentinelManager
      */
     public function model(string $class): ModelSeals
     {
-        return new ModelSeals($class, $this->container->make(DefinitionRegistry::class)->for($class));
+        return new ModelSeals($this, $class, $this->container->make(DefinitionRegistry::class)->for($class));
     }
 
     /**
@@ -125,7 +151,30 @@ class SentinelManager
      */
     public function verifyMany(iterable $models, ?string $seal = null): VerificationReport
     {
-        return $this->container->make(VerifyModelsAction::class)->execute(new VerifyManyRequest($models, $seal));
+        return $this->verifyManyIn(VerificationContext::Api, $models, $seal);
+    }
+
+    /**
+     * `verify()` from another entry point (middleware, rule, collection macro), recorded with
+     * that context.
+     *
+     * @internal
+     */
+    public function verifyIn(VerificationContext $context, Model $model, ?string $seal = null): VerificationResult
+    {
+        return $this->container->make(VerifyModelAction::class)->execute(new VerifyRequest($model, $this->sealName($model, $seal), true, $context));
+    }
+
+    /**
+     * `verifyMany()` from another entry point.
+     *
+     * @internal
+     *
+     * @param  iterable<Model>  $models
+     */
+    public function verifyManyIn(VerificationContext $context, iterable $models, ?string $seal = null): VerificationReport
+    {
+        return $this->container->make(VerifyModelsAction::class)->execute(new VerifyManyRequest($models, $seal, $context));
     }
 
     /**
@@ -150,6 +199,46 @@ class SentinelManager
     public function unseal(Model $model, string $reason, ?Model $actor = null, ?string $seal = null): bool
     {
         return $this->container->make(UnsealModelAction::class)->execute(new UnsealRequest($model, $this->sealName($model, $seal), $reason, $actor));
+    }
+
+    /**
+     * Verify every row of the given models in chunks (`sentinel:verify`).
+     */
+    public function scan(ScanOptions $options): ScanReport
+    {
+        return $this->container->make(ScanSealsAction::class)->execute($options);
+    }
+
+    /**
+     * Re-seal intact/outdated rows with the current key; never launders.
+     */
+    public function reseal(ResealOptions $options): ResealReport
+    {
+        return $this->container->make(ResealModelsAction::class)->execute($options);
+    }
+
+    /**
+     * Acknowledge every row a query selects.
+     */
+    public function resealWhere(ResealWhereRequest $request): ResealReport
+    {
+        return $this->container->make(ResealWhereAction::class)->execute($request);
+    }
+
+    /**
+     * A deliberate mass update: verify all, update, re-seal with the reason.
+     */
+    public function updateAndReseal(UpdateAndResealRequest $request): ResealReport
+    {
+        return $this->container->make(UpdateAndResealAction::class)->execute($request);
+    }
+
+    /**
+     * Seal rows that were never sealed (adoption).
+     */
+    public function sealMissing(BaselineOptions $options): ResealReport
+    {
+        return $this->container->make(SealMissingAction::class)->execute($options);
     }
 
     /**
@@ -226,6 +315,83 @@ class SentinelManager
     public function persist(Model $model, Closure $write, PersistOperation $operation): mixed
     {
         return $this->container->make(PersistSealedModelAction::class)->execute($model, $write, $operation);
+    }
+
+    /**
+     * The `retrieved` hook of `HasSeals` (verify-on-retrieve).
+     *
+     * @internal
+     */
+    public function retrieved(Model $model): void
+    {
+        $this->container->make(VerifyRetrievedModelAction::class)->execute($model);
+    }
+
+    // ── ledger ────────────────────────────────────────────────────────────────
+
+    public function ledger(): LedgerAccessor
+    {
+        return new LedgerAccessor($this);
+    }
+
+    /**
+     * Fold the next batch of pending ledger entries into a checkpoint and anchor it.
+     */
+    public function checkpoint(?CheckpointOptions $options = null): ?CheckpointResult
+    {
+        $options ??= new CheckpointOptions;
+
+        return $this->container->make(CreateCheckpointAction::class)->execute($options);
+    }
+
+    /**
+     * Verify the ledger: checkpoints, anchors, pending entries, entity heads.
+     */
+    public function verifyLedger(?LedgerVerifyOptions $options = null): LedgerReport
+    {
+        $options ??= new LedgerVerifyOptions;
+
+        return $this->container->make(VerifyLedgerAction::class)->execute($options);
+    }
+
+    /**
+     * The newest checkpoint of a connection (unverified), or null.
+     */
+    public function ledgerHead(?string $connection = null): ?CheckpointRecord
+    {
+        $head = Tables::checkpoints($connection)->orderByDesc('seq')->first();
+
+        if ($head === null) {
+            return null;
+        }
+
+        try {
+            $createdAt = (new UtcDateTime)->get($head, 'created_at', $head->getRawOriginal('created_at'), []);
+        } catch (CorruptRecordException) {
+            $createdAt = null;
+        }
+
+        return new CheckpointRecord((int) $head->getRawOriginal('seq'), (string) $head->getRawOriginal('root'), $createdAt ?? Clock::now()->setTimestamp(0), (string) $head->getRawOriginal('key_id'), (int) $head->getRawOriginal('entries'));
+    }
+
+    /**
+     * The configured anchor driver names.
+     *
+     * @return list<string>
+     */
+    public function anchors(): array
+    {
+        return $this->container->make(AnchorManager::class)->names();
+    }
+
+    /**
+     * Register a custom anchor driver: `fn (Container $app, array $config): Anchor`.
+     */
+    public function extendAnchor(string $driver, Closure $factory): static
+    {
+        $this->container->make(AnchorManager::class)->extend($driver, $factory);
+
+        return $this;
     }
 
     // ── keys ──────────────────────────────────────────────────────────────────

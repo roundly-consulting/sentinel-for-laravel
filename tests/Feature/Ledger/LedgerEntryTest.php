@@ -1,0 +1,55 @@
+<?php
+
+declare(strict_types=1);
+
+use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
+use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerVerifyOptions;
+use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
+use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Models\Key;
+use RoundlyConsulting\Sentinel\Models\LedgerEntry;
+use RoundlyConsulting\Sentinel\Tests\TestCase;
+
+/**
+ * §10 item 36: every audit field of a ledger entry is covered by the entry's own MAC.
+ */
+it('covers every audit column with the entry MAC', function (string $column, mixed $value): void {
+    $invoice = invoice();
+    Sentinel::acknowledge($invoice, 'nothing changed', seal: 'identity');
+    $entry = LedgerEntry::query()->where('sealable_id', $invoice->id)->where('seal', 'financial')->firstOrFail();
+
+    LedgerEntry::query()->whereKey($entry->id)->toBase()->update([$column => $value]);
+
+    $kinds = array_map(static fn (LedgerFinding $finding): string => $finding->kind->value, Sentinel::verifyLedger(new LedgerVerifyOptions(entities: false))->findings);
+
+    expect($kinds)->toContain('entry_invalid');
+})->with([
+    ['sealable_type', 'other'],
+    ['sealable_id', 999],
+    ['seal', 'identity2'],
+    ['event', 'resealed'],
+    ['version', 7],
+    ['key_id', 'other'],
+    ['algorithm', 'hmac-sha512'],
+    ['seal_mac', 'AAAA'],
+    ['previous_digest', 'prev'],
+    ['changed', '["a:amount"]'],
+    ['previous_status', 'tampered'],
+    ['actor_type', 'users'],
+    ['actor_id', 5],
+    ['reason', 'edited later'],
+    ['entry_mac', 'AAAA'],
+    ['occurred_at', '2020-01-01 00:00:00.000000'],
+]);
+
+it('only trusts an entry vouched for by a ring its seal accepts', function (): void {
+    // The same root secret, registered as a partner key in the http ring.
+    Key::factory()->ring('http')->create(['kid' => TestCase::ROOT_KEY_ID]);
+    $invoice = invoice();
+    LedgerEntry::query()->where('sealable_id', $invoice->id)->where('seal', 'financial')->toBase()->update(['ring' => 'http']);
+
+    $result = Sentinel::verify($invoice);
+
+    expect($result->status)->toBe(VerificationStatus::Tampered)
+        ->and($result->reason)->toBe('ledger_entry');
+});

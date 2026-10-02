@@ -13,6 +13,7 @@ use RoundlyConsulting\Sentinel\Definition\CompiledSeal;
 use RoundlyConsulting\Sentinel\Definition\ManifestField;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Exceptions\CanonicalizationException;
+use RoundlyConsulting\Sentinel\Support\SealingScope;
 use RoundlyConsulting\Sentinel\Support\Settings;
 use Stringable;
 use Throwable;
@@ -25,7 +26,10 @@ use Throwable;
  */
 final readonly class DocumentBuilder
 {
-    public function __construct(private Normalizer $normalizer) {}
+    public function __construct(
+        private Normalizer $normalizer,
+        private SealingScope $scope,
+    ) {}
 
     /**
      * @param  list<ManifestField>  $fields
@@ -49,15 +53,20 @@ final readonly class DocumentBuilder
         $subject = $seal->needsSubject() ? $this->subject($model, $row) : $model;
 
         foreach ($fields as $field) {
-            $raw = $field->resolver !== null
-                ? ($field->resolver)($subject)
+            $resolver = $field->resolver;
+
+            // Related sealed models a resolver loads are covered by this seal: their own
+            // verify-on-retrieve must not fire (or recurse) from inside sealing/verification.
+            $raw = $resolver !== null
+                ? $this->scope->withoutVerification(static fn (): mixed => $resolver($subject))
                 : $this->attribute($model, $field, $row);
 
             $values[] = $this->normalizer->normalize($field->name, $field->type, $raw);
         }
 
         return new SealMessage(
-            Settings::context(), $model->getMorphClass(), $model->getTable(), (string) $model->getKey(), $this->scope($seal, $subject),
+            Settings::context(), $model->getMorphClass(), $model->getTable(), (string) $model->getKey(),
+            $this->scope->withoutVerification(fn (): string => $this->scope($seal, $subject)),
             $seal->name, $version, $previous, $ring, $keyId, $algorithm, $at, $values,
         );
     }

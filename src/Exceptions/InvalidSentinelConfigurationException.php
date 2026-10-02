@@ -34,4 +34,16 @@ final class InvalidSentinelConfigurationException extends SentinelException
     {
         return self::invalidValue($key, "entry #{$position} must be \"kid|algorithm|base64:material\"");
     }
+
+    public static function unknownAnchor(string $anchor): self
+    {
+        $shown = preg_match('/^[A-Za-z0-9._-]{1,64}$/D', $anchor) === 1 ? $anchor : '(invalid)';
+
+        return self::invalidValue('ledger.anchors', "names an unknown anchor driver [{$shown}]; use cache, filesystem, log or one registered with Sentinel::extendAnchor()");
+    }
+
+    public static function invalidOption(string $option, string $expectation): self
+    {
+        return new self("The option [--{$option}] {$expectation}.");
+    }
 }

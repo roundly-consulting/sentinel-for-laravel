@@ -8,8 +8,9 @@ use Illuminate\Console\Command;
 use RoundlyConsulting\Sentinel\Commands\Concerns\ReadsOptions;
 use RoundlyConsulting\Sentinel\Exceptions\SentinelException;
 use RoundlyConsulting\Sentinel\Keys\EnvSnippet;
-use RoundlyConsulting\Sentinel\Models\Seal;
 use RoundlyConsulting\Sentinel\SentinelManager;
+use RoundlyConsulting\Sentinel\Support\Settings;
+use RoundlyConsulting\Sentinel\Support\Tables;
 
 /**
  * Retire a database key (its verification period ends now).
@@ -45,8 +46,13 @@ final class KeyRetireCommand extends Command
                 return self::SUCCESS;
             }
 
-            // Seals still made with this key would all report retired_key: re-seal them first.
-            $inUse = Seal::query()->where('ring', $ring)->where('key_id', $keyId)->count();
+            // Seals still made with this key would all report retired_key: re-seal them first
+            // (on every connection that holds seals).
+            $inUse = 0;
+
+            foreach (Settings::ledgerConnections() as $connection) {
+                $inUse += Tables::sealsOn($connection)->where('ring', $ring)->where('key_id', $keyId)->count();
+            }
 
             if ($inUse > 0 && ! $this->option('force')) {
                 $this->components->error("{$inUse} seal(s) still use key [{$ring}:{$keyId}]; re-seal them first (sentinel:reseal --from-key={$keyId}) or pass --force.");

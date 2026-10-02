@@ -38,6 +38,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Models
+    |--------------------------------------------------------------------------
+    |
+    | The sealable models `php artisan sentinel:verify` scans when it is given
+    | none (e.g. App\Models\Invoice::class).
+    |
+    */
+
+    'models' => [],
+
+    /*
+    |--------------------------------------------------------------------------
     | Database
     |--------------------------------------------------------------------------
     |
@@ -136,6 +148,10 @@ return [
     | outdated_is_intact — a seal whose definition changed but whose data is
     |                intact counts as intact (re-seal with sentinel:reseal)
     | log_channel  — where findings are logged (null = the default channel)
+    | retrieve_reaction — what seals declared verifyOnRetrieve() do with a
+    |                model that is not intact: throw, event or log
+    | retrieve_checks_ledger — also run the ledger check on retrieve (one more
+    |                query per retrieved model)
     |
     */
 
@@ -143,6 +159,8 @@ return [
         'check_ledger' => env('SENTINEL_VERIFY_LEDGER', true),
         'outdated_is_intact' => env('SENTINEL_OUTDATED_IS_INTACT', true),
         'log_channel' => env('SENTINEL_LOG_CHANNEL'),
+        'retrieve_reaction' => env('SENTINEL_RETRIEVE_REACTION', 'throw'),
+        'retrieve_checks_ledger' => env('SENTINEL_RETRIEVE_CHECKS_LEDGER', false),
     ],
 
     /*
@@ -172,6 +190,65 @@ return [
 
     'ledger' => [
         'enabled' => env('SENTINEL_LEDGER', true),
+
+        // The ring whose current key signs checkpoints.
+        'ring' => env('SENTINEL_LEDGER_RING', 'default'),
+
+        // Connections holding seals and the ledger (null = the default one). Hosts
+        // with sealables on several connections run migrations 0002-0004 on each.
+        'connections' => [null],
+
+        // Ledger entries folded into one checkpoint transaction.
+        'batch_size' => 1000,
+
+        // Entries older than this and not yet checkpointed are reported as a
+        // backlog: the scheduled `sentinel:checkpoint` is not running.
+        'backlog_warning_seconds' => 600,
+
+        /*
+        | External anchors receive every new checkpoint, so a rollback of the
+        | WHOLE database (ledger and checkpoints included) stays detectable.
+        | Comma-separated: cache, filesystem, log, or one registered with
+        | Sentinel::extendAnchor(). None by default — without one, a restore of
+        | the entire database to an older snapshot is undetectable.
+        */
+        'anchors' => env('SENTINEL_ANCHORS', ''),
+
+        'anchor_drivers' => [
+            // Should NOT be the application database (a Redis elsewhere).
+            'cache' => [
+                'store' => env('SENTINEL_ANCHOR_CACHE_STORE'),
+                'key' => 'sentinel:ledger:anchor',
+            ],
+
+            // Object storage with object lock / versioning is ideal.
+            'filesystem' => [
+                'disk' => env('SENTINEL_ANCHOR_DISK', 'local'),
+                'path' => env('SENTINEL_ANCHOR_PATH', 'sentinel/anchors'),
+            ],
+
+            // Write-only: compare with `sentinel:verify --ledger --anchor=<json>`.
+            'log' => [
+                'channel' => env('SENTINEL_ANCHOR_LOG_CHANNEL'),
+            ],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Middleware
+    |--------------------------------------------------------------------------
+    |
+    | `sentinel.verified` verifies the route's sealed models. On a model that is
+    | not intact it aborts with `verified_status` and a generic message (never
+    | the status or reason), or — with `verified_reaction` = report — only
+    | reports the finding and lets the request continue.
+    |
+    */
+
+    'middleware' => [
+        'verified_status' => 409,
+        'verified_reaction' => env('SENTINEL_VERIFIED_REACTION', 'abort'),
     ],
 
 ];

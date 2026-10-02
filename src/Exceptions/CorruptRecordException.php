@@ -13,4 +13,9 @@ final class CorruptRecordException extends SentinelException
     {
         return new self("The stored value of [{$column}] is not a UTC datetime.");
     }
+
+    public static function anchor(string $problem): self
+    {
+        return new self("The anchor payload is not a valid sentinel.anchor/1 document: {$problem}.");
+    }
 }

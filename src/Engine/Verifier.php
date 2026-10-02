@@ -6,6 +6,7 @@ namespace RoundlyConsulting\Sentinel\Engine;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Log\LogManager;
 use JsonException;
@@ -59,28 +60,44 @@ final readonly class Verifier
         private LogManager $log,
     ) {}
 
-    public function verify(Model $model, CompiledSeal $seal, VerificationContext $context, bool $checkLedger, bool $lock = false): VerificationResult
+    /**
+     * Contexts whose models were just loaded from the database: their raw original attributes
+     * (and eager-loaded seal rows) are exactly what the database held, so a second read is
+     * not needed.
+     */
+    private const array FRESH_CONTEXTS = [
+        VerificationContext::Retrieve,
+        VerificationContext::Middleware,
+        VerificationContext::Command,
+        VerificationContext::Rule,
+        VerificationContext::Collection,
+    ];
+
+    /**
+     * @param  bool  $report  announce a failure (`TamperDetected` + a warning log); the
+     *                        retrieve hook reports per its configured reaction instead
+     */
+    public function verify(Model $model, CompiledSeal $seal, VerificationContext $context, bool $checkLedger, bool $lock = false, bool $report = true): VerificationResult
     {
         $result = $this->evaluate($model, $seal, $context, $checkLedger && Settings::ledgerEnabled(), $lock);
 
-        if ($result->failed()) {
+        if ($report && $result->failed()) {
             $this->report($result);
         }
 
         return $result;
     }
 
-    /**
-     * Announce a finding: `TamperDetected` (synchronously) and a warning log line — names and
-     * statuses only, never values.
-     */
-    public function report(VerificationResult $result): void
+    public function dispatchTamperDetected(VerificationResult $result): void
     {
         $this->events->dispatch(new TamperDetected(
             $result->sealableType, $result->sealableId, $result->seal, $result->status, $result->reason,
             $result->changedAttributes, $result->context, $result->keyId,
         ));
+    }
 
+    public function logFinding(VerificationResult $result): void
+    {
         $this->log->channel(Settings::logChannel())->warning('Sentinel: a sealed model is not intact.', [
             'sealable_type' => $result->sealableType,
             'sealable_id' => $result->sealableId,
@@ -92,10 +109,19 @@ final readonly class Verifier
         ]);
     }
 
+    /**
+     * Announce a finding: `TamperDetected` (synchronously) and a warning log line — names and
+     * statuses only, never values.
+     */
+    public function report(VerificationResult $result): void
+    {
+        $this->dispatchTamperDetected($result);
+        $this->logFinding($result);
+    }
+
     private function evaluate(Model $model, CompiledSeal $seal, VerificationContext $context, bool $checkLedger, bool $lock): VerificationResult
     {
-        $query = Tables::seals($model, $seal->name);
-        $row = ($lock ? $query->lockForUpdate() : $query)->first();
+        $row = $this->sealRow($model, $seal, $context, $lock);
         $outcome = new Outcome($model, $seal->name, $context, Settings::outdatedIsIntact());
 
         if ($row === null) {
@@ -142,7 +168,7 @@ final readonly class Verifier
         }
 
         $columns = array_values(array_filter(array_map(static fn (ManifestField $field): ?string => $field->column, $fields)));
-        $values = $this->readBack->row($model, $seal->needsSubject() ? ['*'] : $columns);
+        $values = $this->values($model, $seal, $columns, $context, $lock);
 
         foreach ($columns as $column) {
             if ($values === null || ! array_key_exists($column, $values)) {
@@ -179,6 +205,66 @@ final readonly class Verifier
         }
 
         return $outcome->result(VerificationStatus::Intact);
+    }
+
+    /**
+     * The stored seal row — reused from an eager-loaded `sentinelSeals` relation of a model
+     * that was just loaded (never under the pre-write lock). A row absent from the loaded
+     * relation is looked up anyway: the eager load may have been constrained.
+     */
+    private function sealRow(Model $model, CompiledSeal $seal, VerificationContext $context, bool $lock): ?Seal
+    {
+        if (! $lock && self::fresh($model, $context) && $model->relationLoaded('sentinelSeals')) {
+            $loaded = $model->getRelation('sentinelSeals');
+
+            foreach ($loaded instanceof Collection ? $loaded : [] as $candidate) {
+                if ($candidate instanceof Seal && (string) $candidate->getRawOriginal('seal') === $seal->name) {
+                    return $candidate;
+                }
+            }
+        }
+
+        $query = Tables::seals($model, $seal->name);
+
+        return ($lock ? $query->lockForUpdate() : $query)->first();
+    }
+
+    /**
+     * The raw values to verify (plan §9.5): a just-loaded model's raw original attributes when
+     * they hold every manifest column, else a fresh read. Verify-on-retrieve never reads
+     * again: a partial `select()` is unverifiable, not a finding. Seals with a scope or
+     * computed fields always read the whole row (their closures need the stored model).
+     *
+     * @param  list<string>  $columns
+     * @return array<string, mixed>|null
+     */
+    private function values(Model $model, CompiledSeal $seal, array $columns, VerificationContext $context, bool $lock): ?array
+    {
+        if (! $lock && ! $seal->needsSubject() && self::fresh($model, $context)) {
+            $original = $model->getRawOriginal();
+
+            if (array_diff($columns, array_keys($original)) === []) {
+                return $original;
+            }
+
+            if ($context === VerificationContext::Retrieve) {
+                return null;
+            }
+        }
+
+        // Under the pre-write lock the read must be a locking one too: on MySQL REPEATABLE
+        // READ a plain read can return the transaction's older snapshot, and verifying that
+        // instead of the row as it is would let a concurrent out-of-band change be re-sealed.
+        return $this->readBack->row($model, $seal->needsSubject() ? ['*'] : $columns, $lock);
+    }
+
+    /**
+     * A model whose original attributes still mirror the database (just loaded, not saved
+     * since — a save syncs the original from in-memory values, not from the row).
+     */
+    private static function fresh(Model $model, VerificationContext $context): bool
+    {
+        return in_array($context, self::FRESH_CONTEXTS, true) && $model->exists && ! $model->wasRecentlyCreated && $model->getChanges() === [];
     }
 
     /**
@@ -247,7 +333,8 @@ final readonly class Verifier
             return $outcome->result(VerificationStatus::Stale, 'ledger_mismatch', ledgerVersion: $version);
         }
 
-        if (! $this->ledger->verify($top, $model)) {
+        // The entry must be vouched for by a key of a ring this seal accepts.
+        if (! $this->ledger->verify($top, $model, [$seal->ring, ...$seal->acceptRings])) {
             return $outcome->result(VerificationStatus::Tampered, 'ledger_entry', ledgerVersion: $version);
         }
 

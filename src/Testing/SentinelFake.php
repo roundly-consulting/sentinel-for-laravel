@@ -6,20 +6,35 @@ namespace RoundlyConsulting\Sentinel\Testing;
 
 use Closure;
 use Illuminate\Contracts\Container\Container;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use PHPUnit\Framework\Assert as PHPUnit;
 use RoundlyConsulting\Sentinel\Contracts\AcknowledgementPolicy;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgementResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgeRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\BaselineOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointRecord;
+use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerRecord;
+use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerReport;
+use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerVerifyOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ResealOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ResealReport;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ResealWhereRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RevokeKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotationResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ScanOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ScanReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\StatusCount;
+use RoundlyConsulting\Sentinel\DataTransferObjects\UpdateAndResealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
 use RoundlyConsulting\Sentinel\Definition\CompiledSeal;
@@ -27,18 +42,22 @@ use RoundlyConsulting\Sentinel\Definition\DefinitionRegistry;
 use RoundlyConsulting\Sentinel\Engine\Persister;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
 use RoundlyConsulting\Sentinel\Enums\PersistOperation;
+use RoundlyConsulting\Sentinel\Enums\Reaction;
 use RoundlyConsulting\Sentinel\Enums\SealEvent;
 use RoundlyConsulting\Sentinel\Enums\TamperedWritePolicy;
 use RoundlyConsulting\Sentinel\Enums\VerificationContext;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Exceptions\AcknowledgementDeniedException;
 use RoundlyConsulting\Sentinel\Exceptions\AlgorithmNotAllowedException;
+use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\KeyDriverException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingFailedException;
+use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Keys\KeyIds;
 use RoundlyConsulting\Sentinel\SentinelManager;
+use RoundlyConsulting\Sentinel\Support\BulkQuery;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Support\Identifiers;
 use RoundlyConsulting\Sentinel\Support\Reasons;
@@ -127,32 +146,37 @@ final class SentinelFake extends SentinelManager
         return $this->record('verify', [$model, $compiled->name], $this->faked($model, $compiled, VerificationContext::Api));
     }
 
+    public function verifyIn(VerificationContext $context, Model $model, ?string $seal = null): VerificationResult
+    {
+        $compiled = $this->compiled($model, $seal);
+
+        return $this->record('verify', [$model, $compiled->name], $this->faked($model, $compiled, $context));
+    }
+
+    /**
+     * @param  iterable<Model>  $models
+     */
+    public function verifyManyIn(VerificationContext $context, iterable $models, ?string $seal = null): VerificationReport
+    {
+        $results = [];
+
+        foreach ($models as $model) {
+            $names = $seal === null ? $this->container->make(DefinitionRegistry::class)->for($model)->names() : [$seal];
+
+            foreach ($names as $name) {
+                $results[] = $this->verifyIn($context, $model, $name);
+            }
+        }
+
+        return new VerificationReport($results);
+    }
+
     public function verifyAll(Model $model): VerificationReport
     {
         return new VerificationReport(array_map(
             fn (string $seal): VerificationResult => $this->verify($model, $seal),
             $this->container->make(DefinitionRegistry::class)->for($model)->names(),
         ));
-    }
-
-    /**
-     * @param  iterable<Model>  $models
-     */
-    public function verifyMany(iterable $models, ?string $seal = null): VerificationReport
-    {
-        $results = [];
-
-        foreach ($models as $model) {
-            if ($seal !== null) {
-                $results[] = $this->verify($model, $seal);
-
-                continue;
-            }
-
-            array_push($results, ...$this->verifyAll($model)->results);
-        }
-
-        return new VerificationReport($results);
     }
 
     public function acknowledge(Model $model, string $reason, ?Model $actor = null, ?string $seal = null): AcknowledgementResult
@@ -261,6 +285,206 @@ final class SentinelFake extends SentinelManager
         }
 
         return $result;
+    }
+
+    /**
+     * @internal the verify-on-retrieve hook: faked statuses, the real reactions (`throw`
+     * throws), suspension honoured.
+     */
+    public function retrieved(Model $model): void
+    {
+        $scope = $this->container->make(SealingScope::class);
+
+        if ($scope->verificationSuspended()) {
+            return;
+        }
+
+        foreach ($this->container->make(DefinitionRegistry::class)->for($model)->all() as $seal) {
+            if (! $seal->verifiesOnRetrieve) {
+                continue;
+            }
+
+            $result = $this->record('verify', [$model, $seal->name], $this->faked($model, $seal, VerificationContext::Retrieve));
+
+            if ($result->failed() && ($seal->retrieveReaction ?? Settings::retrieveReaction()) === Reaction::Throw) {
+                throw TamperedModelException::forResult($result);
+            }
+        }
+    }
+
+    // ── bulk ──────────────────────────────────────────────────────────────────
+
+    /**
+     * Faked statuses over every row of the models (the rows are read; nothing is written).
+     */
+    public function scan(ScanOptions $options): ScanReport
+    {
+        $counts = [];
+        $findings = [];
+        $scanned = 0;
+
+        foreach ($options->models as $class) {
+            $compiled = $this->container->make(DefinitionRegistry::class)->for($class);
+            $seals = $options->seal === null ? $compiled->all() : [$compiled->get($options->seal)];
+
+            foreach ($this->rows($class::query()->withoutGlobalScopes(), $options->limit) as $model) {
+                foreach ($seals as $seal) {
+                    $result = $this->faked($model, $seal, VerificationContext::Command);
+                    $scanned++;
+                    $counts[$result->status->value] = ($counts[$result->status->value] ?? 0) + 1;
+
+                    if ($result->failed() && count($findings) < $options->maxFindings) {
+                        $findings[] = $result;
+                    }
+                }
+            }
+        }
+
+        $list = [];
+
+        foreach (VerificationStatus::cases() as $status) {
+            if (isset($counts[$status->value])) {
+                $list[] = new StatusCount($status, $counts[$status->value]);
+            }
+        }
+
+        return $this->record('scan', $options, new ScanReport($scanned, $list, $findings, false, Settings::outdatedIsIntact()));
+    }
+
+    /**
+     * Intact and outdated rows count as re-sealed (the fake holds no keys, so it cannot tell a
+     * row already on the current key); the others are skipped — or acknowledged.
+     */
+    public function reseal(ResealOptions $options): ResealReport
+    {
+        $compiled = $this->container->make(DefinitionRegistry::class)->for($options->model);
+        $seals = $options->seal === null ? $compiled->all() : [$compiled->get($options->seal)];
+        $reason = $options->acknowledgeReason === null ? null : Reasons::normalize($options->acknowledgeReason);
+        $resealed = $acknowledged = 0;
+        $skipped = [];
+
+        foreach ($this->rows($options->model::query()->withoutGlobalScopes()) as $model) {
+            foreach ($seals as $seal) {
+                $verdict = $this->faked($model, $seal, VerificationContext::Command);
+
+                match (true) {
+                    $verdict->status === VerificationStatus::Unsealed => null,
+                    $verdict->status === VerificationStatus::Intact, $verdict->status === VerificationStatus::Outdated => $resealed++,
+                    $reason !== null => $acknowledged += $options->dryRun ? 1 : (int) $this->acknowledge($model, $reason, $options->actor, $seal->name)->acknowledged,
+                    default => $skipped[] = $verdict,
+                };
+            }
+        }
+
+        return $this->record('reseal', $options, new ResealReport($resealed, $acknowledged, count($skipped), 0, $skipped, $options->dryRun));
+    }
+
+    public function resealWhere(ResealWhereRequest $request): ResealReport
+    {
+        $compiled = $this->container->make(DefinitionRegistry::class)->for($request->model);
+        $seals = $request->seal === null ? $compiled->all() : [$compiled->get($request->seal)];
+        $reason = Reasons::normalize($request->reason);
+        $actor = $this->container->make(Runtime::class)->actor($request->actor);
+        $acknowledged = $skipped = 0;
+
+        foreach ($this->rows(BulkQuery::resolve($request->model, $request->query)) as $model) {
+            foreach ($seals as $seal) {
+                $this->acknowledge($model, $reason, $actor, $seal->name)->acknowledged ? $acknowledged++ : $skipped++;
+            }
+        }
+
+        return $this->record('resealWhere', $request, new ResealReport(acknowledged: $acknowledged, skipped: $skipped));
+    }
+
+    /**
+     * The real refusal (any faked non-intact row → nothing written), then the host's update.
+     */
+    public function updateAndReseal(UpdateAndResealRequest $request): ResealReport
+    {
+        foreach (array_keys($request->values) as $column) {
+            if (! Identifiers::isColumn($column)) {
+                throw SealingMisconfiguredException::invalidColumn($column);
+            }
+        }
+
+        $seals = $this->container->make(DefinitionRegistry::class)->for($request->model)->all();
+        Reasons::normalize($request->reason);
+        $this->container->make(Runtime::class)->actor($request->actor);
+        $models = $this->rows(BulkQuery::resolve($request->model, $request->query));
+        $failures = [];
+
+        foreach ($models as $model) {
+            foreach ($seals as $seal) {
+                $verdict = $this->faked($model, $seal, VerificationContext::Api);
+
+                if ($verdict->failed()) {
+                    $failures[] = $verdict;
+                }
+            }
+        }
+
+        if ($failures !== []) {
+            throw TamperedModelException::many($failures);
+        }
+
+        $keys = array_map(static fn (Model $model): mixed => $model->getKey(), $models);
+
+        if ($keys !== []) {
+            $request->model::query()->withoutGlobalScopes()->whereKey($keys)->update($request->values);
+        }
+
+        return $this->record('updateAndReseal', $request, new ResealReport(resealed: count($models)));
+    }
+
+    /**
+     * Nothing is sealed under the fake, so every row is adopted — except rows faked as
+     * `missing`, which (as in production, where their history shows a seal) are reported.
+     */
+    public function sealMissing(BaselineOptions $options): ResealReport
+    {
+        $compiled = $this->container->make(DefinitionRegistry::class)->for($options->model);
+        $seals = $options->seal === null ? $compiled->all() : [$compiled->get($options->seal)];
+        Reasons::normalize($options->reason);
+        $this->container->make(Runtime::class)->actor($options->actor);
+        $resealed = 0;
+        $skipped = [];
+
+        foreach ($this->rows($options->model::query()->withoutGlobalScopes()) as $model) {
+            foreach ($seals as $seal) {
+                $verdict = $this->faked($model, $seal, VerificationContext::Command);
+                $verdict->status === VerificationStatus::Missing ? $skipped[] = $verdict : $resealed++;
+            }
+        }
+
+        return $this->record('sealMissing', $options, new ResealReport(resealed: $resealed, skipped: count($skipped), skippedResults: $skipped));
+    }
+
+    // ── ledger ────────────────────────────────────────────────────────────────
+
+    /**
+     * Records the run; the fake keeps no ledger, so there is never anything to fold.
+     */
+    public function checkpoint(?CheckpointOptions $options = null): ?CheckpointResult
+    {
+        $options ??= new CheckpointOptions;
+
+        if ($options->batchSize !== null && ($options->batchSize < 1 || $options->batchSize > 100000)) {
+            throw InvalidSentinelConfigurationException::invalidValue('ledger.batch_size', 'must be between 1 and 100000');
+        }
+
+        return $this->record('checkpoint', $options, null);
+    }
+
+    public function verifyLedger(?LedgerVerifyOptions $options = null): LedgerReport
+    {
+        $options ??= new LedgerVerifyOptions;
+
+        return $this->record('verifyLedger', $options, new LedgerReport(0, 0, 0, []));
+    }
+
+    public function ledgerHead(?string $connection = null): ?CheckpointRecord
+    {
+        return null;
     }
 
     // ── keys ──────────────────────────────────────────────────────────────────
@@ -431,6 +655,37 @@ final class SentinelFake extends SentinelManager
         PHPUnit::assertEmpty($changes, sprintf('Expected no key changes, but %d were recorded.', count($changes)));
     }
 
+    public function assertCheckpointed(?int $times = null): void
+    {
+        $count = count($this->recorded('checkpoint'));
+
+        $times === null
+            ? PHPUnit::assertGreaterThan(0, $count, 'Expected a ledger checkpoint, but none was made.')
+            : PHPUnit::assertSame($times, $count, "Expected {$times} ledger checkpoint(s), but {$count} were made.");
+    }
+
+    /**
+     * A bulk re-seal of the model happened (`reseal`, `resealWhere`, `updateAndReseal` or
+     * `sealMissing`) — with `count` rows re-sealed or acknowledged in total, when given.
+     *
+     * @param  class-string<Model>  $model
+     */
+    public function assertResealed(string $model, ?int $count = null): void
+    {
+        $calls = array_values(array_filter(
+            array_merge(...array_map($this->recorded(...), ['reseal', 'resealWhere', 'updateAndReseal', 'sealMissing'])),
+            static fn (RecordedCall $call): bool => is_object($call->arguments) && property_exists($call->arguments, 'model') && $call->arguments->model === $model,
+        ));
+
+        PHPUnit::assertNotEmpty($calls, "Expected [{$model}] to be re-sealed, but it was not.");
+
+        if ($count !== null) {
+            $total = array_sum(array_map(static fn (RecordedCall $call): int => $call->result instanceof ResealReport ? $call->result->resealed + $call->result->acknowledged : 0, $calls));
+
+            PHPUnit::assertSame($count, $total, "Expected {$count} [{$model}] row(s) to be re-sealed, but {$total} were.");
+        }
+    }
+
     /**
      * The recorded calls, optionally of one manager method.
      *
@@ -445,6 +700,19 @@ final class SentinelFake extends SentinelManager
     }
 
     // ── internals ─────────────────────────────────────────────────────────────
+
+    /**
+     * @param  Builder<Model>  $query
+     * @return list<Model>
+     */
+    private function rows(Builder $query, ?int $limit = null): array
+    {
+        $models = $this->container->make(SealingScope::class)->withoutVerification(
+            static fn (): EloquentCollection => ($limit === null ? $query : $query->limit($limit))->get(),
+        );
+
+        return array_values($models->all());
+    }
 
     private function compiled(Model $model, ?string $seal): CompiledSeal
     {

@@ -33,4 +33,42 @@ final class SealingMisconfiguredException extends SentinelException
     {
         return new self("[{$class}] overrides {$method}() without sealing; call \$this->persistSealed(fn () => parent::{$method}(...)) from the override.");
     }
+
+    public static function middlewareParameter(string $parameter): self
+    {
+        $shown = preg_match('/^[A-Za-z0-9_]{1,64}$/D', $parameter) === 1 ? $parameter : '(invalid)';
+
+        return new self("sentinel.verified names the route parameter [{$shown}], which is not a bound sealable model; route-model binding must run first.");
+    }
+
+    public static function bindingsNotSubstituted(string $parameter): self
+    {
+        $shown = preg_match('/^[A-Za-z0-9_]{1,64}$/D', $parameter) === 1 ? $parameter : '(invalid)';
+
+        return new self("sentinel.verified ran before route-model binding: the sealable route parameter [{$shown}] is not a model yet. Declare it inside the web/api group (after SubstituteBindings).");
+    }
+
+    public static function queryModelMismatch(string $expected, string $given): self
+    {
+        return new self("The query selects [{$given}] models, not [{$expected}].");
+    }
+
+    public static function missingColumn(string $class, string $seal, string $column): self
+    {
+        return new self("Seal [{$seal}] of [{$class}] covers the column [{$column}], which its table does not have.");
+    }
+
+    public static function unknownModel(string $model): self
+    {
+        $shown = preg_match('/^[A-Za-z0-9_\\\\.:-]{1,255}$/D', $model) === 1 ? $model : '(invalid)';
+
+        return new self("[{$shown}] is not a model class or morph alias.");
+    }
+
+    public static function invalidColumn(string $column): self
+    {
+        $shown = preg_match('/^[A-Za-z0-9_.]{1,64}$/D', $column) === 1 ? $column : '(invalid)';
+
+        return new self("[{$shown}] is not a column name a mass update may set.");
+    }
 }

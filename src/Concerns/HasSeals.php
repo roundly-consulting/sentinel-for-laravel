@@ -35,10 +35,15 @@ trait HasSeals
 {
     /**
      * A model that overrides save() or delete() must route the write through
-     * `persistSealed()`, or its writes would skip sealing.
+     * `persistSealed()`, or its writes would skip sealing. Every retrieved model passes the
+     * manager's verify-on-retrieve hook (a no-op unless a seal declares verifyOnRetrieve()).
      */
     public static function bootHasSeals(): void
     {
+        static::retrieved(static function (Model $model): void {
+            app(SentinelManager::class)->retrieved($model);
+        });
+
         foreach (['save', 'delete'] as $method) {
             $declared = new ReflectionMethod(static::class, $method);
 

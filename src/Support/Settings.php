@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Sentinel\Support;
 
+use Illuminate\Database\Eloquent\Model;
 use RoundlyConsulting\PackageToolkit\Support\Config;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
+use RoundlyConsulting\Sentinel\Enums\Reaction;
 use RoundlyConsulting\Sentinel\Enums\TamperedWritePolicy;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
@@ -266,5 +268,161 @@ final class Settings
     public static function ledgerEnabled(): bool
     {
         return Config::boolean('sentinel.ledger.enabled', true);
+    }
+
+    /**
+     * The sealable classes `sentinel:verify` scans when given none.
+     *
+     * @return list<class-string<Model>>
+     */
+    public static function models(): array
+    {
+        $models = config('sentinel.models') ?? [];
+
+        if (! is_array($models) || ! array_is_list($models)) {
+            throw InvalidSentinelConfigurationException::invalidValue('models', 'must be a list of model classes');
+        }
+
+        $classes = [];
+
+        foreach ($models as $model) {
+            if (! is_string($model) || ! is_subclass_of($model, Model::class)) {
+                throw InvalidSentinelConfigurationException::invalidValue('models', 'must be a list of model classes');
+            }
+
+            $classes[] = $model;
+        }
+
+        return $classes;
+    }
+
+    /**
+     * The ring whose current key signs checkpoints.
+     */
+    public static function ledgerRing(): string
+    {
+        $ring = config('sentinel.ledger.ring') ?? self::defaultRing();
+
+        if (! is_string($ring) || ! in_array($ring, self::rings(), true)) {
+            throw InvalidSentinelConfigurationException::invalidValue('ledger.ring', 'must name a configured key ring');
+        }
+
+        return $ring;
+    }
+
+    /**
+     * Rings whose keys may have signed a checkpoint (or a ledger entry of a model Sentinel can
+     * no longer resolve): the ledger ring and the default ring — never a partner's HTTP ring.
+     *
+     * @return list<string>
+     */
+    public static function ledgerRings(): array
+    {
+        return array_values(array_unique([self::ledgerRing(), self::defaultRing()]));
+    }
+
+    /**
+     * The connections holding seals and the ledger (null = the default connection).
+     *
+     * @return list<string|null>
+     */
+    public static function ledgerConnections(): array
+    {
+        $connections = config('sentinel.ledger.connections') ?? [null];
+
+        if (! is_array($connections) || ! array_is_list($connections) || $connections === []) {
+            throw InvalidSentinelConfigurationException::invalidValue('ledger.connections', 'must be a non-empty list of connection names (null = default)');
+        }
+
+        $names = [];
+
+        foreach ($connections as $connection) {
+            if ($connection !== null && (! is_string($connection) || $connection === '')) {
+                throw InvalidSentinelConfigurationException::invalidValue('ledger.connections', 'must be a non-empty list of connection names (null = default)');
+            }
+
+            $names[] = $connection;
+        }
+
+        return array_values(array_unique($names));
+    }
+
+    public static function ledgerBatchSize(): int
+    {
+        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.ledger.batch_size', 1, 100000, 1000);
+    }
+
+    public static function backlogWarningSeconds(): int
+    {
+        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.ledger.backlog_warning_seconds', 60, 86400, 600);
+    }
+
+    /**
+     * The configured anchor driver names (`SENTINEL_ANCHORS=cache,log`).
+     *
+     * @return list<string>
+     */
+    public static function anchors(): array
+    {
+        $anchors = Identifiers::csv(config('sentinel.ledger.anchors'));
+
+        foreach ($anchors as $anchor) {
+            if (preg_match('/^[a-z][a-z0-9_-]{0,63}$/D', $anchor) !== 1) {
+                throw InvalidSentinelConfigurationException::invalidValue('ledger.anchors', 'must be a comma-separated list of anchor driver names');
+            }
+        }
+
+        return array_values(array_unique($anchors));
+    }
+
+    /**
+     * One anchor driver's config section (`sentinel.ledger.anchor_drivers.<name>`).
+     *
+     * @return array<string, mixed>
+     */
+    public static function anchorDriver(string $driver): array
+    {
+        $section = config("sentinel.ledger.anchor_drivers.{$driver}") ?? [];
+
+        if (! is_array($section)) {
+            throw InvalidSentinelConfigurationException::invalidValue("ledger.anchor_drivers.{$driver}", 'must be an array');
+        }
+
+        $config = [];
+
+        foreach ($section as $key => $value) {
+            $config[(string) $key] = $value;
+        }
+
+        return $config;
+    }
+
+    public static function retrieveReaction(): Reaction
+    {
+        return Config::using(InvalidSentinelConfigurationException::class)->enum('sentinel.verification.retrieve_reaction', Reaction::class);
+    }
+
+    public static function retrieveChecksLedger(): bool
+    {
+        return Config::boolean('sentinel.verification.retrieve_checks_ledger', false);
+    }
+
+    public static function verifiedStatus(): int
+    {
+        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.middleware.verified_status', 400, 599, 409);
+    }
+
+    /**
+     * Whether `sentinel.verified` aborts (`abort`, the default) or only reports (`report`).
+     */
+    public static function verifiedAborts(): bool
+    {
+        $reaction = config('sentinel.middleware.verified_reaction') ?? 'abort';
+
+        return match ($reaction) {
+            'abort' => true,
+            'report' => false,
+            default => throw InvalidSentinelConfigurationException::invalidValue('middleware.verified_reaction', 'must be abort or report'),
+        };
     }
 }

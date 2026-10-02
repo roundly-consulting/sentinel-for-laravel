@@ -18,10 +18,16 @@ use Illuminate\Foundation\Application;
 it('ships exactly the config keys it reads', function (): void {
     expect(__DIR__.'/../config/sentinel.php')->toSatisfyConfigContract(
         [__DIR__.'/../src', __DIR__.'/../database'],
-        ['extraReadPrefixes' => [
-            'sentinel.actor_key_type', 'sentinel.key_type', 'sentinel.sealing.on_tampered_write',
-            'sentinel.sealing.reason_max_length', 'sentinel.sealing.transaction_attempts',
-        ]],
+        [
+            'extraReadPrefixes' => [
+                'sentinel.actor_key_type', 'sentinel.key_type', 'sentinel.sealing.on_tampered_write',
+                'sentinel.sealing.reason_max_length', 'sentinel.sealing.transaction_attempts',
+                'sentinel.ledger.batch_size', 'sentinel.ledger.backlog_warning_seconds',
+                'sentinel.middleware.verified_status', 'sentinel.verification.retrieve_reaction',
+            ],
+            // Each anchor driver's section is read wholesale and indexed with literal offsets.
+            'sectionVariables' => ['AnchorManager.php' => ['$config' => 'sentinel.ledger.anchor_drivers.*']],
+        ],
     );
 });
 

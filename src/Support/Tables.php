@@ -6,6 +6,7 @@ namespace RoundlyConsulting\Sentinel\Support;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use RoundlyConsulting\Sentinel\Models\Checkpoint;
 use RoundlyConsulting\Sentinel\Models\LedgerEntry;
 use RoundlyConsulting\Sentinel\Models\Seal;
 
@@ -45,5 +46,48 @@ final class Tables
             ->where('sealable_type', $sealable->getMorphClass())
             ->where('sealable_id', $sealable->getKey())
             ->where('seal', $seal);
+    }
+
+    /**
+     * The checkpoints of a connection (null = the default one).
+     *
+     * @return Builder<Checkpoint>
+     */
+    public static function checkpoints(?string $connection): Builder
+    {
+        return (new Checkpoint)->setConnection($connection)->newQuery();
+    }
+
+    public static function checkpoint(?string $connection): Checkpoint
+    {
+        return (new Checkpoint)->setConnection($connection);
+    }
+
+    /**
+     * Every ledger entry of a connection (null = the default one).
+     *
+     * @return Builder<LedgerEntry>
+     */
+    public static function ledgerOn(?string $connection): Builder
+    {
+        return (new LedgerEntry)->setConnection($connection)->newQuery();
+    }
+
+    /**
+     * Every seal row of a connection (null = the default one).
+     *
+     * @return Builder<Seal>
+     */
+    public static function sealsOn(?string $connection): Builder
+    {
+        return (new Seal)->setConnection($connection)->newQuery();
+    }
+
+    /**
+     * The name of a connection (null = the default one).
+     */
+    public static function connectionName(?string $connection): string
+    {
+        return (new Checkpoint)->setConnection($connection)->getConnection()->getName() ?? 'default';
     }
 }

@@ -8,7 +8,10 @@ use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use RoundlyConsulting\Sentinel\Contracts\Sealable;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
+use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
+use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Support\Settings;
 use Throwable;
 
@@ -22,6 +25,7 @@ trait ReadsOptions
     protected function stringOption(string $name): ?string
     {
         $value = $this->option($name);
+        $value = is_int($value) ? (string) $value : $value;
 
         return is_string($value) && trim($value) !== '' ? trim($value) : null;
     }
@@ -73,5 +77,41 @@ trait ReadsOptions
         }
 
         return $owner instanceof Model ? $owner : null;
+    }
+
+    /**
+     * A sealable model class from a class name or morph alias.
+     *
+     * @return class-string<Model>
+     *
+     * @throws SealingMisconfiguredException
+     */
+    protected function sealableClass(string $model): string
+    {
+        $class = Relation::getMorphedModel($model) ?? $model;
+
+        if (! class_exists($class) || ! is_subclass_of($class, Model::class) || ! is_subclass_of($class, Sealable::class)) {
+            throw SealingMisconfiguredException::unknownModel($model);
+        }
+
+        return $class;
+    }
+
+    /**
+     * A positive integer option (null when absent).
+     */
+    protected function intOption(string $name, int $minimum = 1, int $maximum = PHP_INT_MAX): ?int
+    {
+        $value = $this->stringOption($name);
+
+        if ($value === null) {
+            return null;
+        }
+
+        if (preg_match('/^\d{1,18}$/D', $value) !== 1 || (int) $value < $minimum || (int) $value > $maximum) {
+            throw InvalidSentinelConfigurationException::invalidOption($name, "must be an integer between {$minimum} and {$maximum}");
+        }
+
+        return (int) $value;
     }
 }

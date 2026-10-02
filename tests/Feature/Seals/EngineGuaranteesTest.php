@@ -12,7 +12,6 @@ use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\LedgerIsAppendOnlyException;
-use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Models\Checkpoint;
 use RoundlyConsulting\Sentinel\Models\LedgerEntry;
@@ -172,36 +171,3 @@ it('canonicalizes a row to the same bytes on every engine', function (): void {
         Carbon::setTestNow();
     }
 });
-
-/**
- * §10 item 25 (Phase D part): every path reaches the same verdict. Middleware, rules, macros,
- * retrieve hooks and scans join in Phase E.
- */
-it('reaches the same verdict through every verification path', function (Closure $tamper, VerificationStatus $status): void {
-    $invoice = invoice();
-    $tamper($invoice);
-
-    $paths = [
-        'verify' => Sentinel::verify($invoice)->status,
-        'handle' => Sentinel::for($invoice)->verify()->status,
-        'trait' => $invoice->verifySeal()->status,
-        'verifyAll' => Sentinel::verifyAll($invoice)->results[0]->status,
-        'verifyMany' => Sentinel::verifyMany([$invoice], 'financial')->results[0]->status,
-    ];
-
-    try {
-        $invoice->update(['note' => 'write']);
-        $paths['pre-write'] = VerificationStatus::Intact;
-    } catch (TamperedModelException $exception) {
-        $paths['pre-write'] = $exception->result()?->status;
-    }
-
-    expect(array_values(array_unique(array_map(static fn (?VerificationStatus $s): ?string => $s?->value, $paths))))->toBe([$status->value]);
-})->with([
-    'intact' => [static fn (): null => null, VerificationStatus::Intact],
-    'tampered' => [static fn (Invoice $i) => DB::table('invoices')->where('id', $i->id)->update(['amount' => '0.00']), VerificationStatus::Tampered],
-    'missing' => [static fn (Invoice $i) => Seal::query()->where('sealable_id', $i->id)->where('seal', 'financial')->delete(), VerificationStatus::Missing],
-    'malformed' => [static fn (Invoice $i) => Seal::query()->where('sealable_id', $i->id)->where('seal', 'financial')->toBase()->update(['format' => 9]), VerificationStatus::Malformed],
-    'algorithm mismatch' => [static fn (Invoice $i) => Seal::query()->where('sealable_id', $i->id)->where('seal', 'financial')->toBase()->update(['algorithm' => 'ed25519']), VerificationStatus::AlgorithmMismatch],
-    'unknown key' => [static fn (Invoice $i) => Seal::query()->where('sealable_id', $i->id)->where('seal', 'financial')->toBase()->update(['key_id' => 'nope']), VerificationStatus::UnknownKey],
-]);

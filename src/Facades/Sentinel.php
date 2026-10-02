@@ -8,16 +8,29 @@ use Closure;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Facade;
 use RoundlyConsulting\Sentinel\Accessors\KeysAccessor;
+use RoundlyConsulting\Sentinel\Accessors\LedgerAccessor;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgementResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\BaselineOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointRecord;
+use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerRecord;
+use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerReport;
+use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerVerifyOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ResealOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ResealReport;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ResealWhereRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RevokeKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotationResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ScanOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ScanReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\UpdateAndResealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
@@ -43,6 +56,11 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static bool unseal(Model $model, string $reason, Model|null $actor = null, string|null $seal = null)
  * @method static list<LedgerRecord> ledgerHistory(Model $model, string|null $seal = null, int $limit = 50)
  * @method static SealRecord|null currentSeal(Model $model, string|null $seal = null)
+ * @method static ScanReport scan(ScanOptions $options)
+ * @method static ResealReport reseal(ResealOptions $options)
+ * @method static ResealReport resealWhere(ResealWhereRequest $request)
+ * @method static ResealReport updateAndReseal(UpdateAndResealRequest $request)
+ * @method static ResealReport sealMissing(BaselineOptions $options)
  * @method static mixed withoutSealing(Closure $callback, string $reason)
  * @method static mixed withoutVerification(Closure $callback)
  * @method static KeysAccessor keys()
@@ -54,6 +72,12 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static KeyInfo|null findKey(string $ring, string $keyId)
  * @method static KeyInfo currentKey(string|null $ring = null)
  * @method static SentinelManager extend(string $driver, Closure $factory)
+ * @method static LedgerAccessor ledger()
+ * @method static CheckpointResult|null checkpoint(CheckpointOptions|null $options = null)
+ * @method static LedgerReport verifyLedger(LedgerVerifyOptions|null $options = null)
+ * @method static CheckpointRecord|null ledgerHead(string|null $connection = null)
+ * @method static list<string> anchors()
+ * @method static SentinelManager extendAnchor(string $driver, Closure $factory)
  * @method static SentinelFake fakeStatus(Model $model, VerificationStatus $status, string|null $seal = null, list<string>|null $changed = null)
  * @method static SentinelFake fakeStatusOnce(Model $model, VerificationStatus $status, string|null $seal = null, list<string>|null $changed = null)
  * @method static void assertSealed(Model $model, string|null $seal = null, Closure|null $callback = null)
@@ -69,6 +93,8 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static void assertKeyRotated(string|null $ring = null)
  * @method static void assertKeyRevoked(string $keyId)
  * @method static void assertNoKeyChanges()
+ * @method static void assertCheckpointed(int|null $times = null)
+ * @method static void assertResealed(string $model, int|null $count = null)
  * @method static list<RecordedCall> recorded(string|null $method = null)
  *
  * @see SentinelManager

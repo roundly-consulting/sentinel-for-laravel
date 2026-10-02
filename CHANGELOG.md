@@ -45,3 +45,19 @@ Initial public release.
 - `Sentinel::for($model)`, `Sentinel::model(Invoice::class)`, `withoutSealing()`,
   `withoutVerification()`, the `HasSeals` trait helpers and scopes, and `Sentinel::fake()`
   with sealing, verification and acknowledgement assertions.
+- Keyed, chained ledger checkpoints (`sentinel:checkpoint`, `Sentinel::ledger()->checkpoint()`)
+  published to external anchors (`cache`, `filesystem`, `log`, or custom ones through
+  `Sentinel::extendAnchor()`), so deleted, rewritten or rolled-back ledger history — and,
+  with an anchor, a restore of the whole database — is detectable.
+- Ledger verification (`Sentinel::ledger()->verify()`, `sentinel:verify --ledger`): checkpoint
+  sequence, chain, MACs and roots, anchors, pending entries, a stalled checkpoint job and
+  every entity's ledger head; violations fire `LedgerIntegrityViolated`.
+- `sentinel:verify` (chunked scans for cron and CI, JSON output, `--fail-on`, exit 1 on
+  findings), `sentinel:reseal` (rotation that never launders), `sentinel:seal-missing`
+  (baseline adoption) and `sentinel:inspect`.
+- `Sentinel::model(Invoice::class)->scan()`, `reseal()`, `resealWhere()` (bulk
+  acknowledgement), `updateAndReseal()` (a verified mass update) and `sealMissing()`.
+- Verify-on-retrieve per seal (`verifyOnRetrieve()`, throw / event / log), the
+  `sentinel.verified` route middleware (a generic 409 that reveals nothing), the
+  `IntactSeal` validation rule and the `verifySeals()` collection macro.
+- English and Slovak translations (`sentinel::`).

@@ -7,9 +7,15 @@ use RoundlyConsulting\Crypto\Signature\Algorithm as CryptoAlgorithm;
 use RoundlyConsulting\Enums\Helpers;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\DigestAlgorithm;
+use RoundlyConsulting\Sentinel\Enums\KeyDestination;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
+use RoundlyConsulting\Sentinel\Enums\LedgerFindingKind;
+use RoundlyConsulting\Sentinel\Enums\PersistOperation;
+use RoundlyConsulting\Sentinel\Enums\Reaction;
 use RoundlyConsulting\Sentinel\Enums\SealEvent;
+use RoundlyConsulting\Sentinel\Enums\TamperedWritePolicy;
 use RoundlyConsulting\Sentinel\Enums\TypeKind;
+use RoundlyConsulting\Sentinel\Enums\VerificationContext;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Keys\Purpose;
 use RoundlyConsulting\Sentinel\Tests\Support\SourceScan;
@@ -28,7 +34,19 @@ it('freezes every enum value', function (string $enum, array $values): void {
     'KeyStatus' => [KeyStatus::class, ['pending', 'active', 'verify_only', 'retired', 'revoked']],
     'DigestAlgorithm' => [DigestAlgorithm::class, ['sha-256', 'sha-512']],
     'Purpose' => [Purpose::class, ['seal', 'ledger']],
+    'KeyDestination' => [KeyDestination::class, ['config', 'database']],
+    'VerificationContext' => [VerificationContext::class, ['api', 'middleware', 'retrieve', 'command', 'rule', 'collection', 'write']],
+    'Reaction' => [Reaction::class, ['throw', 'event', 'log']],
+    'TamperedWritePolicy' => [TamperedWritePolicy::class, ['refuse', 'reseal', 'skip']],
+    'PersistOperation' => [PersistOperation::class, ['save', 'delete', 'increment']],
+    'LedgerFindingKind' => [LedgerFindingKind::class, ['checkpoint_gap', 'checkpoint_invalid', 'checkpoint_mismatch', 'chain_broken', 'anchor_ahead', 'anchor_mismatch', 'anchor_invalid', 'anchor_unreachable', 'entry_invalid', 'entity_deleted', 'seal_rolled_back', 'seal_missing', 'backlog']],
 ]);
+
+it('treats every ledger finding but a backlog and an unreachable anchor as a violation', function (): void {
+    $harmless = array_values(array_filter(LedgerFindingKind::cases(), static fn (LedgerFindingKind $kind): bool => ! $kind->isViolation()));
+
+    expect($harmless)->toBe([LedgerFindingKind::AnchorUnreachable, LedgerFindingKind::Backlog]);
+});
 
 it('uses the enums Helpers trait on every package enum', function (): void {
     $enums = array_filter(array_keys(SourceScan::classes()), enum_exists(...));

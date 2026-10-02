@@ -1,0 +1,132 @@
+<?php
+
+declare(strict_types=1);
+
+namespace RoundlyConsulting\Sentinel\Ledger;
+
+use Closure;
+use Illuminate\Contracts\Container\Container;
+use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Log\LogManager;
+use RoundlyConsulting\Sentinel\Contracts\Anchor;
+use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPayload;
+use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPublication;
+use RoundlyConsulting\Sentinel\Events\AnchorPublishFailed;
+use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
+use RoundlyConsulting\Sentinel\Ledger\Anchors\CacheAnchor;
+use RoundlyConsulting\Sentinel\Ledger\Anchors\FilesystemAnchor;
+use RoundlyConsulting\Sentinel\Ledger\Anchors\LogAnchor;
+use RoundlyConsulting\Sentinel\Support\Settings;
+use Throwable;
+
+/**
+ * Resolves `sentinel.ledger.anchors` to anchors and publishes checkpoints to them. A
+ * singleton holding only driver factories (code), so `Sentinel::fake()` keeps registered
+ * extensions; the anchors themselves are built per use.
+ *
+ * Publication is best effort: a failing anchor fires `AnchorPublishFailed`, is logged, and
+ * never rolls back a checkpoint.
+ *
+ * @internal
+ */
+final class AnchorManager
+{
+    /** @var array<string, Closure> */
+    private array $drivers = [];
+
+    public function __construct(private readonly Container $container) {}
+
+    /**
+     * Register a custom anchor driver: `fn (Container $app, array $config): Anchor`.
+     */
+    public function extend(string $driver, Closure $factory): void
+    {
+        $this->drivers[$driver] = $factory;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function names(): array
+    {
+        return Settings::anchors();
+    }
+
+    /**
+     * @return list<Anchor>
+     */
+    public function anchors(): array
+    {
+        return array_map($this->build(...), $this->names());
+    }
+
+    public function build(string $name): Anchor
+    {
+        $config = Settings::anchorDriver($name);
+
+        $anchor = match (true) {
+            $name === 'cache' => new CacheAnchor(
+                $this->container->make('cache')->store(self::string($config['store'] ?? null)),
+                self::string($config['key'] ?? null) ?? 'sentinel:ledger:anchor',
+            ),
+            $name === 'filesystem' => new FilesystemAnchor(
+                $this->container->make('filesystem')->disk(self::string($config['disk'] ?? null)),
+                self::string($config['path'] ?? null) ?? 'sentinel/anchors',
+            ),
+            $name === 'log' => new LogAnchor($this->container->make(LogManager::class)->channel(self::string($config['channel'] ?? null))),
+            isset($this->drivers[$name]) => ($this->drivers[$name])($this->container, $config),
+            default => throw InvalidSentinelConfigurationException::unknownAnchor($name),
+        };
+
+        return $anchor instanceof Anchor ? $anchor : throw InvalidSentinelConfigurationException::unknownAnchor($name);
+    }
+
+    /**
+     * Publish a payload to every anchor — or, with `onlyLagging`, only to those that report
+     * an older checkpoint (a failure of an earlier run).
+     *
+     * @return list<AnchorPublication>
+     */
+    public function publish(AnchorPayload $payload, bool $onlyLagging = false): array
+    {
+        $publications = [];
+
+        foreach ($this->names() as $name) {
+            try {
+                $anchor = $this->build($name);
+
+                if ($onlyLagging) {
+                    $latest = $anchor->latest($payload->connection);
+
+                    if ($latest === null || $latest->seq >= $payload->seq) {
+                        continue;
+                    }
+                }
+
+                $anchor->publish($payload);
+                $publications[] = new AnchorPublication($name, true);
+            } catch (InvalidSentinelConfigurationException $exception) {
+                throw $exception;
+            } catch (Throwable $exception) {
+                $error = $exception::class.': '.mb_strimwidth($exception->getMessage(), 0, 300, '…');
+
+                $this->container->make(Dispatcher::class)->dispatch(new AnchorPublishFailed($name, $payload->connection, $payload->seq, $error));
+                $this->container->make(LogManager::class)->channel(Settings::logChannel())->warning('Sentinel: an anchor did not accept the newest checkpoint.', [
+                    'anchor' => $name,
+                    'connection' => $payload->connection,
+                    'seq' => $payload->seq,
+                    'error' => $error,
+                ]);
+
+                $publications[] = new AnchorPublication($name, false, $error);
+            }
+        }
+
+        return $publications;
+    }
+
+    private static function string(mixed $value): ?string
+    {
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+}
