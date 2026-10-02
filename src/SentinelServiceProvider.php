@@ -15,6 +15,7 @@ use RoundlyConsulting\Sentinel\Canonical\FieldTagger;
 use RoundlyConsulting\Sentinel\Commands\CheckCommand;
 use RoundlyConsulting\Sentinel\Commands\CheckpointCommand;
 use RoundlyConsulting\Sentinel\Commands\InspectCommand;
+use RoundlyConsulting\Sentinel\Commands\InstallCommand;
 use RoundlyConsulting\Sentinel\Commands\KeyGenerateCommand;
 use RoundlyConsulting\Sentinel\Commands\KeyImportCommand;
 use RoundlyConsulting\Sentinel\Commands\KeyListCommand;
@@ -74,6 +75,7 @@ final class SentinelServiceProvider extends PackageServiceProvider
             ->hasTranslations()
             ->hasCommands([
                 CheckCommand::class,
+                InstallCommand::class,
                 VerifyCommand::class,
                 CheckpointCommand::class,
                 ResealCommand::class,
