@@ -28,7 +28,7 @@ final class KeyRetireCommand extends Command
     public function handle(SentinelManager $sentinel): int
     {
         $ring = $this->ringOption();
-        $keyId = (string) $this->argument('kid');
+        $keyId = $this->stringArgument('kid');
 
         try {
             $key = $sentinel->findKey($ring, $keyId);

@@ -29,7 +29,7 @@ final class KeyRevokeCommand extends Command
     public function handle(SentinelManager $sentinel): int
     {
         $ring = $this->ringOption();
-        $keyId = (string) $this->argument('kid');
+        $keyId = $this->stringArgument('kid');
         $reason = $this->stringOption('reason');
 
         if ($reason === null) {

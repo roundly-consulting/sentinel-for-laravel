@@ -26,6 +26,13 @@ trait ReadsOptions
         return is_string($value) && trim($value) !== '' ? trim($value) : null;
     }
 
+    protected function stringArgument(string $name): string
+    {
+        $value = $this->argument($name);
+
+        return is_string($value) ? $value : '';
+    }
+
     protected function ringOption(): string
     {
         return $this->stringOption('ring') ?? Settings::defaultRing();
