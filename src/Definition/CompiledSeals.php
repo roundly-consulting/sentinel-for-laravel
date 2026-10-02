@@ -28,7 +28,7 @@ final readonly class CompiledSeals
      */
     public function get(?string $seal = null): CompiledSeal
     {
-        return $this->seals[$seal ?? $this->default] ?? throw SealingMisconfiguredException::unknownSeal($this->model, (string) $seal);
+        return $this->seals[$seal ?? $this->default] ?? throw SealingMisconfiguredException::unknownSeal($this->model, (string) $seal, $this->names());
     }
 
     /**

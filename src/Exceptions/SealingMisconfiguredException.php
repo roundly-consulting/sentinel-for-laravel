@@ -22,11 +22,14 @@ final class SealingMisconfiguredException extends SentinelException
         return new self("[{$class}] is not sealable: it must implement RoundlyConsulting\\Sentinel\\Contracts\\Sealable and use RoundlyConsulting\\Sentinel\\Concerns\\HasSeals.");
     }
 
-    public static function unknownSeal(string $class, string $seal): self
+    /**
+     * @param  list<string>  $declared  the seal names the model declares (code-defined)
+     */
+    public static function unknownSeal(string $class, string $seal, array $declared = []): self
     {
         $shown = preg_match('/^[a-z0-9_.-]{1,64}$/D', $seal) === 1 ? $seal : '(invalid)';
 
-        return new self("[{$class}] declares no seal [{$shown}].");
+        return new self("[{$class}] declares no seal [{$shown}]".($declared === [] ? '.' : '; declared: '.implode(', ', $declared).'.'));
     }
 
     public static function saveOverridden(string $class, string $method): self
