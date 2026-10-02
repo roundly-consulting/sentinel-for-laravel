@@ -29,6 +29,15 @@ native, built only on Laravel and the Roundly Tier-0 packages.
 composer require roundly-consulting/sentinel-for-laravel
 ```
 
+Publish the configuration and migrations, then generate a key for the default ring:
+
+```bash
+php artisan vendor:publish --tag="sentinel-config"
+php artisan vendor:publish --tag="sentinel-migrations"
+php artisan migrate
+php artisan sentinel:key:generate   # prints SENTINEL_KEY_ID / SENTINEL_KEY — add them to .env (secret)
+```
+
 ## Naming
 
 The facade is `RoundlyConsulting\Sentinel\Facades\Sentinel` and the injectable manager is

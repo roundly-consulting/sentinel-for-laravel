@@ -19,3 +19,11 @@ Initial public release.
   through `crypto-for-laravel`, with the algorithm pinned per key, per-purpose HKDF subkeys
   (RFC 5869) and `base64:`-only encoding.
 - `sentinel.context` configuration: an application domain separator bound into every MAC.
+- Key rings with `config` (env, the default), `database` (encrypted, integrity-bound
+  envelopes) and `chain` drivers, custom drivers through `Sentinel::extend()`, SP 800-57
+  statuses (pending / active / verify-only / retired / revoked) and a configured revocation
+  list that beats every driver.
+- `Sentinel::keys()` and the `sentinel:key:generate|rotate|revoke|retire|list` commands
+  (config keys are printed as environment lines, never written to `.env`).
+- The `sentinel_keys` migration (publish-only) and `KeyGenerated`, `KeyRotated`,
+  `KeyRevoked`, `KeyRetired` and `KeyIntegrityViolated` events.

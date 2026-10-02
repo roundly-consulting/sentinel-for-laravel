@@ -2,13 +2,30 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Artisan;
 use RoundlyConsulting\Sentinel\SentinelManager;
+use RoundlyConsulting\Sentinel\Tests\TestCase;
 
 /**
- * The `php artisan about` section, pinned with testing-for-laravel's render check: it proves
- * the capture is not empty before anything else is trusted. Rows are presence/flags only —
- * never key material. The Manager row disambiguates from laravel/sentinel's own manager.
+ * The `php artisan about` section, pinned with testing-for-laravel's render check (it proves
+ * the capture is not empty before trusting anything). Rows are presence/flags only — the
+ * configured root key must never render, raw or encoded. The Manager row disambiguates
+ * from laravel/sentinel's own manager.
  */
-it('renders its about section', function (): void {
-    expect('sentinel')->toLeakNoSecrets([], mustRender: ['Manager', SentinelManager::class]);
+it('renders its about section without leaking key material', function (): void {
+    $edSecret = sodium_crypto_sign_secretkey(sodium_crypto_sign_keypair());
+    config()->set('sentinel.keys.rings.http.previous', 'partner|ed25519|base64:'.base64_encode($edSecret));
+
+    expect('sentinel')->toLeakNoSecrets(
+        [substr(TestCase::ROOT_KEY, 7), TestCase::ROOT_KEY, base64_decode(substr(TestCase::ROOT_KEY, 7)), base64_encode($edSecret)],
+        mustRender: ['Default ring / driver', 'default (config)', 'Rings', 'default, http', 'Manager', SentinelManager::class],
+    );
+});
+
+it('reports invalid configuration instead of failing about', function (): void {
+    config()->set('sentinel.keys.default_ring', 'Bad Ring');
+
+    Artisan::call('about', ['--only' => 'sentinel']);
+
+    expect(Artisan::output())->toContain('invalid configuration');
 });

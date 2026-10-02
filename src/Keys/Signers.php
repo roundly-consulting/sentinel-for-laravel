@@ -11,6 +11,7 @@ use RoundlyConsulting\Crypto\Signature\EdDSA;
 use RoundlyConsulting\Crypto\Signature\Es;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidKeyMaterialException;
+use SensitiveParameter;
 
 /**
  * Purpose-bound signing and verification through crypto-for-laravel (one of only two
@@ -32,7 +33,7 @@ final readonly class Signers
     /**
      * The raw MAC/signature bytes over the message.
      */
-    public function sign(SealingKey $key, Purpose $purpose, string $message): string
+    public function sign(#[SensitiveParameter] SealingKey $key, Purpose $purpose, string $message): string
     {
         $material = $key->material();
 
@@ -61,7 +62,7 @@ final readonly class Signers
      * Constant-time MAC check / signature verification. Fails closed: a wrong-length
      * signature is simply invalid.
      */
-    public function verify(SealingKey $key, Purpose $purpose, string $message, string $signature): bool
+    public function verify(#[SensitiveParameter] SealingKey $key, Purpose $purpose, string $message, string $signature): bool
     {
         $algorithm = $key->algorithm();
 
@@ -78,7 +79,7 @@ final readonly class Signers
         }
     }
 
-    private function subkey(SealingKey $key, Purpose $purpose): string
+    private function subkey(#[SensitiveParameter] SealingKey $key, Purpose $purpose): string
     {
         $algorithm = $key->algorithm();
 
@@ -90,7 +91,7 @@ final readonly class Signers
         return Hkdf::derive($algorithm->hashAlgorithm(), $key->material()->hmacRoot(), $algorithm->hashLength(), $info);
     }
 
-    private function eddsa(SealingKey $key): EdDSA
+    private function eddsa(#[SensitiveParameter] SealingKey $key): EdDSA
     {
         if (! ($this->sodium ?? function_exists('sodium_crypto_sign_detached'))) {
             throw InvalidKeyMaterialException::unsupported(Algorithm::Ed25519);

@@ -17,4 +17,21 @@ final class InvalidSentinelConfigurationException extends SentinelException
     {
         return new self("Configuration value [sentinel.{$key}] {$expectation}.");
     }
+
+    public static function unknownDriver(string $key, string $driver): self
+    {
+        $shown = preg_match('/^[A-Za-z0-9._-]{1,64}$/D', $driver) === 1 ? $driver : '(invalid)';
+
+        return self::invalidValue($key, "names an unknown key driver [{$shown}]; use config, database, chain or one registered with Sentinel::extend()");
+    }
+
+    public static function invalidAlgorithmList(string $key): self
+    {
+        return self::invalidValue($key, 'must be a non-empty list of supported algorithm names (hmac-sha256, hmac-sha384, hmac-sha512, ed25519, ecdsa-p256-sha256, ecdsa-p384-sha384)');
+    }
+
+    public static function invalidPreviousKey(string $key, int $position): self
+    {
+        return self::invalidValue($key, "entry #{$position} must be \"kid|algorithm|base64:material\"");
+    }
 }

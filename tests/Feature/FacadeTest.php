@@ -82,7 +82,7 @@ it('fails assertNothingCalled after a call', function (): void {
     Sentinel::example(new ExampleSentinelData('Ada'));
 
     $fake->assertNothingCalled();
-})->throws(ExpectationFailedException::class, 'example() was called 1 time(s)');
+})->throws(ExpectationFailedException::class, '1 call(s) were recorded');
 
 it('declares no global alias, so a host using cartalyst/sentinel keeps its own Sentinel', function (): void {
     // cartalyst/sentinel registers the global alias `Sentinel`; a package-discovered alias of

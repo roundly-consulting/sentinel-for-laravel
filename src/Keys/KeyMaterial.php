@@ -39,7 +39,7 @@ final readonly class KeyMaterial
 
     private function __construct(
         public Algorithm $algorithm,
-        private ?HmacSecret $secret = null,
+        #[SensitiveParameter] private ?HmacSecret $secret = null,
         private ?OkpKey $okp = null,
         private ?EcKey $ec = null,
         private ?EcKey $ecPublic = null,
@@ -264,7 +264,7 @@ final readonly class KeyMaterial
         return self::withPublic($algorithm, $key);
     }
 
-    private static function withPublic(Algorithm $algorithm, EcKey $key): self
+    private static function withPublic(Algorithm $algorithm, #[SensitiveParameter] EcKey $key): self
     {
         return new self($algorithm, ec: $key, ecPublic: $key->isPrivate ? EcKey::public($key->publicPem()) : $key);
     }

@@ -8,6 +8,7 @@ use Carbon\CarbonImmutable;
 use LogicException;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
+use SensitiveParameter;
 
 /**
  * A resolved key: its ring, `kid`, pinned algorithm, validated material and **effective**
@@ -22,7 +23,7 @@ final readonly class SealingKey
     public function __construct(
         public string $ring,
         public string $keyId,
-        private KeyMaterial $material,
+        #[SensitiveParameter] private KeyMaterial $material,
         public KeyStatus $status = KeyStatus::Active,
         public string $driver = 'config',
         public ?CarbonImmutable $activatesAt = null,

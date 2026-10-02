@@ -17,8 +17,7 @@ use RoundlyConsulting\Testing\Arch\ArchPresets;
  *
  * Not adopted, because they would be vacuous: `swappableModelsAreNotFinal` and
  * `modelsResolveThroughSeam` — Sentinel's models are deliberately not swappable (D26).
- * `morphColumnsUseTheSeam` and `modelsGoThroughTheFacade` join once migrations and models
- * exist (Phases C/D).
+ * `modelsGoThroughTheFacade` joins with the sealable model trait (Phase D).
  */
 ArchPresets::strictTypes('RoundlyConsulting\Sentinel');
 // The manager is the one deliberate non-final class: SentinelFake extends it, so an injected
@@ -27,6 +26,7 @@ ArchPresets::finalByDefault('RoundlyConsulting\Sentinel', [SentinelManager::clas
 // No exemptions: every primitive goes through crypto-for-laravel (hash_hkdf is not on the
 // list — it is pinned to Keys\Hkdf below instead).
 ArchPresets::noLocalCryptoPrimitives('RoundlyConsulting\Sentinel');
+ArchPresets::morphColumnsUseTheSeam(__DIR__.'/../database/migrations');
 ArchPresets::runtimeRequireIsWhitelisted(__DIR__.'/../composer.json');
 ArchPresets::noDebuggingLeftovers();
 
