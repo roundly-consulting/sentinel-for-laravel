@@ -65,11 +65,11 @@ it('refuses the same key with another fingerprint, or while it still runs', func
         ->and($inner?->getHeaders())->toHaveKey('Retry-After');
 });
 
-it('releases the key when the callback fails or returns something it cannot store', function (): void {
+it('releases the key when the callback fails, but never after it ran', function (): void {
     expect(fn () => Sentinel::idempotency()->run('job:3', 'jobs', static fn () => throw new RuntimeException('down')))->toThrow(RuntimeException::class, 'down')
         ->and(Sentinel::idempotency()->run('job:3', 'jobs', static fn (): string => 'ok')->value)->toBe('ok')
-        ->and(fn () => Sentinel::idempotency()->run('job:4', 'jobs', static fn () => NAN))->toThrow(IdempotentResultException::class)
-        ->and(Sentinel::idempotency()->run('job:4', 'jobs', static fn (): int => 4)->replayed)->toBeFalse();
+        ->and(fn () => Sentinel::idempotency()->run('job:4', 'jobs', static fn () => NAN))->toThrow(IdempotentResultException::class, 'completed without a replayable result')
+        ->and(fn () => Sentinel::idempotency()->run('job:4', 'jobs', static fn (): int => 4))->toThrow(IdempotentResponseUnavailableException::class);
 });
 
 it('forgets a key on request', function (): void {
@@ -171,3 +171,38 @@ it('records idempotent runs under the fake with the real semantics', function ()
     expect(IdempotencyKey::query()->count())->toBe(0)
         ->and(fn () => $fake->assertIdempotentRun('nope', replayed: true))->toThrow(ExpectationFailedException::class, 'that replayed');
 });
+
+/**
+ * D-1: the callback ran — its side effect (a mail, a charge) is done — but its result cannot be
+ * stored. The key must not be released: a retry would repeat the side effect. It is completed
+ * as unreplayable instead, so a retry is refused (409 unavailable) and the callback runs once.
+ */
+it('never runs a completed callback again when its result cannot be stored', function (string $store, Closure $result): void {
+    match ($store) {
+        'cache' => config()->set(['sentinel.idempotency.store' => 'cache', 'sentinel.idempotency.cache_store' => 'array']),
+        'fake' => Sentinel::fake(),
+        default => null,
+    };
+    $runs = 0;
+    $mail = static function () use (&$runs, $result): mixed {
+        $runs++;
+
+        return $result();
+    };
+
+    expect(fn () => Sentinel::idempotency()->run('invoice-mail:42', 'billing', $mail))->toThrow(IdempotentResultException::class)
+        ->and(fn () => Sentinel::idempotency()->run('invoice-mail:42', 'billing', $mail))->toThrow(IdempotentResponseUnavailableException::class)
+        ->and($runs)->toBe(1);
+})->with(['database', 'cache', 'fake'])->with([
+    'binary string' => [static fn (): string => "%PDF-1.7\xB5\xED\xAE\xFB"],
+    'infinity' => [static fn (): float => INF],
+    'a resource' => [static fn (): mixed => fopen('php://memory', 'r')],
+    'too deep' => [static fn (): array => array_reduce(range(1, 600), static fn (array $carry): array => [$carry], [])],
+    'a serializer that throws' => [static fn (): JsonSerializable => new class implements JsonSerializable
+    {
+        public function jsonSerialize(): mixed
+        {
+            throw new RuntimeException('cannot serialize');
+        }
+    }],
+]);

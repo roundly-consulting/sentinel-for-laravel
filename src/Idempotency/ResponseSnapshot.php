@@ -63,6 +63,14 @@ final readonly class ResponseSnapshot
         return new self(200, [], json_encode($value, JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     }
 
+    /**
+     * A completed call whose result could not be stored: its key answers 409 unavailable.
+     */
+    public static function unreplayable(): self
+    {
+        return new self(200, [], '', false);
+    }
+
     public function value(): mixed
     {
         try {

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Sentinel\Actions\Idempotency;
 
-use JsonException;
 use RoundlyConsulting\Sentinel\Contracts\IdempotencyStore;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentCall;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentRequest;
@@ -25,7 +24,10 @@ use Throwable;
  * Run a callback at most once per (key, scope) — for jobs, commands and webhooks. A repeat
  * returns the first result (replayed, as decoded JSON); a repeat with another fingerprint, or
  * while the first still runs, throws the same exceptions the HTTP middleware renders. A
- * failing callback releases the key, so it may be retried.
+ * failing callback releases the key, so it may be retried. A callback that ran but returned
+ * something that cannot be stored (not JSON-encodable) never runs again: its key is
+ * completed as unreplayable and `IdempotentResultException` is thrown, so a repeat is refused
+ * with `IdempotentResponseUnavailableException` (409).
  */
 final readonly class RunIdempotentAction
 {
@@ -63,15 +65,22 @@ final readonly class RunIdempotentAction
 
         try {
             $value = ($call->callback)();
-            $snapshot = ResponseSnapshot::forValue($value);
-        } catch (JsonException $exception) {
-            $this->store->release($owned);
-
-            throw IdempotentResultException::notEncodable($exception);
         } catch (Throwable $exception) {
+            // The callback failed: nothing completed, so the call may be retried.
             $this->store->release($owned);
 
             throw $exception;
+        }
+
+        try {
+            $snapshot = ResponseSnapshot::forValue($value);
+        } catch (Throwable $exception) {
+            // The callback ran — its side effect happened — but its result cannot be stored.
+            // Releasing the key would let a retry repeat the side effect: complete it as
+            // unreplayable instead, so a repeat is refused (409 unavailable).
+            $this->store->complete($owned, ResponseSnapshot::unreplayable());
+
+            throw IdempotentResultException::notEncodable($exception);
         }
 
         $this->store->complete($owned, $snapshot);
