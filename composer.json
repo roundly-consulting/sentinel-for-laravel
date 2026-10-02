@@ -1,17 +1,22 @@
 {
     "name": "roundly-consulting/sentinel-for-laravel",
-    "description": "Tamper-evident seals for Eloquent models (keyed MACs and signatures, key rotation, append-only ledger), idempotency keys, nonces and RFC 9421 HTTP message signatures.",
+    "description": "Tamper-evident seals for Eloquent models (keyed MACs and signatures, key rotation, an append-only ledger with external anchors), idempotency keys, single-use nonces and URLs, and RFC 9421 HTTP message signatures.",
     "keywords": [
         "roundly-consulting",
         "laravel",
+        "eloquent",
         "integrity",
         "tamper-detection",
+        "seals",
         "hmac",
         "signatures",
+        "ledger",
+        "audit",
         "idempotency",
         "nonce",
+        "replay-protection",
         "http-message-signatures",
-        "audit"
+        "rfc9421"
     ],
     "homepage": "https://github.com/roundly-consulting/sentinel-for-laravel",
     "license": "MIT",
