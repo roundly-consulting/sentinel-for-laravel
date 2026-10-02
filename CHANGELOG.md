@@ -10,8 +10,8 @@ Initial public release.
 
 ### Added
 
-- Package scaffold: native service provider, configuration file and the `Sentinel` facade
-  (no global alias — import `RoundlyConsulting\Sentinel\Facades\Sentinel`).
+- The `Sentinel` facade, the injectable `SentinelManager` and one action per operation — one
+  API in three styles (no global alias: import `RoundlyConsulting\Sentinel\Facades\Sentinel`).
 - Canonical format `sentinel.seal/1`: RFC 8785 (JCS) documents with exact integers, typed
   and engine-portable field values (decimals at a fixed scale, UTC datetimes, canonical JSON),
   and frozen known-answer vectors.
@@ -43,8 +43,13 @@ Initial public release.
 - An append-only, MAC'd ledger of every seal event (seal, re-seal, acknowledgement, deletion,
   unseal) that detects replayed and rolled-back seals.
 - `Sentinel::for($model)`, `Sentinel::model(Invoice::class)`, `withoutSealing()`,
-  `withoutVerification()`, the `HasSeals` trait helpers and scopes, and `Sentinel::fake()`
-  with sealing, verification and acknowledgement assertions.
+  `withoutVerification()` and the `HasSeals` trait helpers and scopes.
+- `Sentinel::fake()`: a recording fake for application tests that keeps production
+  semantics — real definitions, the tampered-write policy applied to scripted statuses
+  (`fakeStatus()`, `fakeStatusOnce()`), enforced reasons and policies, and the real
+  idempotency and nonce state machines in memory — with an assertion for every operation
+  (sealing, verification, acknowledgement, keys, checkpoints, re-sealing, idempotency, nonces,
+  signed requests).
 - Keyed, chained ledger checkpoints (`sentinel:checkpoint`, `Sentinel::ledger()->checkpoint()`)
   published to external anchors (`cache`, `filesystem`, `log`, or custom ones through
   `Sentinel::extendAnchor()`), so deleted, rewritten or rolled-back ledger history — and,
@@ -67,7 +72,8 @@ Initial public release.
   `Retry-After`) while it is still in flight, releases the key on 5xx, never stores
   `Set-Cookie`, encrypts stored responses and optionally commits the handler and the record
   in one transaction; `Sentinel::idempotency()->run()` for jobs and commands;
-  `Http::withIdempotencyKey()` for outgoing requests; database and cache stores.
+  `Http::withIdempotencyKey()` for outgoing requests; database and cache stores (an edited
+  stored record fails closed in both).
 - Single-use, purpose-bound nonces (`Sentinel::nonces()->issue()/consume()`, only digests
   stored, atomic consume) and single-use signed URLs (`signedRoute()` + the
   `sentinel.single-use` middleware); `sentinel:prune` for expired keys and nonces.
@@ -80,3 +86,5 @@ Initial public release.
   `Accept-Signature` hint; `Http::withSignature()` signs outgoing requests;
   `Sentinel::signatures()->verifyResponse()` checks signed responses. Verified against the
   RFC's Appendix B test vectors.
+- A README covering installation, every configuration key, the threat model (what is and
+  is not detected) and the full public API.
