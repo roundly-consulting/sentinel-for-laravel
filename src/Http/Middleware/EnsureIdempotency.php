@@ -41,6 +41,31 @@ final readonly class EnsureIdempotency
 {
     public function __construct(private Container $container) {}
 
+    /**
+     * The middleware accepting requests without a key: `->middleware(EnsureIdempotency::optional())`.
+     *
+     * @throws SealingMisconfiguredException for a TTL outside 60–2 592 000 seconds
+     */
+    public static function optional(?int $ttl = null): string
+    {
+        return self::with('optional', $ttl);
+    }
+
+    /**
+     * The middleware refusing requests without a key (400): `->middleware(EnsureIdempotency::required(ttl: 3600))`.
+     *
+     * @throws SealingMisconfiguredException for a TTL outside 60–2 592 000 seconds
+     */
+    public static function required(?int $ttl = null): string
+    {
+        return self::with('required', $ttl);
+    }
+
+    private static function with(string $mode, ?int $ttl): string
+    {
+        return self::class.':'.$mode.($ttl === null ? '' : ','.self::ttl((string) $ttl));
+    }
+
     public function handle(Request $request, Closure $next, string $mode = 'optional', ?string $ttl = null): Response
     {
         if (! in_array(strtoupper($request->getMethod()), Settings::idempotencyMethods(), true)) {

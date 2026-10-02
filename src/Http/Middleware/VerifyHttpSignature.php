@@ -8,6 +8,7 @@ use Closure;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Http\Request;
 use RoundlyConsulting\Sentinel\Exceptions\HttpSignatureException;
+use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
 use RoundlyConsulting\Sentinel\Http\StructuredFields\InnerList;
 use RoundlyConsulting\Sentinel\Http\StructuredFields\Item;
@@ -31,6 +32,27 @@ final readonly class VerifyHttpSignature
     public const string ATTRIBUTE = 'sentinel.signature';
 
     public function __construct(private Container $container) {}
+
+    /**
+     * The middleware for a configured profile, validated when the route is declared:
+     * `->middleware(VerifyHttpSignature::profile('partners'))`. Null = the default profile.
+     *
+     * @throws SealingMisconfiguredException for a profile not in `sentinel.signatures.profiles`
+     */
+    public static function profile(?string $profile = null): string
+    {
+        if ($profile === null) {
+            return self::class;
+        }
+
+        $profiles = config('sentinel.signatures.profiles');
+
+        if (! is_array($profiles) || ! array_key_exists($profile, $profiles) || preg_match('/^[a-z][a-z0-9_-]{0,63}$/D', $profile) !== 1) {
+            throw SealingMisconfiguredException::middlewareOption('sentinel.signed', $profile);
+        }
+
+        return self::class.':'.$profile;
+    }
 
     public function handle(Request $request, Closure $next, ?string $profile = null): Response
     {

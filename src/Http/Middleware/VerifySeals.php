@@ -35,6 +35,24 @@ final readonly class VerifySeals
 {
     public function __construct(private Container $container) {}
 
+    /**
+     * The middleware with its parameters, validated when the route is declared:
+     * `->middleware(VerifySeals::using('invoice@financial', 'customer'))`. None = every
+     * sealable route parameter, every seal.
+     *
+     * @throws SealingMisconfiguredException for a malformed parameter
+     */
+    public static function using(string ...$parameters): string
+    {
+        foreach ($parameters as $parameter) {
+            if (preg_match('/^[A-Za-z0-9_]{1,64}(@[a-z0-9_.-]{1,64})?$/D', $parameter) !== 1) {
+                throw SealingMisconfiguredException::middlewareOption('sentinel.verified', $parameter);
+            }
+        }
+
+        return $parameters === [] ? self::class : self::class.':'.implode(',', $parameters);
+    }
+
     public function handle(Request $request, Closure $next, string ...$parameters): Response
     {
         $route = $request->route();
