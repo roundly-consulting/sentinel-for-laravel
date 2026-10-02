@@ -8,8 +8,8 @@ use Closure;
 
 /**
  * Run a callback at most once per (key, scope) — `Sentinel::idempotency()->run()`. The
- * result must be JSON-encodable (it is stored, encrypted, for replays). Calls with another
- * fingerprint under the same key are refused.
+ * result must be JSON-encodable (it is stored, encrypted, for replays) and is returned as its
+ * JSON round-trip. Calls with another fingerprint under the same key are refused.
  */
 final readonly class IdempotentCall
 {

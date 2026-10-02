@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
@@ -206,3 +207,43 @@ it('never runs a completed callback again when its result cannot be stored', fun
         }
     }],
 ]);
+
+/**
+ * I-8: the first run and every replay return the same shape — the JSON round-trip.
+ */
+it('returns the same value on the first run and on a replay', function (Closure $result, mixed $expected): void {
+    $first = Sentinel::idempotency()->run('shape', 'jobs', $result);
+    $replay = Sentinel::idempotency()->run('shape', 'jobs', static fn (): never => throw new LogicException('must not run'));
+
+    expect($first->replayed)->toBeFalse()
+        ->and($replay->replayed)->toBeTrue()
+        ->and($first->value)->toBe($expected)
+        ->and($replay->value)->toBe($first->value);
+})->with([
+    'object' => [static fn (): object => (object) ['id' => 'ch_1', 'amount' => 1050], ['id' => 'ch_1', 'amount' => 1050]],
+    'JsonSerializable' => [static fn (): JsonSerializable => new class implements JsonSerializable
+    {
+        public function jsonSerialize(): array
+        {
+            return ['id' => 'ch_2'];
+        }
+    }, ['id' => 'ch_2']],
+    'Arrayable collection' => [static fn (): Collection => collect(['a' => 1, 'b' => [2.0, true]]), ['a' => 1, 'b' => [2.0, true]]],
+    'string' => [static fn (): string => 'ok', 'ok'],
+    'int' => [static fn (): int => 42, 42],
+    'float' => [static fn (): float => 1.0, 1.0],
+    'bool' => [static fn (): bool => false, false],
+    'null' => [static fn (): null => null, null],
+    'list' => [static fn (): array => [1, 'two', null], [1, 'two', null]],
+]);
+
+it('returns the same shape under the fake', function (): void {
+    Sentinel::fake();
+
+    $first = Sentinel::idempotency()->run('shape', 'jobs', static fn (): object => (object) ['id' => 'ch_3']);
+    $replay = Sentinel::idempotency()->run('shape', 'jobs', static fn (): object => (object) ['id' => 'other']);
+
+    expect($first->value)->toBe(['id' => 'ch_3'])
+        ->and($replay->value)->toBe(['id' => 'ch_3'])
+        ->and($replay->replayed)->toBeTrue();
+});

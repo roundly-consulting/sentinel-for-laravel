@@ -21,8 +21,9 @@ use RoundlyConsulting\Sentinel\Support\Settings;
 use Throwable;
 
 /**
- * Run a callback at most once per (key, scope) — for jobs, commands and webhooks. A repeat
- * returns the first result (replayed, as decoded JSON); a repeat with another fingerprint, or
+ * Run a callback at most once per (key, scope) — for jobs, commands and webhooks. Every run
+ * returns the JSON round-trip of the callback's result (objects become arrays), fresh or
+ * replayed, so the value has one shape on both paths; a repeat with another fingerprint, or
  * while the first still runs, throws the same exceptions the HTTP middleware renders. A
  * failing callback releases the key, so it may be retried. A callback that ran but returned
  * something that cannot be stored (not JSON-encodable) never runs again: its key is
@@ -85,6 +86,7 @@ final readonly class RunIdempotentAction
 
         $this->store->complete($owned, $snapshot);
 
-        return new IdempotentResult($value, false, $firstSeenAt);
+        // The JSON round-trip — exactly what a replay returns — so the value has one shape.
+        return new IdempotentResult($snapshot->value(), false, $firstSeenAt);
     }
 }
