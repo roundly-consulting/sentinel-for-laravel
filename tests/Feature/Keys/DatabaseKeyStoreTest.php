@@ -15,6 +15,7 @@ use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Models\Key;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\User;
+use RoundlyConsulting\Testing\Database\DriverMatrix;
 
 function httpKeys(): KeyStoreManager
 {
@@ -68,7 +69,12 @@ it('detects every out-of-band edit of a key row (§10 item 11)', function (Closu
     Event::fake([KeyIntegrityViolated::class]);
     $key = Key::factory()->ring('http')->create(['kid' => 'victim']);
 
-    $tamper($key);
+    // false: the engine refused to store the corruption at all (MySQL rejects a bad datetime).
+    if ($tamper($key) === false) {
+        expect(DriverMatrix::driver())->not->toBe('sqlite');
+
+        return;
+    }
 
     expect(httpKeys()->lookup('http', 'victim'))->toEqual(new KeyLookup(null, KeyLookup::INTEGRITY));
 
@@ -82,7 +88,7 @@ it('detects every out-of-band edit of a key row (§10 item 11)', function (Closu
     }],
     'owner re-pointed' => [fn (Key $key) => Key::query()->whereKey($key->id)->update(['owner_type' => 'user', 'owner_id' => 7])],
     'garbage envelope' => [fn (Key $key) => Key::query()->whereKey($key->id)->update(['envelope' => 'not-a-ciphertext'])],
-    'corrupt date column' => [fn (Key $key) => Key::query()->whereKey($key->id)->update(['activates_at' => 'yesterday'])],
+    'corrupt date column' => [fn (Key $key): bool => corrupt(static fn () => Key::query()->whereKey($key->id)->update(['activates_at' => 'yesterday']))],
     'envelope of another key' => [function (Key $key): void {
         $other = Key::factory()->ring('http')->create(['kid' => 'other']);
         Key::query()->whereKey($key->id)->update(['envelope' => $other->getRawOriginal('envelope')]);
