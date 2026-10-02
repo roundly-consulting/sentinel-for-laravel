@@ -78,7 +78,8 @@ function definedBy(Closure $define): string
 /**
  * Write a corrupt value the way an attacker with SQL access would. SQLite stores anything;
  * PostgreSQL and MySQL refuse what does not fit the column type — then the corruption is
- * impossible on that engine, which the caller asserts instead.
+ * impossible on that engine, which the caller asserts instead. Only that refusal counts
+ * (SQLSTATE class 22 "data exception", MySQL 1292 / 1366); any other failure is rethrown.
  */
 function corrupt(Closure $write): bool
 {
@@ -86,8 +87,15 @@ function corrupt(Closure $write): bool
         $write();
 
         return true;
-    } catch (QueryException) {
-        expect(DriverMatrix::driver())->not->toBe('sqlite');
+    } catch (QueryException $exception) {
+        $state = (string) ($exception->errorInfo[0] ?? '');
+        $code = (int) ($exception->errorInfo[1] ?? 0);
+
+        if (DriverMatrix::driver() === 'sqlite' || ! (str_starts_with($state, '22') || in_array($code, [1292, 1366], true))) {
+            throw $exception;
+        }
+
+        expect(DriverMatrix::driver())->toBeIn(['pgsql', 'mysql', 'mariadb']);
 
         return false;
     }
