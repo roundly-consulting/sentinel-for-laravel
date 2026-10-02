@@ -17,6 +17,7 @@ use RoundlyConsulting\Sentinel\Exceptions\IdempotentResponseUnavailableException
 use RoundlyConsulting\Sentinel\Exceptions\IdempotentResultException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidIdempotencyKeyException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Jobs\Middleware\Idempotent;
 use RoundlyConsulting\Sentinel\Models\IdempotencyKey;
 use RoundlyConsulting\Sentinel\SentinelManager;
 
@@ -247,3 +248,54 @@ it('returns the same shape under the fake', function (): void {
         ->and($replay->value)->toBe(['id' => 'ch_3'])
         ->and($replay->replayed)->toBeTrue();
 });
+
+/**
+ * Audit follow-ups B2 + B3: a programmatic run takes the arguments the `Idempotent` job
+ * middleware takes — the TTL range of `idempotency.ttl` and `sentinel.idempotent` (B2), and a
+ * scope that is never empty (B3: an empty, e.g. computed, scope would merge every such
+ * caller's keys into one namespace). Every entry point refuses the same input before the
+ * store is touched, the fake included; `forget()` takes the same key and scope.
+ */
+it('refuses what the job middleware refuses, on every entry point', function (string $key, string $scope, ?int $ttl): void {
+    $call = new IdempotentCall($key, $scope, static fn (): int => 1, null, $ttl);
+    $refused = static function (Closure $run): void {
+        expect($run)->toThrow(InvalidIdempotencyKeyException::class);
+    };
+
+    $refused(fn () => new Idempotent($key, $scope, $ttl));
+    $refused(fn () => Sentinel::idempotency()->run($key, $scope, static fn (): int => 1, ttl: $ttl));
+    $refused(fn () => Sentinel::runIdempotent($call));
+    $refused(fn () => app(RunIdempotentAction::class)->execute($call));
+
+    expect(IdempotencyKey::query()->count())->toBe(0);
+
+    Sentinel::fake();
+    $refused(fn () => Sentinel::idempotency()->run($key, $scope, static fn (): int => 1, ttl: $ttl));
+
+    if ($ttl === null) {
+        $refused(fn () => Sentinel::idempotency()->forget($key, $scope));
+    }
+})->with([
+    'empty scope' => ['charge:1', '', null],
+    'long scope' => ['charge:1', str_repeat('s', 256), null],
+    'empty key' => ['', 'billing', null],
+    'long key' => [str_repeat('k', 256), 'billing', null],
+    'zero ttl' => ['charge:1', 'billing', 0],
+    'negative ttl' => ['charge:1', 'billing', -1],
+    'short ttl' => ['charge:1', 'billing', 59],
+    'long ttl' => ['charge:1', 'billing', 2592001],
+]);
+
+it('accepts the boundaries the job middleware accepts', function (string $key, string $scope, ?int $ttl): void {
+    $middleware = new Idempotent($key, $scope, $ttl);
+    $result = Sentinel::idempotency()->run($key, $scope, static fn (): int => 1, ttl: $ttl);
+
+    expect($middleware->key)->toBe($key)
+        ->and($result->value)->toBe(1)
+        ->and(Sentinel::idempotency()->forget($key, $scope))->toBeTrue();
+})->with([
+    'one-byte key and scope' => ['k', 's', null],
+    '255-byte key and scope' => [str_repeat('k', 255), str_repeat('s', 255), null],
+    'shortest ttl' => ['charge:1', 'billing', 60],
+    'longest ttl' => ['charge:1', 'billing', 2592000],
+]);

@@ -23,6 +23,7 @@ use RoundlyConsulting\Sentinel\Idempotency\KeyParser;
 use RoundlyConsulting\Sentinel\Idempotency\ReleaseResponse;
 use RoundlyConsulting\Sentinel\Idempotency\RequestFingerprint;
 use RoundlyConsulting\Sentinel\Idempotency\RequestScope;
+use RoundlyConsulting\Sentinel\Idempotency\RunLimits;
 use RoundlyConsulting\Sentinel\Models\IdempotencyKey;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\Settings;
@@ -197,7 +198,7 @@ final readonly class EnsureIdempotency
 
     private static function ttl(string $ttl): int
     {
-        if (preg_match('/^\d{2,7}$/D', $ttl) !== 1 || (int) $ttl < 60 || (int) $ttl > 2592000) {
+        if (preg_match('/^\d{2,7}$/D', $ttl) !== 1 || (int) $ttl < RunLimits::MIN_TTL || (int) $ttl > RunLimits::MAX_TTL) {
             throw SealingMisconfiguredException::middlewareOption('sentinel.idempotent', $ttl);
         }
 

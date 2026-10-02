@@ -10,6 +10,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentCall;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidIdempotencyKeyException;
 use RoundlyConsulting\Sentinel\Exceptions\JobNotCompletedException;
+use RoundlyConsulting\Sentinel\Idempotency\RunLimits;
 use RoundlyConsulting\Sentinel\SentinelManager;
 
 /**
@@ -30,7 +31,8 @@ use RoundlyConsulting\Sentinel\SentinelManager;
 final readonly class Idempotent
 {
     /**
-     * @throws InvalidIdempotencyKeyException for an empty or overlong key or scope
+     * @throws InvalidIdempotencyKeyException for an empty or overlong key or scope, a TTL
+     *                                        outside 60–2 592 000 seconds or a release delay < 1
      */
     public function __construct(
         public string $key,
@@ -38,8 +40,9 @@ final readonly class Idempotent
         public ?int $ttl = null,
         public int $releaseAfter = 10,
     ) {
-        if ($key === '' || strlen($key) > 255 || $scope === '' || strlen($scope) > 255
-            || ($ttl !== null && ($ttl < 60 || $ttl > 2592000)) || $releaseAfter < 1) {
+        RunLimits::check($key, $scope, $ttl);
+
+        if ($releaseAfter < 1) {
             throw InvalidIdempotencyKeyException::make();
         }
     }

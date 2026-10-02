@@ -16,6 +16,7 @@ use RoundlyConsulting\Sentinel\Exceptions\IdempotentResultException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidIdempotencyKeyException;
 use RoundlyConsulting\Sentinel\Idempotency\RequestFingerprint;
 use RoundlyConsulting\Sentinel\Idempotency\ResponseSnapshot;
+use RoundlyConsulting\Sentinel\Idempotency\RunLimits;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Support\Settings;
 use Throwable;
@@ -28,17 +29,21 @@ use Throwable;
  * failing callback releases the key, so it may be retried. A callback that ran but returned
  * something that cannot be stored (not JSON-encodable) never runs again: its key is
  * completed as unreplayable and `IdempotentResultException` is thrown, so a repeat is refused
- * with `IdempotentResponseUnavailableException` (409).
+ * with `IdempotentResponseUnavailableException` (409). The key and the scope are 1–255
+ * bytes and a TTL is 60–2 592 000 seconds — what the `Idempotent` job middleware takes
+ * (`InvalidIdempotencyKeyException` otherwise, before the store is touched).
  */
 final readonly class RunIdempotentAction
 {
     public function __construct(private IdempotencyStore $store) {}
 
+    /**
+     * @throws InvalidIdempotencyKeyException for an empty or overlong key or scope, or a TTL
+     *                                        outside 60–2 592 000 seconds
+     */
     public function execute(IdempotentCall $call): IdempotentResult
     {
-        if ($call->key === '' || strlen($call->key) > 255 || strlen($call->scope) > 255) {
-            throw InvalidIdempotencyKeyException::make();
-        }
+        RunLimits::check($call->key, $call->scope, $call->ttl);
 
         $request = new IdempotentRequest(
             RequestFingerprint::key($call->scope, 'run', $call->key),

@@ -102,6 +102,7 @@ use RoundlyConsulting\Sentinel\Enums\SealEvent;
 use RoundlyConsulting\Sentinel\Enums\VerificationContext;
 use RoundlyConsulting\Sentinel\Events\SealingSuspended;
 use RoundlyConsulting\Sentinel\Exceptions\CorruptRecordException;
+use RoundlyConsulting\Sentinel\Exceptions\InvalidIdempotencyKeyException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Http\Middleware\VerifyHttpSignature;
@@ -478,7 +479,10 @@ class SentinelManager
     }
 
     /**
-     * Run a callback at most once per (key, scope).
+     * Run a callback at most once per (key, scope). The key and the scope are 1–255 bytes, a
+     * TTL 60–2 592 000 seconds — as for the `Idempotent` job middleware.
+     *
+     * @throws InvalidIdempotencyKeyException
      */
     public function runIdempotent(IdempotentCall $call): IdempotentResult
     {
@@ -487,6 +491,8 @@ class SentinelManager
 
     /**
      * Forget a programmatic idempotency key.
+     *
+     * @throws InvalidIdempotencyKeyException
      */
     public function forgetIdempotencyKey(string $key, string $scope): bool
     {

@@ -7,6 +7,7 @@ namespace RoundlyConsulting\Sentinel\Accessors;
 use Closure;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentCall;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentResult;
+use RoundlyConsulting\Sentinel\Exceptions\InvalidIdempotencyKeyException;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use SensitiveParameter;
 
@@ -19,7 +20,10 @@ final readonly class IdempotencyAccessor
     public function __construct(private SentinelManager $manager) {}
 
     /**
-     * Run the callback once per (key, scope); a repeat returns the stored result.
+     * Run the callback once per (key, scope); a repeat returns the stored result. The key and
+     * the scope are 1–255 bytes, a TTL 60–2 592 000 seconds.
+     *
+     * @throws InvalidIdempotencyKeyException
      */
     public function run(#[SensitiveParameter] string $key, string $scope, Closure $callback, ?string $fingerprint = null, ?int $ttl = null): IdempotentResult
     {
@@ -28,6 +32,8 @@ final readonly class IdempotencyAccessor
 
     /**
      * Forget a key, so the next run executes again.
+     *
+     * @throws InvalidIdempotencyKeyException
      */
     public function forget(#[SensitiveParameter] string $key, string $scope): bool
     {

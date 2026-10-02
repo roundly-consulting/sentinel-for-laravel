@@ -9,7 +9,9 @@ use Closure;
 /**
  * Run a callback at most once per (key, scope) — `Sentinel::idempotency()->run()`. The
  * result must be JSON-encodable (it is stored, encrypted, for replays) and is returned as its
- * JSON round-trip. Calls with another fingerprint under the same key are refused.
+ * JSON round-trip. Calls with another fingerprint under the same key are refused. The key and
+ * the scope are 1–255 bytes, `ttl` (null = `idempotency.ttl`) 60–2 592 000 seconds — checked
+ * when the call runs (`InvalidIdempotencyKeyException`), as for the `Idempotent` job middleware.
  */
 final readonly class IdempotentCall
 {

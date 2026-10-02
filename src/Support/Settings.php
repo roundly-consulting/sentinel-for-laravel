@@ -13,6 +13,7 @@ use RoundlyConsulting\Sentinel\Enums\TamperedWritePolicy;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
+use RoundlyConsulting\Sentinel\Idempotency\RunLimits;
 use RoundlyConsulting\Sentinel\Keys\RingConfig;
 
 /**
@@ -477,7 +478,7 @@ final class Settings
 
     public static function idempotencyTtl(): int
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.idempotency.ttl', 60, 2592000, 86400);
+        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.idempotency.ttl', RunLimits::MIN_TTL, RunLimits::MAX_TTL, 86400);
     }
 
     public static function idempotencyLockSeconds(): int
