@@ -5,7 +5,9 @@ declare(strict_types=1);
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use RoundlyConsulting\Sentinel\Canonical\Normalizer;
 use RoundlyConsulting\Sentinel\Definition\DefinitionRegistry;
+use RoundlyConsulting\Sentinel\Definition\SealType;
 use RoundlyConsulting\Sentinel\Engine\DocumentBuilder;
 use RoundlyConsulting\Sentinel\Engine\ReadBack;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
@@ -13,6 +15,7 @@ use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\LedgerIsAppendOnlyException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
 use RoundlyConsulting\Sentinel\Models\Checkpoint;
 use RoundlyConsulting\Sentinel\Models\LedgerEntry;
 use RoundlyConsulting\Sentinel\Models\Seal;
@@ -115,6 +118,11 @@ it('reads every boolean switch the way an env string means it', function (string
     ['sentinel.idempotency.store_server_errors', fn () => Settings::storesServerErrors()],
     ['sentinel.idempotency.transactional', fn () => Settings::idempotencyTransactional()],
     ['sentinel.idempotency.encrypt', fn () => Settings::idempotencyEncrypt()],
+    ['sentinel.signatures.advertise', fn () => Settings::advertisesSignatures()],
+    ['sentinel.signatures.outbound.include_alg', fn () => Settings::outboundIncludesAlg()],
+    ['sentinel.signatures.profiles.default.require_query', fn () => ProfileResolver::resolve()->requireQuery],
+    ['sentinel.signatures.profiles.default.require_content_digest', fn () => ProfileResolver::resolve()->requireContentDigest],
+    ['sentinel.signatures.profiles.default.require_nonce', fn () => ProfileResolver::resolve()->requireNonce],
 ])->with([
     ['off', false], ['no', false], ['0', false], ['false', false], ['', false], [false, false],
     ['on', true], ['yes', true], ['1', true], ['true', true], [true, true],
@@ -208,3 +216,33 @@ it('canonicalizes a row to the same bytes on every engine', function (): void {
         Carbon::setTestNow();
     }
 });
+
+/**
+ * §10 items 26 and 28: datetimes and declared floats come back from every engine in its own
+ * raw form (pgsql trims trailing fraction zeros, SQLite stores floats as REAL) and still
+ * canonicalize to the same bytes.
+ */
+it('canonicalizes datetimes and declared floats to the same bytes on every engine', function (): void {
+    $record = record(['happened_at' => '2026-10-02 18:30:00.500000', 'ratio' => 0.25]);
+    $seal = app(DefinitionRegistry::class)->seal($record);
+    $row = app(ReadBack::class)->row($record, $seal->readColumns()) ?? [];
+    $message = app(DocumentBuilder::class)->build($record, $seal, $seal->fields, $row, 'default', 'k', Algorithm::HmacSha256, 1, null, CarbonImmutable::now());
+    $tuples = array_column(array_map(static fn ($field): array => $field->tuple(), $message->fields), null, 0);
+
+    expect($tuples['a:happened_at'])->toBe(['a:happened_at', 'dt', '2026-10-02T18:30:00.500000Z'])
+        ->and($tuples['a:ratio'])->toBe(['a:ratio', 'flt:3', '0.250'])
+        ->and(Sentinel::verify($record)->isIntact())->toBeTrue();
+});
+
+it('reads a pgsql timestamptz in any session time zone as the same instant', function (): void {
+    DB::statement("set time zone 'America/New_York'");
+
+    try {
+        $raw = DB::selectOne("select '2026-10-02 18:30:00.25+00'::timestamptz as at")->at;
+
+        expect($raw)->toBe('2026-10-02 14:30:00.25-04')
+            ->and((new Normalizer)->normalize('a:at', SealType::datetime(), $raw)->tuple())->toBe(['a:at', 'dt', '2026-10-02T18:30:00.250000Z']);
+    } finally {
+        DB::statement("set time zone 'UTC'");
+    }
+})->skip(fn (): bool => DriverMatrix::driver() !== 'pgsql', 'timestamptz is a PostgreSQL type');

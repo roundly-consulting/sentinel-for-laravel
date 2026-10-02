@@ -110,7 +110,7 @@ it('writes nothing when a listener cancels the save of a sealed model', function
 
     expect($invoice->update(['amount' => '99.00']))->toBeFalse()
         ->and(LedgerEntry::query()->count())->toBe($versions)
-        ->and(DB::table('invoices')->where('id', $invoice->id)->value('amount'))->toEqual('10.5')
+        ->and((float) DB::table('invoices')->where('id', $invoice->id)->value('amount'))->toBe(10.5)
         ->and(Sentinel::verify($invoice->refresh())->isIntact())->toBeTrue();
 });
 
