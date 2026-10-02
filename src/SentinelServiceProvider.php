@@ -6,7 +6,6 @@ namespace RoundlyConsulting\Sentinel;
 
 use RoundlyConsulting\PackageToolkit\Package;
 use RoundlyConsulting\PackageToolkit\PackageServiceProvider;
-use RoundlyConsulting\PackageToolkit\Support\Config;
 
 final class SentinelServiceProvider extends PackageServiceProvider
 {
@@ -15,10 +14,10 @@ final class SentinelServiceProvider extends PackageServiceProvider
         $package
             ->name('sentinel')
             ->hasConfigFile()
-            // Read env-backed flags through the toolkit's Config helpers, never a bare truthiness
-            // check: env() leaves `off`/`no` as non-empty (truthy) strings.
+            // Presence and flags only — never key material, never a database key's kid.
             ->contributesToAbout(static fn (): array => [
-                'Enabled' => Config::boolean('sentinel.enabled', true) ? 'YES' : 'NO',
+                // Disambiguates from Laravel\Sentinel\SentinelManager (laravel/sentinel).
+                'Manager' => SentinelManager::class,
             ]);
 
         // Deliberately NO global facade alias (no extra.laravel.aliases, no hasFacadeAlias()):

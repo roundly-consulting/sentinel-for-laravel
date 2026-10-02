@@ -6,16 +6,16 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Enabled
+    | Context
     |--------------------------------------------------------------------------
     |
-    | Placeholder setting so the service provider has something real to merge,
-    | publish, and report via `php artisan about`. Replace with the package's
-    | real configuration — every key here must be read somewhere under src/,
-    | and ConfigContractTest enforces both directions.
+    | An application-level domain separator bound into every seal, ledger entry,
+    | checkpoint and field tag. Two applications that share signing keys but use
+    | different contexts can never forge each other's seals. Changing it
+    | invalidates every existing seal — re-seal with `sentinel:reseal`.
     |
     */
 
-    'enabled' => env('SENTINEL_ENABLED', true),
+    'context' => env('SENTINEL_CONTEXT', ''),
 
 ];
