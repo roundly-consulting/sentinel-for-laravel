@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Sentinel\Keys;
 
 use LogicException;
-use RoundlyConsulting\Crypto\Cose\UnsupportedAlgorithmException;
-use RoundlyConsulting\Crypto\Exceptions\CryptoException;
 use RoundlyConsulting\Crypto\Signature\EdDSA;
 use RoundlyConsulting\Crypto\Signature\Key\EcKey;
 use RoundlyConsulting\Crypto\Signature\Key\HmacSecret;
@@ -66,18 +64,14 @@ final readonly class KeyMaterial
      */
     public static function generate(Algorithm $algorithm): self
     {
-        try {
-            return match ($algorithm) {
-                Algorithm::HmacSha256, Algorithm::HmacSha384, Algorithm::HmacSha512 => new self($algorithm, secret: HmacSecret::generate($algorithm->hashLength())),
-                Algorithm::Ed25519 => new self($algorithm, okp: OkpKey::generate()),
-                Algorithm::EcdsaP256Sha256, Algorithm::EcdsaP384Sha384 => new self(
-                    $algorithm,
-                    ec: EcKey::generate($algorithm === Algorithm::EcdsaP256Sha256 ? 'P-256' : 'P-384'),
-                ),
-            };
-        } catch (UnsupportedAlgorithmException $exception) {
-            throw InvalidKeyMaterialException::unsupported($algorithm, $exception);
-        }
+        return CryptoErrors::translate($algorithm, static fn (): self => match ($algorithm) {
+            Algorithm::HmacSha256, Algorithm::HmacSha384, Algorithm::HmacSha512 => new self($algorithm, secret: HmacSecret::generate($algorithm->hashLength())),
+            Algorithm::Ed25519 => new self($algorithm, okp: OkpKey::generate()),
+            Algorithm::EcdsaP256Sha256, Algorithm::EcdsaP384Sha384 => new self(
+                $algorithm,
+                ec: EcKey::generate($algorithm === Algorithm::EcdsaP256Sha256 ? 'P-256' : 'P-384'),
+            ),
+        });
     }
 
     public function canSign(): bool
@@ -167,15 +161,11 @@ final readonly class KeyMaterial
 
     private static function fromBytes(Algorithm $algorithm, #[SensitiveParameter] ?string $private, ?string $public): self
     {
-        try {
-            return match ($algorithm) {
-                Algorithm::HmacSha256, Algorithm::HmacSha384, Algorithm::HmacSha512 => self::hmac($algorithm, $private, $public),
-                Algorithm::Ed25519 => self::ed25519($private, $public),
-                Algorithm::EcdsaP256Sha256, Algorithm::EcdsaP384Sha384 => self::ecdsa($algorithm, $private, $public),
-            };
-        } catch (UnsupportedAlgorithmException $exception) {
-            throw InvalidKeyMaterialException::unsupported($algorithm, $exception);
-        }
+        return match ($algorithm) {
+            Algorithm::HmacSha256, Algorithm::HmacSha384, Algorithm::HmacSha512 => self::hmac($algorithm, $private, $public),
+            Algorithm::Ed25519 => self::ed25519($private, $public),
+            Algorithm::EcdsaP256Sha256, Algorithm::EcdsaP384Sha384 => self::ecdsa($algorithm, $private, $public),
+        };
     }
 
     private static function hmac(Algorithm $algorithm, #[SensitiveParameter] ?string $private, ?string $public): self
@@ -208,20 +198,20 @@ final readonly class KeyMaterial
     {
         $algorithm = Algorithm::Ed25519;
 
-        try {
-            $key = $private !== null ? OkpKey::fromSecretKey($private) : OkpKey::ed25519((string) $public);
-        } catch (UnsupportedAlgorithmException $exception) {
-            throw $exception;
-        } catch (CryptoException $exception) {
-            throw InvalidKeyMaterialException::wrongType($algorithm, $private !== null
-                ? 'the secret key must be the 64-byte libsodium secret key'
-                : 'the public key must be 32 bytes', $exception);
-        }
+        $key = CryptoErrors::translate(
+            $algorithm,
+            static fn (): OkpKey => $private !== null ? OkpKey::fromSecretKey($private) : OkpKey::ed25519((string) $public),
+            $private !== null ? 'the secret key must be the 64-byte libsodium secret key' : 'the public key must be 32 bytes',
+        );
 
         if ($private !== null) {
-            $probe = new EdDSA($key);
+            $proven = CryptoErrors::translate($algorithm, static function () use ($key): bool {
+                $probe = new EdDSA($key);
 
-            if (! $probe->verify(self::ED25519_PROBE, $probe->sign(self::ED25519_PROBE))) {
+                return $probe->verify(self::ED25519_PROBE, $probe->sign(self::ED25519_PROBE));
+            });
+
+            if (! $proven) {
                 throw InvalidKeyMaterialException::wrongType($algorithm, 'the secret key does not embed its own public key');
             }
 
@@ -235,12 +225,14 @@ final readonly class KeyMaterial
 
     private static function ecdsa(Algorithm $algorithm, #[SensitiveParameter] ?string $private, ?string $public): self
     {
-        try {
-            $key = $private !== null ? EcKey::private($private) : EcKey::public((string) $public);
-            $publicKey = $private !== null && $public !== null ? EcKey::public($public) : null;
-        } catch (CryptoException $exception) {
-            throw InvalidKeyMaterialException::wrongType($algorithm, 'expected PEM text of a P-256 or P-384 EC key', $exception);
-        }
+        [$key, $publicKey] = CryptoErrors::translate(
+            $algorithm,
+            static fn (): array => [
+                $private !== null ? EcKey::private($private) : EcKey::public((string) $public),
+                $private !== null && $public !== null ? EcKey::public($public) : null,
+            ],
+            'expected PEM text of a P-256 or P-384 EC key',
+        );
 
         if ($key->algorithm() !== $algorithm->cryptoAlgorithm()) {
             throw InvalidKeyMaterialException::curveMismatch($algorithm);

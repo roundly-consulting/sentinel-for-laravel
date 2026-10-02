@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Sentinel\Keys;
 
-use RoundlyConsulting\Crypto\Cose\UnsupportedAlgorithmException;
-use RoundlyConsulting\Crypto\Exceptions\CryptoException;
 use RoundlyConsulting\Crypto\Hash\Hmac;
 use RoundlyConsulting\Crypto\Signature\EdDSA;
 use RoundlyConsulting\Crypto\Signature\Es;
@@ -47,15 +45,11 @@ final readonly class Signers
             return (new Hmac($algorithm->hashAlgorithm()))->sign($message, $this->subkey($key, $purpose));
         }
 
-        try {
-            return $algorithm === Algorithm::Ed25519
-                ? $this->eddsa($key)->sign($message)
-                : (new Es($material->ec()))->sign($message);
-        } catch (UnsupportedAlgorithmException $exception) {
-            throw InvalidKeyMaterialException::unsupported($algorithm, $exception);
-        } catch (CryptoException $exception) {
-            throw InvalidKeyMaterialException::wrongType($algorithm, 'the signature could not be produced', $exception);
-        }
+        return CryptoErrors::translate(
+            $algorithm,
+            fn (): string => $algorithm === Algorithm::Ed25519 ? $this->eddsa($key)->sign($message) : (new Es($material->ec()))->sign($message),
+            'the signature could not be produced',
+        );
     }
 
     /**
@@ -70,13 +64,10 @@ final readonly class Signers
             return (new Hmac($algorithm->hashAlgorithm()))->verify($message, $signature, $this->subkey($key, $purpose));
         }
 
-        try {
-            return $algorithm === Algorithm::Ed25519
-                ? $this->eddsa($key)->verify($message, $signature)
-                : (new Es($key->material()->ec()))->verify($message, $signature);
-        } catch (UnsupportedAlgorithmException $exception) {
-            throw InvalidKeyMaterialException::unsupported($algorithm, $exception);
-        }
+        return CryptoErrors::translate(
+            $algorithm,
+            fn (): bool => $algorithm === Algorithm::Ed25519 ? $this->eddsa($key)->verify($message, $signature) : (new Es($key->material()->ec()))->verify($message, $signature),
+        );
     }
 
     private function subkey(#[SensitiveParameter] SealingKey $key, Purpose $purpose): string
