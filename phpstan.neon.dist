@@ -3,6 +3,11 @@ parameters:
     paths:
         - src
         - config
+        - database
+        # The sealable fixtures are the only users of the HasSeals trait; analysing them is
+        # what makes PHPStan analyse the trait at all.
+        - tests/Fixtures/Models
+        - tests/Fixtures/Definitions
     # This package ships its own config/ dir; env() is correct there.
     configDirectories:
         - config

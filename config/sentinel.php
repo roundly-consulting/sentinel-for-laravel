@@ -25,10 +25,14 @@ return [
     | Morph key types
     |--------------------------------------------------------------------------
     |
-    | The id type of actors, key owners and nonce subjects in Sentinel's tables:
-    | bigint, uuid or ulid. Set it before running the published migrations.
+    | The id type of sealed models (`key_type`) and of actors, key owners and
+    | nonce subjects (`actor_key_type`) in Sentinel's tables: bigint, uuid or
+    | ulid. A fleet mixing key types picks the widest. Set both before running
+    | the published migrations.
     |
     */
+
+    'key_type' => env('SENTINEL_KEY_TYPE', 'bigint'),
 
     'actor_key_type' => env('SENTINEL_ACTOR_KEY_TYPE', 'bigint'),
 
@@ -92,6 +96,82 @@ return [
                 'drivers' => ['config', 'database'],
             ],
         ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Sealing
+    |--------------------------------------------------------------------------
+    |
+    | auto               — seal automatically on Eloquent writes (turn off on
+    |                      verify-only nodes that hold only public keys)
+    | on_tampered_write  — an Eloquent write on a model that is not intact:
+    |                      refuse (nothing written), reseal (write and audit the
+    |                      previous status) or skip (write, leave the seal)
+    | allow_suspension   — permit Sentinel::withoutSealing() (seeders, imports)
+    | field_tags         — keyed per-field tags that tell which attributes
+    |                      changed (HMAC keys only; never stores values)
+    | reason_max_length  — acknowledgement / unseal / baseline reasons
+    | transaction_attempts — retries of Sentinel's own transactions (never the
+    |                      host's save())
+    |
+    */
+
+    'sealing' => [
+        'auto' => env('SENTINEL_AUTO_SEAL', true),
+        'on_tampered_write' => env('SENTINEL_ON_TAMPERED_WRITE', 'refuse'),
+        'allow_suspension' => env('SENTINEL_ALLOW_SUSPENSION', true),
+        'field_tags' => env('SENTINEL_FIELD_TAGS', true),
+        'reason_max_length' => 1000,
+        'transaction_attempts' => 3,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Verification
+    |--------------------------------------------------------------------------
+    |
+    | check_ledger — also compare the seal with the ledger (detects replayed or
+    |                rolled-back seals; one indexed query)
+    | outdated_is_intact — a seal whose definition changed but whose data is
+    |                intact counts as intact (re-seal with sentinel:reseal)
+    | log_channel  — where findings are logged (null = the default channel)
+    |
+    */
+
+    'verification' => [
+        'check_ledger' => env('SENTINEL_VERIFY_LEDGER', true),
+        'outdated_is_intact' => env('SENTINEL_OUTDATED_IS_INTACT', true),
+        'log_channel' => env('SENTINEL_LOG_CHANNEL'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Acknowledgement
+    |--------------------------------------------------------------------------
+    |
+    | The Gate ability checked (with the model and seal name) before an
+    | out-of-band change may be acknowledged. Null allows any actor; a reason is
+    | always required and recorded.
+    |
+    */
+
+    'acknowledgement' => [
+        'ability' => env('SENTINEL_ACKNOWLEDGE_ABILITY'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Ledger
+    |--------------------------------------------------------------------------
+    |
+    | The append-only, MAC'd history of every seal event. Turning it off loses
+    | replay/rollback detection (Stale) — keep it on.
+    |
+    */
+
+    'ledger' => [
+        'enabled' => env('SENTINEL_LEDGER', true),
     ],
 
 ];

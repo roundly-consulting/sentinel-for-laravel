@@ -88,7 +88,7 @@ it('stores the owner and a scheduled activation', function (): void {
     expect($generated->info->status)->toBe(KeyStatus::Pending)
         ->and($generated->info->activatesAt?->format('Y-m-d H:i:s e'))->toBe('2030-01-01 11:00:00 UTC')
         ->and($generated->info->ownerType)->toBe(User::class)
-        ->and(Key::query()->toBase()->value('activates_at'))->toBe('2030-01-01 11:00:00.000000');
+        ->and(Key::query()->firstOrFail()->activates_at->format('Y-m-d H:i:s.u e'))->toBe('2030-01-01 11:00:00.000000 UTC');
 });
 
 it('rotates a database ring: the old key stops signing when the new one activates', function (): void {

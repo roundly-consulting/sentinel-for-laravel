@@ -5,15 +5,24 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Sentinel\Facades;
 
 use Closure;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Facade;
 use RoundlyConsulting\Sentinel\Accessors\KeysAccessor;
-use RoundlyConsulting\Sentinel\DataTransferObjects\ExampleSentinelData;
+use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgementResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
+use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RevokeKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotationResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\SealRecord;
+use RoundlyConsulting\Sentinel\DataTransferObjects\SealResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationReport;
+use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
+use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
+use RoundlyConsulting\Sentinel\ModelSeals;
+use RoundlyConsulting\Sentinel\SealHandle;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Testing\RecordedCall;
 use RoundlyConsulting\Sentinel\Testing\SentinelFake;
@@ -22,7 +31,20 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * Import this class explicitly — Sentinel registers **no** global alias (cartalyst/sentinel
  * owns the global `Sentinel`, laravel/sentinel ships `Laravel\Sentinel\Sentinel`).
  *
- * @method static string example(ExampleSentinelData $data)
+ * @method static SealHandle for(Model $model, string|null $seal = null)
+ * @method static ModelSeals model(string $class)
+ * @method static SealResult seal(Model $model, string|null $seal = null, string|null $reason = null, Model|null $actor = null)
+ * @method static VerificationResult verify(Model $model, string|null $seal = null)
+ * @method static VerificationResult verifyOrFail(Model $model, string|null $seal = null)
+ * @method static VerificationReport verifyAll(Model $model)
+ * @method static VerificationReport verifyMany(iterable<Model> $models, string|null $seal = null)
+ * @method static bool isIntact(Model $model)
+ * @method static AcknowledgementResult acknowledge(Model $model, string $reason, Model|null $actor = null, string|null $seal = null)
+ * @method static bool unseal(Model $model, string $reason, Model|null $actor = null, string|null $seal = null)
+ * @method static list<LedgerRecord> ledgerHistory(Model $model, string|null $seal = null, int $limit = 50)
+ * @method static SealRecord|null currentSeal(Model $model, string|null $seal = null)
+ * @method static mixed withoutSealing(Closure $callback, string $reason)
+ * @method static mixed withoutVerification(Closure $callback)
  * @method static KeysAccessor keys()
  * @method static GeneratedKey generateKey(GenerateKeyRequest $request)
  * @method static RotationResult rotateKey(RotateKeyRequest $request)
@@ -32,8 +54,17 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static KeyInfo|null findKey(string $ring, string $keyId)
  * @method static KeyInfo currentKey(string|null $ring = null)
  * @method static SentinelManager extend(string $driver, Closure $factory)
- * @method static void assertExampleCalled(Closure|null $callback = null)
- * @method static void assertNothingCalled()
+ * @method static SentinelFake fakeStatus(Model $model, VerificationStatus $status, string|null $seal = null, list<string>|null $changed = null)
+ * @method static SentinelFake fakeStatusOnce(Model $model, VerificationStatus $status, string|null $seal = null, list<string>|null $changed = null)
+ * @method static void assertSealed(Model $model, string|null $seal = null, Closure|null $callback = null)
+ * @method static void assertNotSealed(Model $model, string|null $seal = null)
+ * @method static void assertNothingSealed()
+ * @method static void assertVerified(Model $model, string|null $seal = null)
+ * @method static void assertNothingVerified()
+ * @method static void assertAcknowledged(Model $model, string|null $reason = null)
+ * @method static void assertNothingAcknowledged()
+ * @method static void assertUnsealed(Model $model, string|null $seal = null)
+ * @method static void assertSealingSuspended(string|null $reason = null)
  * @method static void assertKeyGenerated(string|null $ring = null)
  * @method static void assertKeyRotated(string|null $ring = null)
  * @method static void assertKeyRevoked(string $keyId)

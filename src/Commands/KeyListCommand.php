@@ -9,6 +9,7 @@ use Illuminate\Console\Command;
 use RoundlyConsulting\Sentinel\Commands\Concerns\ReadsOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
 use RoundlyConsulting\Sentinel\Exceptions\SentinelException;
+use RoundlyConsulting\Sentinel\Models\Seal;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\Clock;
 
@@ -34,10 +35,14 @@ final class KeyListCommand extends Command
             return self::FAILURE;
         }
 
+        $usage = Seal::query()->toBase()->selectRaw('ring, key_id, count(*) as seals')->groupBy('ring', 'key_id')->get()
+            ->mapWithKeys(static fn (object $row): array => [((string) $row->ring).':'.((string) $row->key_id) => (int) $row->seals]);
+
         $this->table(
-            ['Ring', 'Key id', 'Algorithm', 'Status', 'Driver', 'Can sign', 'Activates', 'Signs until', 'Verifies until', 'Revoked'],
+            ['Ring', 'Key id', 'Algorithm', 'Status', 'Driver', 'Can sign', 'Seals', 'Activates', 'Signs until', 'Verifies until', 'Revoked'],
             array_map(static fn (KeyInfo $key): array => [
                 $key->ring, $key->keyId, $key->algorithm->value, $key->status->value, $key->driver, $key->canSign ? 'yes' : 'no',
+                (string) ($usage["{$key->ring}:{$key->keyId}"] ?? 0),
                 self::date($key->activatesAt), self::date($key->signsUntil), self::date($key->verifiesUntil), self::date($key->revokedAt),
             ], $keys),
         );

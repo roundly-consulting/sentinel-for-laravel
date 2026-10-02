@@ -38,6 +38,30 @@ php artisan migrate
 php artisan sentinel:key:generate   # prints SENTINEL_KEY_ID / SENTINEL_KEY — add them to .env (secret)
 ```
 
+## Sealing a model
+
+```php
+use Illuminate\Database\Eloquent\Model;
+use RoundlyConsulting\Sentinel\Concerns\HasSeals;
+use RoundlyConsulting\Sentinel\Contracts\Sealable;
+use RoundlyConsulting\Sentinel\Definition\SealBuilder;
+use RoundlyConsulting\Sentinel\Facades\Sentinel;
+
+final class Invoice extends Model implements Sealable
+{
+    use HasSeals;
+
+    public static function defineSeals(SealBuilder $seals): void
+    {
+        $seals->seal('financial')->attributes('customer_id', 'amount', 'currency', 'status');
+    }
+}
+
+$invoice->isIntact();                         // every seal intact?
+Sentinel::for($invoice)->verify();            // VerificationResult (status, reason, changed attributes)
+Sentinel::for($invoice)->by($admin)->because('INC-88: fixed by the DBA')->acknowledge();
+```
+
 ## Naming
 
 The facade is `RoundlyConsulting\Sentinel\Facades\Sentinel` and the injectable manager is

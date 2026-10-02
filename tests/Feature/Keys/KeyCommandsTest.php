@@ -40,7 +40,7 @@ it('stores a database key and prints only its id and public key', function (): v
         ->assertSuccessful();
 
     expect((string) Key::query()->where('kid', 'partner-a')->value('owner_id'))->toBe((string) $owner->getKey())
-        ->and(Key::query()->where('kid', 'partner-a')->toBase()->value('activates_at'))->toBe('2026-10-02 10:00:00.000000');
+        ->and(Key::query()->where('kid', 'partner-a')->firstOrFail()->activates_at->format('Y-m-d H:i:s e'))->toBe('2026-10-02 10:00:00 UTC');
 });
 
 it('fails cleanly on bad generate input', function (array $options, string $message): void {
@@ -115,4 +115,15 @@ it('lists keys without ever printing material, and warns on duplicate kids', fun
 
     $this->artisan('sentinel:key:list', ['--ring' => 'http'])->expectsOutputToContain('more than one driver')->assertSuccessful();
     $this->artisan('sentinel:key:list', ['--ring' => 'nope'])->expectsOutputToContain('not configured')->assertFailed();
+});
+
+it('refuses to retire a key that seals still use, unless forced', function (): void {
+    config()->set('sentinel.keys.rings.default.driver', 'chain');
+    config()->set('sentinel.keys.rings.default.drivers', ['database', 'config']);
+    Sentinel::keys()->ring()->generate(Algorithm::HmacSha256, 'in-use');
+    invoice();
+
+    $this->artisan('sentinel:key:retire', ['kid' => 'in-use'])->expectsOutputToContain('2 seal(s) still use key [default:in-use]')->assertFailed();
+    $this->artisan('sentinel:key:list')->expectsOutputToContain('in-use')->assertSuccessful();
+    $this->artisan('sentinel:key:retire', ['kid' => 'in-use', '--force' => true])->expectsOutputToContain('Retired key [default:in-use]')->assertSuccessful();
 });

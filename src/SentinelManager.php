@@ -6,21 +6,49 @@ namespace RoundlyConsulting\Sentinel;
 
 use Closure;
 use Illuminate\Contracts\Container\Container;
+use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Database\Eloquent\Model;
 use RoundlyConsulting\Sentinel\Accessors\KeysAccessor;
-use RoundlyConsulting\Sentinel\Actions\ExampleSentinelAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\GenerateKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\RetireKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\RevokeKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\RotateKeyAction;
-use RoundlyConsulting\Sentinel\DataTransferObjects\ExampleSentinelData;
+use RoundlyConsulting\Sentinel\Actions\Seals\AcknowledgeTamperingAction;
+use RoundlyConsulting\Sentinel\Actions\Seals\PersistSealedModelAction;
+use RoundlyConsulting\Sentinel\Actions\Seals\ReadLedgerHistoryAction;
+use RoundlyConsulting\Sentinel\Actions\Seals\SealModelAction;
+use RoundlyConsulting\Sentinel\Actions\Seals\UnsealModelAction;
+use RoundlyConsulting\Sentinel\Actions\Seals\VerifyModelAction;
+use RoundlyConsulting\Sentinel\Actions\Seals\VerifyModelsAction;
+use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgementResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgeRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
+use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RevokeKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotationResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\SealRecord;
+use RoundlyConsulting\Sentinel\DataTransferObjects\SealRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\SealResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\UnsealRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationReport;
+use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\VerifyManyRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\VerifyRequest;
+use RoundlyConsulting\Sentinel\Definition\DefinitionRegistry;
+use RoundlyConsulting\Sentinel\Enums\PersistOperation;
+use RoundlyConsulting\Sentinel\Enums\SealEvent;
+use RoundlyConsulting\Sentinel\Events\SealingSuspended;
+use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
+use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
+use RoundlyConsulting\Sentinel\Support\Reasons;
+use RoundlyConsulting\Sentinel\Support\Runtime;
+use RoundlyConsulting\Sentinel\Support\SealingScope;
 use RoundlyConsulting\Sentinel\Support\Settings;
+use RoundlyConsulting\Sentinel\Support\Tables;
 
 /**
  * The public API behind the `Sentinel` facade, injectable by its own class-string. Every
@@ -40,12 +68,164 @@ class SentinelManager
         protected readonly Container $container,
     ) {}
 
+    // ── model seals ───────────────────────────────────────────────────────────
+
     /**
-     * REPLACE ME — the template placeholder; removed in Phase D with the first seal verb.
+     * A handle on one seal of a model (null = its default seal).
      */
-    public function example(ExampleSentinelData $data): string
+    public function for(Model $model, ?string $seal = null): SealHandle
     {
-        return $this->container->make(ExampleSentinelAction::class)->execute($data);
+        return new SealHandle($this, $model, $this->container->make(DefinitionRegistry::class)->seal($model, $seal));
+    }
+
+    /**
+     * Class-level operations of a sealable model.
+     *
+     * @param  class-string<Model>  $class
+     */
+    public function model(string $class): ModelSeals
+    {
+        return new ModelSeals($class, $this->container->make(DefinitionRegistry::class)->for($class));
+    }
+
+    /**
+     * Seal (or re-seal) a model explicitly. Refuses a model changed outside the application
+     * — acknowledge it instead.
+     */
+    public function seal(Model $model, ?string $seal = null, ?string $reason = null, ?Model $actor = null): SealResult
+    {
+        return $this->container->make(SealModelAction::class)->execute(new SealRequest($model, $this->sealName($model, $seal), $reason, $actor));
+    }
+
+    public function verify(Model $model, ?string $seal = null): VerificationResult
+    {
+        return $this->container->make(VerifyModelAction::class)->execute(new VerifyRequest($model, $this->sealName($model, $seal)));
+    }
+
+    /**
+     * @throws TamperedModelException when the seal is not intact
+     */
+    public function verifyOrFail(Model $model, ?string $seal = null): VerificationResult
+    {
+        $result = $this->verify($model, $seal);
+
+        return $result->isIntact() ? $result : throw TamperedModelException::forResult($result);
+    }
+
+    /**
+     * Every seal of the model.
+     */
+    public function verifyAll(Model $model): VerificationReport
+    {
+        return $this->container->make(VerifyModelsAction::class)->execute(new VerifyManyRequest([$model]));
+    }
+
+    /**
+     * @param  iterable<Model>  $models
+     */
+    public function verifyMany(iterable $models, ?string $seal = null): VerificationReport
+    {
+        return $this->container->make(VerifyModelsAction::class)->execute(new VerifyManyRequest($models, $seal));
+    }
+
+    /**
+     * Every seal of the model is intact.
+     */
+    public function isIntact(Model $model): bool
+    {
+        return $this->verifyAll($model)->allIntact();
+    }
+
+    /**
+     * Accept an out-of-band change: reason required, actor recorded, policy checked.
+     */
+    public function acknowledge(Model $model, string $reason, ?Model $actor = null, ?string $seal = null): AcknowledgementResult
+    {
+        return $this->container->make(AcknowledgeTamperingAction::class)->execute(new AcknowledgeRequest($model, $this->sealName($model, $seal), $reason, $actor));
+    }
+
+    /**
+     * Remove a seal deliberately (an `unsealed` tombstone records why).
+     */
+    public function unseal(Model $model, string $reason, ?Model $actor = null, ?string $seal = null): bool
+    {
+        return $this->container->make(UnsealModelAction::class)->execute(new UnsealRequest($model, $this->sealName($model, $seal), $reason, $actor));
+    }
+
+    /**
+     * @return list<LedgerRecord>
+     */
+    public function ledgerHistory(Model $model, ?string $seal = null, int $limit = 50): array
+    {
+        return $this->container->make(ReadLedgerHistoryAction::class)->execute($model, $this->sealName($model, $seal), $limit);
+    }
+
+    /**
+     * The stored seal row (unverified), or null.
+     */
+    public function currentSeal(Model $model, ?string $seal = null): ?SealRecord
+    {
+        $row = Tables::seals($model, $this->sealName($model, $seal))->first();
+
+        if ($row === null) {
+            return null;
+        }
+
+        $manifest = $row->manifest;
+        $sealedById = $row->getRawOriginal('sealed_by_id');
+
+        return new SealRecord(
+            $row->sealable_type, $row->sealable_id, $row->seal, $row->version, $row->ring, $row->key_id, $row->algorithm,
+            $manifest ?? [], $row->sealed_at, SealEvent::tryFrom((string) $row->getRawOriginal('event')),
+            $row->reason, $row->sealed_by_type, is_int($sealedById) || is_string($sealedById) ? $sealedById : null,
+        );
+    }
+
+    /**
+     * Run the callback with automatic sealing off (seeders, imports). Writes inside are
+     * unsealed or stale until re-sealed; strict seals report them. Audited by
+     * `SealingSuspended`; refused when `sentinel.sealing.allow_suspension` is false.
+     *
+     * @template T
+     *
+     * @param  Closure(): T  $callback
+     * @return T
+     */
+    public function withoutSealing(Closure $callback, string $reason): mixed
+    {
+        if (! Settings::allowSuspension()) {
+            throw SealingSuspensionNotAllowedException::disabled();
+        }
+
+        $reason = Reasons::normalize($reason);
+        $actor = $this->container->make(Runtime::class)->user();
+        $this->container->make(Dispatcher::class)->dispatch(new SealingSuspended($reason, $actor?->getMorphClass(), $actor?->getKey()));
+
+        return $this->container->make(SealingScope::class)->withoutSealing($callback);
+    }
+
+    /**
+     * Run the callback with verify-on-retrieve off (so an acknowledgement can load a tampered
+     * model).
+     *
+     * @template T
+     *
+     * @param  Closure(): T  $callback
+     * @return T
+     */
+    public function withoutVerification(Closure $callback): mixed
+    {
+        return $this->container->make(SealingScope::class)->withoutVerification($callback);
+    }
+
+    /**
+     * The Eloquent write path of `HasSeals`.
+     *
+     * @internal
+     */
+    public function persist(Model $model, Closure $write, PersistOperation $operation): mixed
+    {
+        return $this->container->make(PersistSealedModelAction::class)->execute($model, $write, $operation);
     }
 
     // ── keys ──────────────────────────────────────────────────────────────────
@@ -110,5 +290,13 @@ class SentinelManager
         $this->container->make(KeyStoreManager::class)->extend($driver, $factory);
 
         return $this;
+    }
+
+    /**
+     * The seal's name, validated against the model's definition (null = its default).
+     */
+    protected function sealName(Model $model, ?string $seal): string
+    {
+        return $this->container->make(DefinitionRegistry::class)->seal($model, $seal)->name;
     }
 }

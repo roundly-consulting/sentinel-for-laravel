@@ -20,6 +20,12 @@ use RoundlyConsulting\Sentinel\Support\Clock;
  */
 final class UtcDateTime implements CastsAttributes
 {
+    /**
+     * Always read through get(): Laravel would otherwise hand back the (possibly mutable,
+     * non-UTC) object that was assigned.
+     */
+    public bool $withoutObjectCaching = true;
+
     private const string FORMAT = '/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?Z?$/D';
 
     /**
@@ -45,6 +51,14 @@ final class UtcDateTime implements CastsAttributes
         }
 
         if (! is_string($value) || preg_match(self::FORMAT, $value, $m) !== 1) {
+            throw CorruptRecordException::invalidDatetime($key);
+        }
+
+        [$year, $month, $day] = array_map(intval(...), explode('-', $m[1]));
+        [$hour, $minute, $second] = array_map(intval(...), explode(':', $m[2]));
+
+        // Well-shaped is not enough: 2026-13-45 99:99:99 must fail closed, not overflow.
+        if (! checkdate($month, $day, $year) || $hour > 23 || $minute > 59 || $second > 59) {
             throw CorruptRecordException::invalidDatetime($key);
         }
 

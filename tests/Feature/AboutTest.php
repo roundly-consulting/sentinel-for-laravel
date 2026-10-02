@@ -18,8 +18,21 @@ it('renders its about section without leaking key material', function (): void {
 
     expect('sentinel')->toLeakNoSecrets(
         [substr(TestCase::ROOT_KEY, 7), TestCase::ROOT_KEY, base64_decode(substr(TestCase::ROOT_KEY, 7)), base64_encode($edSecret)],
-        mustRender: ['Default ring / driver', 'default (config)', 'Rings', 'default, http', 'Manager', SentinelManager::class],
+        mustRender: [
+            'Default ring / driver', 'default (config)', 'Rings', 'default, http', 'Auto-seal', 'ON',
+            'Tampered writes', 'refuse', 'Ledger', 'Manager', SentinelManager::class,
+        ],
     );
+});
+
+it('reports flags the way the environment means them', function (): void {
+    config()->set('sentinel.sealing.auto', 'off');
+    config()->set('sentinel.ledger.enabled', 'no');
+    config()->set('sentinel.sealing.on_tampered_write', 'reseal');
+
+    Artisan::call('about', ['--only' => 'sentinel']);
+
+    expect(Artisan::output())->toMatch('/Auto-seal\W+OFF/')->toMatch('/Ledger\W+OFF/')->toMatch('/Tampered writes\W+reseal/');
 });
 
 it('reports invalid configuration instead of failing about', function (): void {

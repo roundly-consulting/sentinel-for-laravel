@@ -11,13 +11,17 @@ use Illuminate\Foundation\Application;
  *  - reverse — every shipped leaf is read (ring sections through `keys.rings.*.<leaf>`
  *    patterns, which prove each leaf for every ring).
  *
- * `KeyType::fromConfig('sentinel.actor_key_type')` in the migrations is not a `config(`
- * token, so that exact key is named as an extra read prefix.
+ * `KeyType::fromConfig(...)` in the migrations and the toolkit's `Config::using()->enum()` /
+ * `->intBetween()` readers are not `config(` tokens, so those exact keys are named as extra
+ * read prefixes (never a blanket `sentinel.`, which would also match `sentinel.seal/1`).
  */
 it('ships exactly the config keys it reads', function (): void {
     expect(__DIR__.'/../config/sentinel.php')->toSatisfyConfigContract(
         [__DIR__.'/../src', __DIR__.'/../database'],
-        ['extraReadPrefixes' => ['sentinel.actor_key_type']],
+        ['extraReadPrefixes' => [
+            'sentinel.actor_key_type', 'sentinel.key_type', 'sentinel.sealing.on_tampered_write',
+            'sentinel.sealing.reason_max_length', 'sentinel.sealing.transaction_attempts',
+        ]],
     );
 });
 

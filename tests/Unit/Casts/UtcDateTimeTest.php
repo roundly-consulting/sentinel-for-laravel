@@ -46,3 +46,7 @@ it('keeps timestamps UTC while the process runs in another zone', function (): v
     expect($key->getRawOriginal('created_at'))->toBe($key->created_at?->utc()->format('Y-m-d H:i:s.u'))
         ->and($key->created_at?->getTimezone()->getName())->toBe('UTC');
 });
+
+it('refuses well-shaped but impossible datetimes', function (string $stored): void {
+    expect(fn () => (new UtcDateTime)->get(new Key, 'revoked_at', $stored, []))->toThrow(CorruptRecordException::class);
+})->with(['2026-13-45 99:99:99', '2026-02-30 00:00:00', '2026-10-02 24:00:00', '2026-10-02 23:60:00', '2026-10-02 23:59:60']);

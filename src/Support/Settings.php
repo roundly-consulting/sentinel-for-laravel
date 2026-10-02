@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Sentinel\Support;
 
+use RoundlyConsulting\PackageToolkit\Support\Config;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
+use RoundlyConsulting\Sentinel\Enums\TamperedWritePolicy;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Keys\RingConfig;
@@ -202,5 +204,67 @@ final class Settings
         }
 
         return array_values($algorithms);
+    }
+
+    public static function autoSeal(): bool
+    {
+        return Config::boolean('sentinel.sealing.auto', true);
+    }
+
+    public static function allowSuspension(): bool
+    {
+        return Config::boolean('sentinel.sealing.allow_suspension', true);
+    }
+
+    public static function fieldTags(): bool
+    {
+        return Config::boolean('sentinel.sealing.field_tags', true);
+    }
+
+    public static function onTamperedWrite(): TamperedWritePolicy
+    {
+        return Config::using(InvalidSentinelConfigurationException::class)->enum('sentinel.sealing.on_tampered_write', TamperedWritePolicy::class);
+    }
+
+    public static function reasonMaxLength(): int
+    {
+        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.sealing.reason_max_length', 1, 10000, 1000);
+    }
+
+    /**
+     * @return int<1, max>
+     */
+    public static function transactionAttempts(): int
+    {
+        return max(1, Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.sealing.transaction_attempts', 1, 10, 3));
+    }
+
+    public static function checkLedger(): bool
+    {
+        return Config::boolean('sentinel.verification.check_ledger', true);
+    }
+
+    public static function outdatedIsIntact(): bool
+    {
+        return Config::boolean('sentinel.verification.outdated_is_intact', true);
+    }
+
+    public static function logChannel(): ?string
+    {
+        $channel = config('sentinel.verification.log_channel');
+
+        return is_string($channel) && $channel !== '' ? $channel : null;
+    }
+
+    public static function acknowledgementAbility(): ?string
+    {
+        $ability = config('sentinel.acknowledgement.ability');
+
+        return is_string($ability) && $ability !== '' ? $ability : null;
+    }
+
+    public static function ledgerEnabled(): bool
+    {
+        return Config::boolean('sentinel.ledger.enabled', true);
     }
 }

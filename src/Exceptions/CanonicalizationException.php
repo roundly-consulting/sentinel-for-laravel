@@ -64,6 +64,11 @@ final class CanonicalizationException extends SentinelException
         return self::make('computed_model', $field, 'returned a Model; return its key or an array explicitly');
     }
 
+    public static function undecryptable(?string $field = null): self
+    {
+        return self::make('undecryptable', $field, 'could not be decrypted through the model cast');
+    }
+
     public static function unsupportedType(string $type, ?string $field = null): self
     {
         return self::make('unsupported_type', $field, "has an unsupported type [{$type}]");
