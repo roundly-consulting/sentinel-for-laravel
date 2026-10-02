@@ -721,6 +721,9 @@ $signature = Sentinel::signatures()->current($request);   // VerifiedSignature: 
 $partner = Sentinel::signatures()->owner($request);       // the key's owner model (database keys), or null
 ```
 
+Flat: `Sentinel::verifiedSignature($request)` and `Sentinel::signatureOwner($request)` (or pass the
+`VerifiedSignature`).
+
 A rejection answers 401 problem details with a generic `code` (the precise reason only with
 `app.debug`) and an `Accept-Signature` hint; `HttpSignatureRejected` carries the reason.
 Add profiles under `sentinel.signatures.profiles` and name them: `sentinel.signed:partners`.
@@ -761,7 +764,8 @@ Sentinel::keys()->ring('http')->retire('acme-2025-10');
 Sentinel::keys()->all();                                    // every ring
 ```
 
-**Importing keys.** `import()` (or `sentinel:key:import`) stores existing material in a ring's
+**Importing keys.** `import()` (flat: `Sentinel::importKey(new ImportKeyRequest(…))`, or
+`sentinel:key:import`) stores existing material in a ring's
 database store: a partner's public key (Ed25519 raw or SPKI PEM, ECDSA PEM) or an agreed HMAC
 secret, bound to the owner model and **verify-only** — it never signs, not as the ring's
 current key and not through `Http::withSignature()` — unless imported with `signing: true`
@@ -808,6 +812,9 @@ Schedule::command('sentinel:checkpoint')->everyMinute();
 Schedule::command('sentinel:verify --ledger')->hourly();
 Schedule::command('sentinel:prune')->daily();
 ```
+
+`Sentinel::sealables()` lists what `sentinel:verify` scans when it is given no model:
+`sentinel.models` first, then every class that has seals.
 
 **The health check** reports every misconfiguration that silently weakens the guarantees, in
 one place:

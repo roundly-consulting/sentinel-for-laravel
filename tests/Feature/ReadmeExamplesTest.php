@@ -413,6 +413,8 @@ it('runs the extension examples', function (): void {
 it('runs the health check example', function (): void {
     invoice();
 
+    expect(Sentinel::sealables())->toBe([Invoice::class]);
+
     $report = Sentinel::check();
 
     expect($report->failed())->toBeFalse()
@@ -502,7 +504,8 @@ it('names only facade methods that exist', function (): void {
     preg_match_all('/Sentinel::([a-zA-Z]+)\(/', readme(), $matches);
     $names = array_values(array_unique($matches[1]));
 
-    expect($names)->not->toBeEmpty();
+    expect($names)->not->toBeEmpty()
+        ->and($names)->toContain('importKey', 'check', 'sealables', 'verifiedSignature', 'signatureOwner', 'model', 'fake');
 
     foreach ($names as $name) {
         expect(method_exists(SentinelManager::class, $name) || method_exists(SentinelFake::class, $name) || method_exists(SentinelFacade::class, $name))->toBeTrue("Sentinel::{$name}() is not a method");
