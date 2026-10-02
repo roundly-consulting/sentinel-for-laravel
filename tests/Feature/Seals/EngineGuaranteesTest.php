@@ -78,6 +78,12 @@ it('reads every boolean switch the way an env string means it', function (string
     ['sentinel.verification.check_ledger', fn () => Settings::checkLedger()],
     ['sentinel.verification.outdated_is_intact', fn () => Settings::outdatedIsIntact()],
     ['sentinel.ledger.enabled', fn () => Settings::ledgerEnabled()],
+    ['sentinel.verification.retrieve_checks_ledger', fn () => Settings::retrieveChecksLedger()],
+    ['sentinel.idempotency.accept_unquoted', fn () => Settings::idempotencyAcceptsUnquoted()],
+    ['sentinel.idempotency.store_client_errors', fn () => Settings::storesClientErrors()],
+    ['sentinel.idempotency.store_server_errors', fn () => Settings::storesServerErrors()],
+    ['sentinel.idempotency.transactional', fn () => Settings::idempotencyTransactional()],
+    ['sentinel.idempotency.encrypt', fn () => Settings::idempotencyEncrypt()],
 ])->with([
     ['off', false], ['no', false], ['0', false], ['false', false], ['', false], [false, false],
     ['on', true], ['yes', true], ['1', true], ['true', true], [true, true],

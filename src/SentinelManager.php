@@ -4,18 +4,31 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Sentinel;
 
+use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Model;
+use RoundlyConsulting\Sentinel\Accessors\IdempotencyAccessor;
 use RoundlyConsulting\Sentinel\Accessors\KeysAccessor;
 use RoundlyConsulting\Sentinel\Accessors\LedgerAccessor;
+use RoundlyConsulting\Sentinel\Accessors\NoncesAccessor;
+use RoundlyConsulting\Sentinel\Actions\Idempotency\BeginIdempotentRequestAction;
+use RoundlyConsulting\Sentinel\Actions\Idempotency\CompleteIdempotentRequestAction;
+use RoundlyConsulting\Sentinel\Actions\Idempotency\ForgetIdempotencyKeyAction;
+use RoundlyConsulting\Sentinel\Actions\Idempotency\ReleaseIdempotentRequestAction;
+use RoundlyConsulting\Sentinel\Actions\Idempotency\RunIdempotentAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\GenerateKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\RetireKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\RevokeKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\RotateKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Ledger\CreateCheckpointAction;
 use RoundlyConsulting\Sentinel\Actions\Ledger\VerifyLedgerAction;
+use RoundlyConsulting\Sentinel\Actions\Nonces\ConsumeNonceAction;
+use RoundlyConsulting\Sentinel\Actions\Nonces\IssueNonceAction;
+use RoundlyConsulting\Sentinel\Actions\Nonces\IssueSingleUseUrlAction;
+use RoundlyConsulting\Sentinel\Actions\Nonces\RememberNonceAction;
+use RoundlyConsulting\Sentinel\Actions\PruneAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\AcknowledgeTamperingAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\PersistSealedModelAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\ReadLedgerHistoryAction;
@@ -36,12 +49,21 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\BaselineOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ConsumeNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotencyDecision;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentCall;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedNonce;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IssueNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerVerifyOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\PruneOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\PruneResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ResealOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ResealReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ResealWhereRequest;
@@ -53,6 +75,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\ScanReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\SignedRouteRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\UnsealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\UpdateAndResealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationReport;
@@ -75,6 +98,8 @@ use RoundlyConsulting\Sentinel\Support\Runtime;
 use RoundlyConsulting\Sentinel\Support\SealingScope;
 use RoundlyConsulting\Sentinel\Support\Settings;
 use RoundlyConsulting\Sentinel\Support\Tables;
+use SensitiveParameter;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * The public API behind the `Sentinel` facade, injectable by its own class-string. Every
@@ -392,6 +417,96 @@ class SentinelManager
         $this->container->make(AnchorManager::class)->extend($driver, $factory);
 
         return $this;
+    }
+
+    // ── idempotency / nonces ──────────────────────────────────────────────────
+
+    public function idempotency(): IdempotencyAccessor
+    {
+        return new IdempotencyAccessor($this);
+    }
+
+    /**
+     * Run a callback at most once per (key, scope).
+     */
+    public function runIdempotent(IdempotentCall $call): IdempotentResult
+    {
+        return $this->container->make(RunIdempotentAction::class)->execute($call);
+    }
+
+    /**
+     * Forget a programmatic idempotency key.
+     */
+    public function forgetIdempotencyKey(string $key, string $scope): bool
+    {
+        return $this->container->make(ForgetIdempotencyKeyAction::class)->execute($key, $scope);
+    }
+
+    public function nonces(): NoncesAccessor
+    {
+        return new NoncesAccessor($this);
+    }
+
+    public function issueNonce(IssueNonceRequest $request): IssuedNonce
+    {
+        return $this->container->make(IssueNonceAction::class)->execute($request);
+    }
+
+    public function consumeNonce(ConsumeNonceRequest $request): bool
+    {
+        return $this->container->make(ConsumeNonceAction::class)->execute($request);
+    }
+
+    /**
+     * A signed URL for a named route that works once.
+     */
+    public function signedRoute(SignedRouteRequest $request): string
+    {
+        return $this->container->make(IssueSingleUseUrlAction::class)->execute($request);
+    }
+
+    /**
+     * Delete expired idempotency keys and nonces.
+     */
+    public function prune(?PruneOptions $options = null): PruneResult
+    {
+        return $this->container->make(PruneAction::class)->execute($options ?? new PruneOptions);
+    }
+
+    /**
+     * The `sentinel.idempotent` middleware: own the key, or learn why not.
+     *
+     * @internal
+     */
+    public function beginIdempotentRequest(IdempotentRequest $request): IdempotencyDecision
+    {
+        return $this->container->make(BeginIdempotentRequestAction::class)->execute($request);
+    }
+
+    /**
+     * @internal
+     */
+    public function completeIdempotentRequest(IdempotentRequest $request, Response $response): bool
+    {
+        return $this->container->make(CompleteIdempotentRequestAction::class)->execute($request, $response);
+    }
+
+    /**
+     * @internal
+     */
+    public function releaseIdempotentRequest(IdempotentRequest $request): void
+    {
+        $this->container->make(ReleaseIdempotentRequestAction::class)->execute($request);
+    }
+
+    /**
+     * Remember a client's nonce (HTTP signatures); false for a replay.
+     *
+     * @internal
+     */
+    public function rememberNonce(string $purpose, #[SensitiveParameter] string $nonce, CarbonImmutable $until): bool
+    {
+        return $this->container->make(RememberNonceAction::class)->execute($purpose, $nonce, $until);
     }
 
     // ── keys ──────────────────────────────────────────────────────────────────

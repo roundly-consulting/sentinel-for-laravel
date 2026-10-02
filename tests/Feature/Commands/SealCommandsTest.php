@@ -30,13 +30,14 @@ it('scans the configured models and exits 0 when everything is intact', function
 
 it('exits 1 on a finding and prints names, never values', function (): void {
     $invoice = invoice(['amount' => '4242.42']);
-    DB::table('invoices')->where('id', $invoice->id)->update(['amount' => '0.17']);
+    DB::table('invoices')->where('id', $invoice->id)->update(['amount' => '313.17']);
 
     [$status, $output] = runArtisan('sentinel:verify', ['model' => [Invoice::class], '--seal' => 'financial']);
 
+    // Three integer digits: no timestamp in the output can contain these by chance.
     expect($status)->toBe(1)
         ->and($output)->toContain("{$invoice->id}  seal=financial  tampered (mac)  changed=a:amount")
-        ->and($output)->not->toContain('4242')->not->toContain('0.17');
+        ->and($output)->not->toContain('4242.42')->not->toContain('313.17');
 });
 
 it('fails only on the statuses named in --fail-on', function (): void {
@@ -157,13 +158,13 @@ it('baselines from the console with a required reason', function (): void {
 
 it('inspects one row with values redacted unless asked', function (): void {
     $invoice = invoice(['amount' => '777.77']);
-    DB::table('invoices')->where('id', $invoice->id)->update(['amount' => '1.23']);
+    DB::table('invoices')->where('id', $invoice->id)->update(['amount' => '991.23']);
 
     [$status, $output] = runArtisan('sentinel:inspect', ['model' => Invoice::class, 'id' => (string) $invoice->id, '--check-schema' => true]);
 
     expect($status)->toBe(1)
         ->and($output)->toContain('tampered (mac)')->toContain('a:amount')->toContain('redacted')->toContain('every sealed column exists')
-        ->and($output)->not->toContain('1.23');
+        ->and($output)->not->toContain('991.23');
 
     [$shown, $values] = runArtisan('sentinel:inspect', ['model' => Invoice::class, 'id' => (string) $invoice->id, '--seal' => 'identity', '--show-values' => true]);
 

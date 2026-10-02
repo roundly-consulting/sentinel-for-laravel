@@ -61,3 +61,15 @@ Initial public release.
   `sentinel.verified` route middleware (a generic 409 that reveals nothing), the
   `IntactSeal` validation rule and the `verifySeals()` collection macro.
 - English and Slovak translations (`sentinel::`).
+- `Idempotency-Key` support (draft-ietf-httpapi-idempotency-key-header-07): the
+  `sentinel.idempotent[:required]` middleware replays a completed request's stored response
+  (`Idempotent-Replayed`), answers 422 for a key reused with another payload and 409 (with
+  `Retry-After`) while it is still in flight, releases the key on 5xx, never stores
+  `Set-Cookie`, encrypts stored responses and optionally commits the handler and the record
+  in one transaction; `Sentinel::idempotency()->run()` for jobs and commands;
+  `Http::withIdempotencyKey()` for outgoing requests; database and cache stores.
+- Single-use, purpose-bound nonces (`Sentinel::nonces()->issue()/consume()`, only digests
+  stored, atomic consume) and single-use signed URLs (`signedRoute()` + the
+  `sentinel.single-use` middleware); `sentinel:prune` for expired keys and nonces.
+- RFC 9457 problem responses for every HTTP rejection, and an RFC 9651 structured-field
+  parser and serializer.

@@ -71,4 +71,11 @@ final class SealingMisconfiguredException extends SentinelException
 
         return new self("[{$shown}] is not a column name a mass update may set.");
     }
+
+    public static function middlewareOption(string $middleware, string $option): self
+    {
+        $shown = preg_match('/^[A-Za-z0-9_.:-]{1,64}$/D', $option) === 1 ? $option : '(invalid)';
+
+        return new self("[{$shown}] is not a valid option of the {$middleware} middleware.");
+    }
 }

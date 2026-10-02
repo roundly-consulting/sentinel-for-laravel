@@ -18,4 +18,9 @@ final class CorruptRecordException extends SentinelException
     {
         return new self("The anchor payload is not a valid sentinel.anchor/1 document: {$problem}.");
     }
+
+    public static function idempotency(string $problem): self
+    {
+        return new self("An idempotency record is unusable: {$problem}.");
+    }
 }

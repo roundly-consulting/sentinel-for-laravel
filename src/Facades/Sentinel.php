@@ -7,19 +7,28 @@ namespace RoundlyConsulting\Sentinel\Facades;
 use Closure;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Facade;
+use RoundlyConsulting\Sentinel\Accessors\IdempotencyAccessor;
 use RoundlyConsulting\Sentinel\Accessors\KeysAccessor;
 use RoundlyConsulting\Sentinel\Accessors\LedgerAccessor;
+use RoundlyConsulting\Sentinel\Accessors\NoncesAccessor;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgementResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\BaselineOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ConsumeNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentCall;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedNonce;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IssueNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerVerifyOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\PruneOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\PruneResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ResealOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ResealReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ResealWhereRequest;
@@ -30,6 +39,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\ScanOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ScanReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\SignedRouteRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\UpdateAndResealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
@@ -78,6 +88,14 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static CheckpointRecord|null ledgerHead(string|null $connection = null)
  * @method static list<string> anchors()
  * @method static SentinelManager extendAnchor(string $driver, Closure $factory)
+ * @method static IdempotencyAccessor idempotency()
+ * @method static IdempotentResult runIdempotent(IdempotentCall $call)
+ * @method static bool forgetIdempotencyKey(string $key, string $scope)
+ * @method static NoncesAccessor nonces()
+ * @method static IssuedNonce issueNonce(IssueNonceRequest $request)
+ * @method static bool consumeNonce(ConsumeNonceRequest $request)
+ * @method static string signedRoute(SignedRouteRequest $request)
+ * @method static PruneResult prune(PruneOptions|null $options = null)
  * @method static SentinelFake fakeStatus(Model $model, VerificationStatus $status, string|null $seal = null, list<string>|null $changed = null)
  * @method static SentinelFake fakeStatusOnce(Model $model, VerificationStatus $status, string|null $seal = null, list<string>|null $changed = null)
  * @method static void assertSealed(Model $model, string|null $seal = null, Closure|null $callback = null)
@@ -95,6 +113,9 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static void assertNoKeyChanges()
  * @method static void assertCheckpointed(int|null $times = null)
  * @method static void assertResealed(string $model, int|null $count = null)
+ * @method static void assertIdempotentRun(string $key, bool|null $replayed = null)
+ * @method static void assertNonceIssued(string $purpose)
+ * @method static void assertNonceConsumed(string $purpose)
  * @method static list<RecordedCall> recorded(string|null $method = null)
  *
  * @see SentinelManager

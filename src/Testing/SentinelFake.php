@@ -4,12 +4,21 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Sentinel\Testing;
 
+use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use PHPUnit\Framework\Assert as PHPUnit;
+use RoundlyConsulting\Sentinel\Actions\Idempotency\CompleteIdempotentRequestAction;
+use RoundlyConsulting\Sentinel\Actions\Idempotency\ForgetIdempotencyKeyAction;
+use RoundlyConsulting\Sentinel\Actions\Idempotency\RunIdempotentAction;
+use RoundlyConsulting\Sentinel\Actions\Nonces\ConsumeNonceAction;
+use RoundlyConsulting\Sentinel\Actions\Nonces\IssueNonceAction;
+use RoundlyConsulting\Sentinel\Actions\Nonces\IssueSingleUseUrlAction;
+use RoundlyConsulting\Sentinel\Actions\Nonces\RememberNonceAction;
+use RoundlyConsulting\Sentinel\Actions\PruneAction;
 use RoundlyConsulting\Sentinel\Contracts\AcknowledgementPolicy;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgementResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgeRequest;
@@ -17,12 +26,21 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\BaselineOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ConsumeNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotencyDecision;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentCall;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedNonce;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IssueNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerVerifyOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\PruneOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\PruneResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ResealOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ResealReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ResealWhereRequest;
@@ -33,6 +51,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\ScanOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ScanReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\SignedRouteRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\StatusCount;
 use RoundlyConsulting\Sentinel\DataTransferObjects\UpdateAndResealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationReport;
@@ -64,6 +83,8 @@ use RoundlyConsulting\Sentinel\Support\Reasons;
 use RoundlyConsulting\Sentinel\Support\Runtime;
 use RoundlyConsulting\Sentinel\Support\SealingScope;
 use RoundlyConsulting\Sentinel\Support\Settings;
+use SensitiveParameter;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * The test double installed by `Sentinel::fake()`. It extends the manager, so injected
@@ -87,9 +108,16 @@ final class SentinelFake extends SentinelManager
     /** @var array<string, list<FakedStatus>> */
     private array $once = [];
 
+    private readonly InMemoryIdempotencyStore $idempotencyStore;
+
+    private readonly InMemoryNonceStore $nonceStore;
+
     public function __construct(Container $container)
     {
         parent::__construct($container);
+
+        $this->idempotencyStore = new InMemoryIdempotencyStore;
+        $this->nonceStore = new InMemoryNonceStore;
     }
 
     // ── controls ──────────────────────────────────────────────────────────────
@@ -487,6 +515,81 @@ final class SentinelFake extends SentinelManager
         return null;
     }
 
+    // ── idempotency / nonces ──────────────────────────────────────────────────
+
+    /**
+     * The real action over the in-memory store: replay, 409 and 422 behave as in production.
+     */
+    public function runIdempotent(IdempotentCall $call): IdempotentResult
+    {
+        $result = null;
+
+        try {
+            return $result = $this->container->make(RunIdempotentAction::class, ['store' => $this->idempotencyStore])->execute($call);
+        } finally {
+            $this->record('runIdempotent', $call, $result);
+        }
+    }
+
+    public function forgetIdempotencyKey(string $key, string $scope): bool
+    {
+        return $this->record('forgetIdempotencyKey', [$key, $scope], $this->container->make(ForgetIdempotencyKeyAction::class, ['store' => $this->idempotencyStore])->execute($key, $scope));
+    }
+
+    public function issueNonce(IssueNonceRequest $request): IssuedNonce
+    {
+        return $this->record('issueNonce', $request, $this->container->make(IssueNonceAction::class, ['store' => $this->nonceStore])->execute($request));
+    }
+
+    public function consumeNonce(ConsumeNonceRequest $request): bool
+    {
+        return $this->record('consumeNonce', $request, $this->container->make(ConsumeNonceAction::class, ['store' => $this->nonceStore])->execute($request));
+    }
+
+    public function signedRoute(SignedRouteRequest $request): string
+    {
+        return $this->record('signedRoute', $request, $this->container->make(IssueSingleUseUrlAction::class, ['manager' => $this])->execute($request));
+    }
+
+    public function prune(?PruneOptions $options = null): PruneResult
+    {
+        $options ??= new PruneOptions;
+
+        return $this->record('prune', $options, $this->container->make(PruneAction::class, ['idempotency' => $this->idempotencyStore, 'nonces' => $this->nonceStore])->execute($options));
+    }
+
+    /**
+     * @internal the `sentinel.idempotent` middleware, over the in-memory store
+     */
+    public function beginIdempotentRequest(IdempotentRequest $request): IdempotencyDecision
+    {
+        return $this->record('beginIdempotentRequest', $request, $this->idempotencyStore->begin($request));
+    }
+
+    /**
+     * @internal
+     */
+    public function completeIdempotentRequest(IdempotentRequest $request, Response $response): bool
+    {
+        return $this->container->make(CompleteIdempotentRequestAction::class, ['store' => $this->idempotencyStore])->execute($request, $response);
+    }
+
+    /**
+     * @internal
+     */
+    public function releaseIdempotentRequest(IdempotentRequest $request): void
+    {
+        $this->idempotencyStore->release($request);
+    }
+
+    /**
+     * @internal
+     */
+    public function rememberNonce(string $purpose, #[SensitiveParameter] string $nonce, CarbonImmutable $until): bool
+    {
+        return $this->container->make(RememberNonceAction::class, ['store' => $this->nonceStore])->execute($purpose, $nonce, $until);
+    }
+
     // ── keys ──────────────────────────────────────────────────────────────────
 
     public function generateKey(GenerateKeyRequest $request): GeneratedKey
@@ -684,6 +787,39 @@ final class SentinelFake extends SentinelManager
 
             PHPUnit::assertSame($count, $total, "Expected {$count} [{$model}] row(s) to be re-sealed, but {$total} were.");
         }
+    }
+
+    /**
+     * An idempotent run with this key happened — replayed or fresh, when given.
+     */
+    public function assertIdempotentRun(string $key, ?bool $replayed = null): void
+    {
+        $matching = array_filter(
+            $this->recorded('runIdempotent'),
+            static fn (RecordedCall $call): bool => $call->arguments instanceof IdempotentCall && $call->arguments->key === $key
+                && ($replayed === null || ($call->result instanceof IdempotentResult && $call->result->replayed === $replayed)),
+        );
+
+        PHPUnit::assertNotEmpty($matching, "Expected an idempotent run with key [{$key}]".match ($replayed) {
+            true => ' that replayed', false => ' that ran fresh', null => '',
+        }.', but there was none.');
+    }
+
+    public function assertNonceIssued(string $purpose): void
+    {
+        $matching = array_filter($this->recorded('issueNonce'), static fn (RecordedCall $call): bool => $call->arguments instanceof IssueNonceRequest && $call->arguments->purpose === $purpose);
+
+        PHPUnit::assertNotEmpty($matching, "Expected a nonce to be issued for [{$purpose}], but none was.");
+    }
+
+    /**
+     * A nonce of this purpose was consumed successfully.
+     */
+    public function assertNonceConsumed(string $purpose): void
+    {
+        $matching = array_filter($this->recorded('consumeNonce'), static fn (RecordedCall $call): bool => $call->arguments instanceof ConsumeNonceRequest && $call->arguments->purpose === $purpose && $call->result === true);
+
+        PHPUnit::assertNotEmpty($matching, "Expected a nonce for [{$purpose}] to be consumed, but none was.");
     }
 
     /**

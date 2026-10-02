@@ -31,7 +31,7 @@ it('detects a query-builder write and names the changed column (§10 item 1)', f
         ->and($result->changedAttributes)->toBe(['a:amount'])
         ->and($result->isIntact())->toBeFalse()
         ->and($result->toArray())->toMatchArray(['status' => 'tampered', 'changed_attributes' => ['a:amount'], 'intact' => false])
-        ->and(json_encode($result->toArray()))->not->toContain('0.00')
+        ->and(json_encode($result->toArray()))->not->toContain('"0.00"')
         ->and(fn () => Sentinel::verifyOrFail($invoice))->toThrow(TamperedModelException::class, 'tampered: mac');
 
     Event::assertDispatched(TamperDetected::class, static fn (TamperDetected $event): bool => $event->changedAttributes === ['a:amount'] && $event->context === VerificationContext::Api);

@@ -46,4 +46,9 @@ final class InvalidSentinelConfigurationException extends SentinelException
     {
         return new self("The option [--{$option}] {$expectation}.");
     }
+
+    public static function lockStoreRequired(string $key): self
+    {
+        return self::invalidValue($key, 'must name a cache store that supports atomic locks (redis, memcached, database, dynamodb, file or array)');
+    }
 }

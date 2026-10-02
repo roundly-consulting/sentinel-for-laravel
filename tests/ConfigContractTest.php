@@ -24,6 +24,9 @@ it('ships exactly the config keys it reads', function (): void {
                 'sentinel.sealing.reason_max_length', 'sentinel.sealing.transaction_attempts',
                 'sentinel.ledger.batch_size', 'sentinel.ledger.backlog_warning_seconds',
                 'sentinel.middleware.verified_status', 'sentinel.verification.retrieve_reaction',
+                'sentinel.idempotency.ttl', 'sentinel.idempotency.lock_seconds', 'sentinel.idempotency.min_length',
+                'sentinel.idempotency.max_length', 'sentinel.idempotency.max_response_bytes', 'sentinel.nonces.ttl',
+                'sentinel.nonces.length',
             ],
             // Each anchor driver's section is read wholesale and indexed with literal offsets.
             'sectionVariables' => ['AnchorManager.php' => ['$config' => 'sentinel.ledger.anchor_drivers.*']],

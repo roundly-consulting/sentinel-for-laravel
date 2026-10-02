@@ -425,4 +425,189 @@ final class Settings
             default => throw InvalidSentinelConfigurationException::invalidValue('middleware.verified_reaction', 'must be abort or report'),
         };
     }
+
+    /**
+     * `database`, `cache`, or a host binding of the store contract (any other name).
+     */
+    public static function idempotencyStore(): string
+    {
+        return self::storeName('idempotency.store', config('sentinel.idempotency.store'));
+    }
+
+    public static function idempotencyCacheStore(): ?string
+    {
+        return self::optionalString('idempotency.cache_store', config('sentinel.idempotency.cache_store'));
+    }
+
+    public static function idempotencyHeader(): string
+    {
+        return self::headerName('idempotency.header', config('sentinel.idempotency.header') ?? 'Idempotency-Key');
+    }
+
+    public static function replayHeader(): string
+    {
+        return self::headerName('idempotency.replay_header', config('sentinel.idempotency.replay_header') ?? 'Idempotent-Replayed');
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function idempotencyMethods(): array
+    {
+        $methods = config('sentinel.idempotency.methods') ?? ['POST', 'PATCH'];
+
+        if (! is_array($methods) || ! array_is_list($methods) || $methods === []) {
+            throw InvalidSentinelConfigurationException::invalidValue('idempotency.methods', 'must be a non-empty list of HTTP methods');
+        }
+
+        $normalized = [];
+
+        foreach ($methods as $method) {
+            if (! is_string($method) || preg_match('/^[A-Za-z]{1,16}$/D', $method) !== 1) {
+                throw InvalidSentinelConfigurationException::invalidValue('idempotency.methods', 'must be a non-empty list of HTTP methods');
+            }
+
+            $normalized[] = strtoupper($method);
+        }
+
+        return $normalized;
+    }
+
+    public static function idempotencyTtl(): int
+    {
+        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.idempotency.ttl', 60, 2592000, 86400);
+    }
+
+    public static function idempotencyLockSeconds(): int
+    {
+        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.idempotency.lock_seconds', 1, 3600, 60);
+    }
+
+    public static function idempotencyMinLength(): int
+    {
+        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.idempotency.min_length', 1, 255, 16);
+    }
+
+    public static function idempotencyMaxLength(): int
+    {
+        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.idempotency.max_length', 1, 255, 255);
+    }
+
+    public static function idempotencyAcceptsUnquoted(): bool
+    {
+        return Config::boolean('sentinel.idempotency.accept_unquoted', true);
+    }
+
+    public static function storesClientErrors(): bool
+    {
+        return Config::boolean('sentinel.idempotency.store_client_errors', true);
+    }
+
+    public static function storesServerErrors(): bool
+    {
+        return Config::boolean('sentinel.idempotency.store_server_errors', false);
+    }
+
+    public static function idempotencyTransactional(): bool
+    {
+        return Config::boolean('sentinel.idempotency.transactional', false);
+    }
+
+    public static function idempotencyEncrypt(): bool
+    {
+        return Config::boolean('sentinel.idempotency.encrypt', true);
+    }
+
+    public static function maxResponseBytes(): int
+    {
+        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.idempotency.max_response_bytes', 1024, 67108864, 1048576);
+    }
+
+    /**
+     * Lowercase header names a replay carries; `set-cookie` never.
+     *
+     * @return list<string>
+     */
+    public static function replayedHeaders(): array
+    {
+        $headers = config('sentinel.idempotency.replayed_headers') ?? [];
+
+        if (! is_array($headers) || ! array_is_list($headers)) {
+            throw InvalidSentinelConfigurationException::invalidValue('idempotency.replayed_headers', 'must be a list of header names');
+        }
+
+        $names = [];
+
+        foreach ($headers as $header) {
+            if (! is_string($header) || preg_match('/^[A-Za-z0-9-]{1,64}$/D', $header) !== 1) {
+                throw InvalidSentinelConfigurationException::invalidValue('idempotency.replayed_headers', 'must be a list of header names');
+            }
+
+            $names[] = strtolower($header);
+        }
+
+        return array_values(array_diff(array_unique($names), ['set-cookie']));
+    }
+
+    public static function nonceStore(): string
+    {
+        return self::storeName('nonces.store', config('sentinel.nonces.store'));
+    }
+
+    public static function nonceCacheStore(): ?string
+    {
+        return self::optionalString('nonces.cache_store', config('sentinel.nonces.cache_store'));
+    }
+
+    public static function nonceTtl(): int
+    {
+        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.nonces.ttl', 1, 2592000, 900);
+    }
+
+    public static function nonceLength(): int
+    {
+        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.nonces.length', 32, 128, 43);
+    }
+
+    public static function problemTypeBase(): ?string
+    {
+        $base = self::optionalString('problems.type_base', config('sentinel.problems.type_base'));
+
+        if ($base !== null && filter_var($base, FILTER_VALIDATE_URL) === false) {
+            throw InvalidSentinelConfigurationException::invalidValue('problems.type_base', 'must be an absolute URL or null');
+        }
+
+        return $base;
+    }
+
+    private static function storeName(string $key, mixed $store): string
+    {
+        $store ??= 'database';
+
+        if (! is_string($store) || preg_match('/^[a-z][a-z0-9_-]{0,63}$/D', $store) !== 1) {
+            throw InvalidSentinelConfigurationException::invalidValue($key, 'must be database, cache or the name of a bound store');
+        }
+
+        return $store;
+    }
+
+    private static function optionalString(string $key, mixed $value): ?string
+    {
+
+        if ($value !== null && ! is_string($value)) {
+            throw InvalidSentinelConfigurationException::invalidValue($key, 'must be a string or null');
+        }
+
+        return $value === null || $value === '' ? null : $value;
+    }
+
+    private static function headerName(string $key, mixed $value): string
+    {
+
+        if (! is_string($value) || preg_match('/^[A-Za-z0-9-]{1,64}$/D', $value) !== 1) {
+            throw InvalidSentinelConfigurationException::invalidValue($key, 'must be an HTTP header name');
+        }
+
+        return $value;
+    }
 }

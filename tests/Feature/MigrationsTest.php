@@ -14,7 +14,7 @@ it('never auto-loads its migrations — the host publishes them', function (): v
 });
 
 it('publishes its migrations timestamp-injected into the host', function (): void {
-    expect(SentinelServiceProvider::class)->toPublishMigrationsTimestamped('sentinel-migrations', 4);
+    expect(SentinelServiceProvider::class)->toPublishMigrationsTimestamped('sentinel-migrations', 6);
 });
 
 it('orders its migrations so every foreign key target exists first', function () use ($migrations): void {
@@ -25,7 +25,7 @@ it('orders its migrations so every foreign key target exists first', function ()
 it('migrates forward only — no migration defines down()', function () use ($migrations): void {
     $files = glob($migrations.'/*.php') ?: [];
 
-    expect($files)->toHaveCount(4);
+    expect($files)->toHaveCount(6);
 
     foreach ($files as $file) {
         expect((string) file_get_contents($file))->not->toContain('function down(');
@@ -33,12 +33,12 @@ it('migrates forward only — no migration defines down()', function () use ($mi
 });
 
 it('applies its migrations on postgres and refuses a broken order', function () use ($migrations): void {
-    expect($migrations)->toApplyOnConnection('pgsql', migrations: 4)
+    expect($migrations)->toApplyOnConnection('pgsql', migrations: 6)
         ->toRejectBrokenOrderOnConnection(static fn (array $files): array => array_reverse($files), 'pgsql');
 })->skip(fn (): bool => ! test()->connectionAvailable('pgsql'), 'no postgres connection available');
 
 it('applies its migrations on mysql and refuses a broken order', function () use ($migrations): void {
-    expect($migrations)->toApplyOnConnection('mysql', migrations: 4)
+    expect($migrations)->toApplyOnConnection('mysql', migrations: 6)
         ->toRejectBrokenOrderOnConnection(static fn (array $files): array => array_reverse($files), 'mysql');
 })->skip(fn (): bool => ! test()->connectionAvailable('mysql'), 'no mysql connection available');
 

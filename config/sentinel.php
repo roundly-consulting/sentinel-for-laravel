@@ -251,4 +251,74 @@ return [
         'verified_reaction' => env('SENTINEL_VERIFIED_REACTION', 'abort'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Idempotency (the `sentinel.idempotent` middleware and Sentinel::idempotency())
+    |--------------------------------------------------------------------------
+    |
+    | Follows draft-ietf-httpapi-idempotency-key-header-07: the key is an RFC
+    | 9651 string (`Idempotency-Key: "8e03978e-…"`); a key reused with another
+    | payload answers 422, one still in flight 409 (with Retry-After), and a
+    | completed request replays its stored response with `Idempotent-Replayed`.
+    | Keys expire `ttl` seconds after they were first seen. 5xx responses are
+    | released (the client may retry); `Set-Cookie` is never stored or replayed.
+    |
+    | transactional — run the handler and the idempotency record in one database
+    |                 transaction on `database.connection` (exactly-once for that
+    |                 connection's writes; holds the transaction for the request)
+    |
+    */
+
+    'idempotency' => [
+        'store' => env('SENTINEL_IDEMPOTENCY_STORE', 'database'),
+        'cache_store' => env('SENTINEL_IDEMPOTENCY_CACHE_STORE'),
+        'header' => 'Idempotency-Key',
+        'replay_header' => 'Idempotent-Replayed',
+        'methods' => ['POST', 'PATCH'],
+        'ttl' => env('SENTINEL_IDEMPOTENCY_TTL', 86400),
+        'lock_seconds' => 60,
+        'min_length' => 16,
+        'max_length' => 255,
+        'accept_unquoted' => env('SENTINEL_IDEMPOTENCY_ACCEPT_UNQUOTED', true),
+        'store_client_errors' => true,
+        'store_server_errors' => false,
+        'transactional' => env('SENTINEL_IDEMPOTENCY_TRANSACTIONAL', false),
+        'encrypt' => env('SENTINEL_IDEMPOTENCY_ENCRYPT', true),
+        'max_response_bytes' => 1048576,
+        'replayed_headers' => ['content-type', 'content-language', 'location', 'etag', 'last-modified', 'cache-control'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Nonces and single-use URLs
+    |--------------------------------------------------------------------------
+    |
+    | Only the SHA-256 of a nonce is stored; consuming one is a single atomic
+    | statement. `length` is in base64url characters (43 ≈ 256 bits). A cache
+    | store must support atomic locks.
+    |
+    */
+
+    'nonces' => [
+        'store' => env('SENTINEL_NONCE_STORE', 'database'),
+        'cache_store' => env('SENTINEL_NONCE_CACHE_STORE'),
+        'ttl' => 900,
+        'length' => 43,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Problem details (RFC 9457)
+    |--------------------------------------------------------------------------
+    |
+    | Rejections answer `application/problem+json` with a `code` member. With a
+    | base URL, `type` becomes `<base>#<code>`; without one it is omitted
+    | (`about:blank`).
+    |
+    */
+
+    'problems' => [
+        'type_base' => env('SENTINEL_PROBLEM_TYPE_BASE'),
+    ],
+
 ];
