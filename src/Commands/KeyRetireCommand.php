@@ -9,8 +9,7 @@ use RoundlyConsulting\Sentinel\Commands\Concerns\ReadsOptions;
 use RoundlyConsulting\Sentinel\Exceptions\SentinelException;
 use RoundlyConsulting\Sentinel\Keys\EnvSnippet;
 use RoundlyConsulting\Sentinel\SentinelManager;
-use RoundlyConsulting\Sentinel\Support\Settings;
-use RoundlyConsulting\Sentinel\Support\Tables;
+use RoundlyConsulting\Sentinel\Support\SealUsage;
 
 /**
  * Retire a database key (its verification period ends now).
@@ -47,12 +46,8 @@ final class KeyRetireCommand extends Command
             }
 
             // Seals still made with this key would all report retired_key: re-seal them first
-            // (on every connection that holds seals).
-            $inUse = 0;
-
-            foreach (Settings::ledgerConnections() as $connection) {
-                $inUse += Tables::sealsOn($connection)->where('ring', $ring)->where('key_id', $keyId)->count();
-            }
+            // (on every connection that holds seals — the count sentinel:key:list shows).
+            $inUse = SealUsage::of($ring, $keyId);
 
             if ($inUse > 0 && ! $this->option('force')) {
                 $this->components->error("{$inUse} seal(s) still use key [{$ring}:{$keyId}]; re-seal them first (sentinel:reseal --from-key={$keyId}) or pass --force.");

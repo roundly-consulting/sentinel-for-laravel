@@ -2,7 +2,10 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
@@ -127,6 +130,49 @@ it('refuses to retire a key that seals still use, unless forced', function (): v
     $this->artisan('sentinel:key:retire', ['kid' => 'in-use'])->expectsOutputToContain('2 seal(s) still use key [default:in-use]')->assertFailed();
     $this->artisan('sentinel:key:list')->expectsOutputToContain('in-use')->assertSuccessful();
     $this->artisan('sentinel:key:retire', ['kid' => 'in-use', '--force' => true])->expectsOutputToContain('Retired key [default:in-use]')->assertSuccessful();
+});
+
+/**
+ * Audit follow-up B1: `sentinel:key:list` counted seals on the default connection only, while
+ * `sentinel:key:retire` (and the health check) counted on every ledger connection — two
+ * different numbers for one key in a multi-connection app. One counting path now.
+ */
+it('counts the seals of a key on every ledger connection, in the list and the retire guard alike', function (): void {
+    config()->set('sentinel.keys.rings.default.driver', 'chain');
+    config()->set('sentinel.keys.rings.default.drivers', ['database', 'config']);
+    Sentinel::keys()->ring()->generate(Algorithm::HmacSha256, 'in-use');
+    invoice();
+    config()->set('database.connections.second', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '', 'foreign_key_constraints' => true]);
+    Schema::connection('second')->create('sentinel_seals', static function (Blueprint $table): void {
+        $table->id();
+        $table->string('ring');
+        $table->string('key_id');
+    });
+    DB::connection('second')->table('sentinel_seals')->insert([
+        ['ring' => 'default', 'key_id' => 'in-use'], ['ring' => 'default', 'key_id' => 'in-use'], ['ring' => 'default', 'key_id' => 'in-use'],
+        ['ring' => 'http', 'key_id' => 'in-use'],
+    ]);
+    config()->set('sentinel.ledger.connections', [null, 'second']);
+
+    $listed = static function (): string {
+        expect(Artisan::call('sentinel:key:list', ['--ring' => 'default']))->toBe(0);
+
+        preg_match('/^\|\s*default\s*\|\s*in-use\s*\|(?:[^|]*\|){4}\s*(\d+)\s*\|/m', Artisan::output(), $row);
+
+        return $row[1] ?? 'no row';
+    };
+
+    expect($listed())->toBe('5');
+
+    $this->artisan('sentinel:key:retire', ['kid' => 'in-use'])->expectsOutputToContain('5 seal(s) still use key [default:in-use]')->assertFailed();
+
+    // A connection list without the default connection never reads the default one.
+    Schema::drop('sentinel_seals');
+    config()->set('sentinel.ledger.connections', ['second']);
+
+    expect($listed())->toBe('3');
+
+    $this->artisan('sentinel:key:retire', ['kid' => 'in-use'])->expectsOutputToContain('3 seal(s) still use key [default:in-use]')->assertFailed();
 });
 
 /**

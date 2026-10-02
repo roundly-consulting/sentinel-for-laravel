@@ -27,6 +27,7 @@ use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Ledger\AnchorManager;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Support\ModelDiscovery;
+use RoundlyConsulting\Sentinel\Support\SealUsage;
 use RoundlyConsulting\Sentinel\Support\Settings;
 use RoundlyConsulting\Sentinel\Support\Tables;
 use Throwable;
@@ -399,17 +400,12 @@ final readonly class CheckInstallationAction
     {
         $counts = [];
 
-        foreach (Settings::ledgerConnections() as $connection) {
-            $rows = Tables::sealsOn($connection)->toBase()->select(['ring', 'key_id'])->selectRaw('count(*) as seals')->groupBy('ring', 'key_id')->get();
+        foreach (SealUsage::perKey() as $usage) {
+            $state = $this->keyState($usage->ring, $usage->keyId);
 
-            foreach ($rows as $row) {
-                $ring = is_string($row->ring ?? null) ? $row->ring : '';
-                $state = $this->keyState($ring, is_string($row->key_id ?? null) ? $row->key_id : '');
-
-                if ($state !== null) {
-                    $label = "{$state} keys in ring [".(preg_match('/^[a-z0-9_-]{1,64}$/D', $ring) === 1 ? $ring : '(invalid)').']';
-                    $counts[$label] = ($counts[$label] ?? 0) + (is_numeric($row->seals ?? null) ? (int) $row->seals : 0);
-                }
+            if ($state !== null) {
+                $label = "{$state} keys in ring [".(preg_match('/^[a-z0-9_-]{1,64}$/D', $usage->ring) === 1 ? $usage->ring : '(invalid)').']';
+                $counts[$label] = ($counts[$label] ?? 0) + $usage->seals;
             }
         }
 
