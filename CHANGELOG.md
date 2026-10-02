@@ -73,3 +73,10 @@ Initial public release.
   `sentinel.single-use` middleware); `sentinel:prune` for expired keys and nonces.
 - RFC 9457 problem responses for every HTTP rejection, and an RFC 9651 structured-field
   parser and serializer.
+- RFC 9421 HTTP message signatures: the `sentinel.signed[:profile]` middleware verifies
+  `hmac-sha256`, `ed25519`, `ecdsa-p256-sha256` and `ecdsa-p384-sha384` signatures (keys of
+  a dedicated ring, the algorithm taken from the key, a clock-skew window, RFC 9530
+  `Content-Digest`, nonce replay protection) and answers 401 problem details with an
+  `Accept-Signature` hint; `Http::withSignature()` signs outgoing requests;
+  `Sentinel::signatures()->verifyResponse()` checks signed responses. Verified against the
+  RFC's Appendix B test vectors.

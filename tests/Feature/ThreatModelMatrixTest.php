@@ -2,8 +2,11 @@
 
 declare(strict_types=1);
 
+use GuzzleHttp\Psr7\Request as PsrRequest;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
+use Psr\Http\Message\RequestInterface;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
@@ -258,4 +261,42 @@ it('lets the configured revocation list beat a restored key envelope (#15 mitiga
     app(KeyStoreManager::class)->flush();
 
     expect(Sentinel::verify($a)->status)->toBe(VerificationStatus::RevokedKey);
+});
+
+/**
+ * §3.2 rows 17–21: the request-integrity half of the matrix (no anchor column).
+ */
+it('detects replayed, altered and duplicated requests', function (): void {
+    config()->set('app.debug', false);
+    config()->set('sentinel.keys.rings.http.driver', 'config');
+    config()->set('sentinel.keys.rings.http.key_id', 'partner');
+    config()->set('sentinel.keys.rings.http.key', 'base64:'.base64_encode(str_repeat("\x07\x01", 16)));
+    app(KeyStoreManager::class)->flush();
+
+    Route::post('/signed', static fn (): string => 'ok')->middleware('sentinel.signed');
+    Route::post('/orders', static fn (): string => (string) cache()->increment('orders'))->middleware('sentinel.idempotent');
+    Route::get('/once', static fn (): string => 'once')->name('once')->middleware('sentinel.single-use');
+
+    $signed = Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/signed', ['Content-Type' => 'text/plain'], 'pay 10'), 'partner');
+    $server = static fn (RequestInterface $psr): array => [
+        'HTTPS' => 'on', 'HTTP_HOST' => 'api.example.com', 'CONTENT_TYPE' => 'text/plain',
+        'HTTP_CONTENT_DIGEST' => $psr->getHeaderLine('Content-Digest'),
+        'HTTP_SIGNATURE_INPUT' => $psr->getHeaderLine('Signature-Input'), 'HTTP_SIGNATURE' => $psr->getHeaderLine('Signature'),
+    ];
+
+    // #17 replay, #18 altered body.
+    $this->call('POST', 'https://api.example.com/signed', server: $server($signed), content: 'pay 10')->assertOk();
+    $this->call('POST', 'https://api.example.com/signed', server: $server($signed), content: 'pay 10')->assertUnauthorized();
+    $this->call('POST', 'https://api.example.com/signed', server: $server($signed), content: 'pay 99')->assertUnauthorized();
+
+    // #19 a duplicated POST, #20 a key reused with another payload.
+    $key = ['Idempotency-Key' => '"order-0001-0001-0001"'];
+    $this->postJson('/orders', ['n' => 1], $key)->assertSee('1');
+    $this->postJson('/orders', ['n' => 1], $key)->assertSee('1')->assertHeader('Idempotent-Replayed', 'true');
+    $this->postJson('/orders', ['n' => 2], $key)->assertStatus(422);
+
+    // #21 a single-use URL used twice.
+    $url = Sentinel::nonces()->signedRoute('once');
+    $this->get($url)->assertOk();
+    $this->get($url)->assertForbidden();
 });

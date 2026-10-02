@@ -7,8 +7,9 @@ namespace RoundlyConsulting\Sentinel\Keys;
 use RoundlyConsulting\Enums\Helpers;
 
 /**
- * What a key is MACing/signing. HMAC keys derive a distinct HKDF subkey per purpose; signing
- * keys rely on the documents' distinct `v` members for separation.
+ * What a key is MACing/signing. HMAC keys derive a distinct HKDF subkey per purpose (except
+ * HTTP signatures, which use the shared secret as is, for interop); signing keys rely on the
+ * documents' distinct `v` members for separation.
  *
  * @internal
  */
@@ -21,4 +22,7 @@ enum Purpose: string
 
     /** Ledger entries, checkpoints and anchors. */
     case Ledger = 'ledger';
+
+    /** RFC 9421 HTTP message signatures: the raw key, as the peer holds it (no HKDF). */
+    case Http = 'http';
 }

@@ -83,6 +83,12 @@ final readonly class Signers
     {
         $algorithm = $key->algorithm();
 
+        // RFC 9421 peers MAC with the shared secret itself; such keys live in their own ring,
+        // so a partner's secret can never derive a seal or ledger subkey.
+        if ($purpose === Purpose::Http) {
+            return $key->material()->hmacRoot();
+        }
+
         $info = match ($purpose) {
             Purpose::Seal => Hkdf::sealInfo($key->ring, $key->keyId, $algorithm),
             Purpose::Ledger => Hkdf::ledgerInfo($key->ring, $key->keyId, $algorithm),

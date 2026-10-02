@@ -7,12 +7,16 @@ use RoundlyConsulting\Crypto\Signature\Algorithm as CryptoAlgorithm;
 use RoundlyConsulting\Enums\Helpers;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\DigestAlgorithm;
+use RoundlyConsulting\Sentinel\Enums\IdempotencyOutcome;
+use RoundlyConsulting\Sentinel\Enums\IdempotencyRejection;
 use RoundlyConsulting\Sentinel\Enums\KeyDestination;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
 use RoundlyConsulting\Sentinel\Enums\LedgerFindingKind;
+use RoundlyConsulting\Sentinel\Enums\NonceKind;
 use RoundlyConsulting\Sentinel\Enums\PersistOperation;
 use RoundlyConsulting\Sentinel\Enums\Reaction;
 use RoundlyConsulting\Sentinel\Enums\SealEvent;
+use RoundlyConsulting\Sentinel\Enums\SignatureRejection;
 use RoundlyConsulting\Sentinel\Enums\TamperedWritePolicy;
 use RoundlyConsulting\Sentinel\Enums\TypeKind;
 use RoundlyConsulting\Sentinel\Enums\VerificationContext;
@@ -33,7 +37,11 @@ it('freezes every enum value', function (string $enum, array $values): void {
     'VerificationStatus' => [VerificationStatus::class, ['intact', 'outdated', 'unsealed', 'tampered', 'missing', 'stale', 'unknown_key', 'revoked_key', 'retired_key', 'algorithm_not_allowed', 'algorithm_mismatch', 'malformed', 'unverifiable']],
     'KeyStatus' => [KeyStatus::class, ['pending', 'active', 'verify_only', 'retired', 'revoked']],
     'DigestAlgorithm' => [DigestAlgorithm::class, ['sha-256', 'sha-512']],
-    'Purpose' => [Purpose::class, ['seal', 'ledger']],
+    'Purpose' => [Purpose::class, ['seal', 'ledger', 'http']],
+    'IdempotencyOutcome' => [IdempotencyOutcome::class, ['proceed', 'replay', 'in_progress', 'reused', 'unavailable']],
+    'IdempotencyRejection' => [IdempotencyRejection::class, ['idempotency_key_missing', 'invalid_idempotency_key', 'idempotency_key_reused', 'idempotency_request_in_progress', 'idempotent_response_unavailable']],
+    'NonceKind' => [NonceKind::class, ['issued', 'seen']],
+    'SignatureRejection' => [SignatureRejection::class, ['missing_signature', 'malformed', 'ambiguous_signature', 'missing_parameter', 'missing_component', 'unsupported_component', 'unsupported_algorithm', 'unknown_key', 'revoked_key', 'algorithm_mismatch', 'algorithm_not_allowed', 'tag_mismatch', 'not_yet_valid', 'too_old', 'expired', 'digest_mismatch', 'unsupported_digest', 'invalid_signature', 'replayed']],
     'KeyDestination' => [KeyDestination::class, ['config', 'database']],
     'VerificationContext' => [VerificationContext::class, ['api', 'middleware', 'retrieve', 'command', 'rule', 'collection', 'write']],
     'Reaction' => [Reaction::class, ['throw', 'event', 'log']],
@@ -41,6 +49,10 @@ it('freezes every enum value', function (string $enum, array $values): void {
     'PersistOperation' => [PersistOperation::class, ['save', 'delete', 'increment']],
     'LedgerFindingKind' => [LedgerFindingKind::class, ['checkpoint_gap', 'checkpoint_invalid', 'checkpoint_mismatch', 'chain_broken', 'anchor_ahead', 'anchor_mismatch', 'anchor_invalid', 'anchor_unreachable', 'entry_invalid', 'entity_deleted', 'seal_rolled_back', 'seal_missing', 'backlog']],
 ]);
+
+it('maps each idempotency rejection to its HTTP status', function (): void {
+    expect(array_map(static fn (IdempotencyRejection $rejection): int => $rejection->status(), IdempotencyRejection::cases()))->toBe([400, 400, 422, 409, 409]);
+});
 
 it('treats every ledger finding but a backlog and an unreachable anchor as a violation', function (): void {
     $harmless = array_values(array_filter(LedgerFindingKind::cases(), static fn (LedgerFindingKind $kind): bool => ! $kind->isViolation()));

@@ -321,4 +321,53 @@ return [
         'type_base' => env('SENTINEL_PROBLEM_TYPE_BASE'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | HTTP message signatures (RFC 9421)
+    |--------------------------------------------------------------------------
+    |
+    | Inbound profiles for the `sentinel.signed[:profile]` middleware. A key id
+    | resolves only inside the profile's ring (partner keys never touch seals).
+    | `created` must lie within `max_age` (plus `clock_skew`), the nonce is
+    | remembered for that window, `content-digest` must be covered whenever
+    | there is a body, `@query` whenever there is a query. Supported: the
+    | derived components @method @target-uri @authority @scheme @path @query
+    | @status and header fields — no component parameters.
+    |
+    | `outbound` configures Http::withSignature() (keys of the outbound ring).
+    | `advertise` adds Accept-Signature to 401 responses.
+    |
+    */
+
+    'signatures' => [
+        'default_profile' => 'default',
+
+        'profiles' => [
+            'default' => [
+                'ring' => 'http',
+                'label' => null,
+                'tag' => null,
+                'components' => ['@method', '@authority', '@path'],
+                'require_query' => true,
+                'require_content_digest' => true,
+                'require_nonce' => true,
+                'max_age' => 300,
+                'clock_skew' => 30,
+                'algorithms' => ['hmac-sha256', 'ed25519', 'ecdsa-p256-sha256', 'ecdsa-p384-sha384'],
+            ],
+        ],
+
+        'outbound' => [
+            'ring' => 'http',
+            'label' => 'sig1',
+            'components' => ['@method', '@authority', '@path', '@query', 'content-digest', 'content-type'],
+            'digest' => 'sha-256',
+            'expires_in' => null,
+            'tag' => null,
+            'include_alg' => false,
+        ],
+
+        'advertise' => env('SENTINEL_ADVERTISE_SIGNATURE', true),
+    ],
+
 ];

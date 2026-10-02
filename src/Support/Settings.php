@@ -7,10 +7,12 @@ namespace RoundlyConsulting\Sentinel\Support;
 use Illuminate\Database\Eloquent\Model;
 use RoundlyConsulting\PackageToolkit\Support\Config;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
+use RoundlyConsulting\Sentinel\Enums\DigestAlgorithm;
 use RoundlyConsulting\Sentinel\Enums\Reaction;
 use RoundlyConsulting\Sentinel\Enums\TamperedWritePolicy;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
+use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
 use RoundlyConsulting\Sentinel\Keys\RingConfig;
 
 /**
@@ -609,5 +611,68 @@ final class Settings
         }
 
         return $value;
+    }
+
+    public static function outboundRing(): string
+    {
+        $ring = config('sentinel.signatures.outbound.ring') ?? 'http';
+
+        if (! is_string($ring) || ! in_array($ring, self::rings(), true)) {
+            throw InvalidSentinelConfigurationException::invalidValue('signatures.outbound.ring', 'must name a configured key ring');
+        }
+
+        return $ring;
+    }
+
+    public static function outboundLabel(): string
+    {
+        $label = config('sentinel.signatures.outbound.label') ?? 'sig1';
+
+        if (! is_string($label) || preg_match('/^[a-z*][a-z0-9_\-.*]{0,63}$/D', $label) !== 1) {
+            throw InvalidSentinelConfigurationException::invalidValue('signatures.outbound.label', 'must be a signature label ([a-z*][a-z0-9_-.*]*)');
+        }
+
+        return $label;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function outboundComponents(): array
+    {
+        return ProfileResolver::components('signatures.outbound.components', config('sentinel.signatures.outbound.components') ?? []);
+    }
+
+    public static function outboundDigest(): DigestAlgorithm
+    {
+        return Config::using(InvalidSentinelConfigurationException::class)->enum('sentinel.signatures.outbound.digest', DigestAlgorithm::class);
+    }
+
+    public static function outboundExpiresIn(): ?int
+    {
+        return config('sentinel.signatures.outbound.expires_in') === null
+            ? null
+            : Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.signatures.outbound.expires_in', 1, 86400, 300);
+    }
+
+    public static function outboundTag(): ?string
+    {
+        $tag = config('sentinel.signatures.outbound.tag');
+
+        if ($tag !== null && (! is_string($tag) || preg_match('/^[\x20-\x7E]{1,255}$/D', $tag) !== 1)) {
+            throw InvalidSentinelConfigurationException::invalidValue('signatures.outbound.tag', 'must be a printable ASCII string or null');
+        }
+
+        return $tag;
+    }
+
+    public static function outboundIncludesAlg(): bool
+    {
+        return Config::boolean('sentinel.signatures.outbound.include_alg', false);
+    }
+
+    public static function advertisesSignatures(): bool
+    {
+        return Config::boolean('sentinel.signatures.advertise', true);
     }
 }

@@ -9,10 +9,15 @@ use Closure;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Client\Response as ClientResponse;
+use Illuminate\Http\Request;
+use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
 use RoundlyConsulting\Sentinel\Accessors\IdempotencyAccessor;
 use RoundlyConsulting\Sentinel\Accessors\KeysAccessor;
 use RoundlyConsulting\Sentinel\Accessors\LedgerAccessor;
 use RoundlyConsulting\Sentinel\Accessors\NoncesAccessor;
+use RoundlyConsulting\Sentinel\Accessors\SignaturesAccessor;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\BeginIdempotentRequestAction;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\CompleteIdempotentRequestAction;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\ForgetIdempotencyKeyAction;
@@ -42,6 +47,9 @@ use RoundlyConsulting\Sentinel\Actions\Seals\UpdateAndResealAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\VerifyModelAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\VerifyModelsAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\VerifyRetrievedModelAction;
+use RoundlyConsulting\Sentinel\Actions\Signatures\SignRequestAction;
+use RoundlyConsulting\Sentinel\Actions\Signatures\VerifyRequestSignatureAction;
+use RoundlyConsulting\Sentinel\Actions\Signatures\VerifyResponseSignatureAction;
 use RoundlyConsulting\Sentinel\Casts\UtcDateTime;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgementResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgeRequest;
@@ -76,10 +84,12 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\SealRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SignedRouteRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\SigningOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\UnsealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\UpdateAndResealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\VerifiedSignature;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerifyManyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerifyRequest;
 use RoundlyConsulting\Sentinel\Definition\DefinitionRegistry;
@@ -90,6 +100,7 @@ use RoundlyConsulting\Sentinel\Events\SealingSuspended;
 use RoundlyConsulting\Sentinel\Exceptions\CorruptRecordException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
+use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Ledger\AnchorManager;
 use RoundlyConsulting\Sentinel\Support\Clock;
@@ -471,6 +482,37 @@ class SentinelManager
     public function prune(?PruneOptions $options = null): PruneResult
     {
         return $this->container->make(PruneAction::class)->execute($options ?? new PruneOptions);
+    }
+
+    // ── HTTP message signatures ───────────────────────────────────────────────
+
+    public function signatures(): SignaturesAccessor
+    {
+        return new SignaturesAccessor($this);
+    }
+
+    /**
+     * Sign an outgoing PSR-7 request (RFC 9421).
+     */
+    public function signRequest(RequestInterface $request, string $keyId, ?SigningOptions $options = null): RequestInterface
+    {
+        return $this->container->make(SignRequestAction::class)->execute($request, $keyId, $options ?? new SigningOptions);
+    }
+
+    /**
+     * Verify an incoming request's signature against a profile (null = the default).
+     */
+    public function verifyRequestSignature(Request $request, ?string $profile = null): VerifiedSignature
+    {
+        return $this->container->make(VerifyRequestSignatureAction::class)->execute($request, ProfileResolver::resolve($profile));
+    }
+
+    /**
+     * Verify a received response's signature against a profile (null = the default).
+     */
+    public function verifyResponseSignature(ResponseInterface|ClientResponse $response, ?string $profile = null): VerifiedSignature
+    {
+        return $this->container->make(VerifyResponseSignatureAction::class)->execute($response, ProfileResolver::resolve($profile));
     }
 
     /**

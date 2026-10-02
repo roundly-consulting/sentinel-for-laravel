@@ -10,7 +10,11 @@ use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Client\Response as ClientResponse;
+use Illuminate\Http\Request;
 use PHPUnit\Framework\Assert as PHPUnit;
+use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\CompleteIdempotentRequestAction;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\ForgetIdempotencyKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\RunIdempotentAction;
@@ -52,28 +56,34 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\ScanReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SignedRouteRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\SigningOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\StatusCount;
 use RoundlyConsulting\Sentinel\DataTransferObjects\UpdateAndResealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\VerifiedSignature;
 use RoundlyConsulting\Sentinel\Definition\CompiledSeal;
 use RoundlyConsulting\Sentinel\Definition\DefinitionRegistry;
 use RoundlyConsulting\Sentinel\Engine\Persister;
+use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
 use RoundlyConsulting\Sentinel\Enums\PersistOperation;
 use RoundlyConsulting\Sentinel\Enums\Reaction;
 use RoundlyConsulting\Sentinel\Enums\SealEvent;
+use RoundlyConsulting\Sentinel\Enums\SignatureRejection;
 use RoundlyConsulting\Sentinel\Enums\TamperedWritePolicy;
 use RoundlyConsulting\Sentinel\Enums\VerificationContext;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Exceptions\AcknowledgementDeniedException;
 use RoundlyConsulting\Sentinel\Exceptions\AlgorithmNotAllowedException;
+use RoundlyConsulting\Sentinel\Exceptions\HttpSignatureException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\KeyDriverException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingFailedException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
+use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
 use RoundlyConsulting\Sentinel\Keys\KeyIds;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\BulkQuery;
@@ -112,6 +122,10 @@ final class SentinelFake extends SentinelManager
 
     private readonly InMemoryNonceStore $nonceStore;
 
+    private ?VerifiedSignature $signature = null;
+
+    private ?SignatureRejection $rejection = null;
+
     public function __construct(Container $container)
     {
         parent::__construct($container);
@@ -143,6 +157,27 @@ final class SentinelFake extends SentinelManager
     public function fakeStatusOnce(Model $model, VerificationStatus $status, ?string $seal = null, ?array $changed = null): static
     {
         $this->once[$this->identity($model, $seal)][] = new FakedStatus($status, $changed);
+
+        return $this;
+    }
+
+    /**
+     * Every signature verification returns this signature (null = a synthetic one, key `fake`).
+     */
+    public function fakeVerifiedSignature(?VerifiedSignature $signature = null): static
+    {
+        $this->signature = $signature;
+        $this->rejection = null;
+
+        return $this;
+    }
+
+    /**
+     * Every signature verification is rejected for this reason (401, as in production).
+     */
+    public function rejectSignatures(SignatureRejection $reason): static
+    {
+        $this->rejection = $reason;
 
         return $this;
     }
@@ -590,6 +625,26 @@ final class SentinelFake extends SentinelManager
         return $this->container->make(RememberNonceAction::class, ['store' => $this->nonceStore])->execute($purpose, $nonce, $until);
     }
 
+    // ── HTTP message signatures ───────────────────────────────────────────────
+
+    /**
+     * Records the request and returns it unsigned (the fake holds no key material).
+     */
+    public function signRequest(RequestInterface $request, string $keyId, ?SigningOptions $options = null): RequestInterface
+    {
+        return $this->record('signRequest', [$request, $keyId, $options], $request);
+    }
+
+    public function verifyRequestSignature(Request $request, ?string $profile = null): VerifiedSignature
+    {
+        return $this->fakedSignature('verifyRequestSignature', $request, $profile);
+    }
+
+    public function verifyResponseSignature(ResponseInterface|ClientResponse $response, ?string $profile = null): VerifiedSignature
+    {
+        return $this->fakedSignature('verifyResponseSignature', $response, $profile);
+    }
+
     // ── keys ──────────────────────────────────────────────────────────────────
 
     public function generateKey(GenerateKeyRequest $request): GeneratedKey
@@ -823,6 +878,19 @@ final class SentinelFake extends SentinelManager
     }
 
     /**
+     * An outgoing request was signed — with this key, when given.
+     */
+    public function assertRequestSigned(?string $keyId = null): void
+    {
+        $matching = array_filter(
+            $this->recorded('signRequest'),
+            static fn (RecordedCall $call): bool => $keyId === null || (is_array($call->arguments) && ($call->arguments[1] ?? null) === $keyId),
+        );
+
+        PHPUnit::assertNotEmpty($matching, $keyId === null ? 'Expected a request to be signed, but none was.' : "Expected a request to be signed with key [{$keyId}], but none was.");
+    }
+
+    /**
      * The recorded calls, optionally of one manager method.
      *
      * @return list<RecordedCall>
@@ -836,6 +904,24 @@ final class SentinelFake extends SentinelManager
     }
 
     // ── internals ─────────────────────────────────────────────────────────────
+
+    /**
+     * The profile is validated as in production; the outcome is scripted.
+     */
+    private function fakedSignature(string $method, object $message, ?string $profile): VerifiedSignature
+    {
+        $resolved = ProfileResolver::resolve($profile);
+
+        if ($this->rejection !== null) {
+            $this->record($method, [$message, $resolved->name], $this->rejection);
+
+            throw HttpSignatureException::rejected($this->rejection, 'fake');
+        }
+
+        return $this->record($method, [$message, $resolved->name], $this->signature ?? new VerifiedSignature(
+            'sig1', $resolved->ring, 'fake', Algorithm::HmacSha256, Clock::now()->getTimestamp(), null, null, $resolved->tag, $resolved->components,
+        ));
+    }
 
     /**
      * @param  Builder<Model>  $query

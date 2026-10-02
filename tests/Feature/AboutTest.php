@@ -22,7 +22,7 @@ it('renders its about section without leaking key material', function (): void {
         mustRender: [
             'Default ring / driver', 'default (config)', 'Rings', 'default, http', 'Auto-seal', 'ON',
             'Tampered writes', 'refuse', 'Ledger', 'Anchors', 'none (whole-database rollback undetectable)',
-            'Registered models', 'Idempotency store', 'database', 'Nonce store', 'Manager', SentinelManager::class,
+            'Registered models', 'Idempotency store', 'database', 'Nonce store', 'Signature profiles', 'Manager', SentinelManager::class,
         ],
     );
 });

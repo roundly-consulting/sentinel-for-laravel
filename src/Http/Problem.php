@@ -18,21 +18,30 @@ final class Problem
 {
     /**
      * @param  array<string, string>  $headers
+     * @param  string|null  $messages  the translation entry of title and detail (default: the code's)
      */
-    public static function response(int $status, string $code, array $headers = []): JsonResponse
+    public static function response(int $status, string $code, array $headers = [], ?string $messages = null): JsonResponse
     {
         $base = Settings::problemTypeBase();
-        $title = trans("sentinel::messages.problems.{$code}.title");
-        $detail = trans("sentinel::messages.problems.{$code}.detail");
+        $messages ??= $code;
+        $title = self::message("sentinel::messages.problems.{$messages}.title");
+        $detail = self::message("sentinel::messages.problems.{$messages}.detail");
 
         $body = array_filter([
             'type' => $base === null ? null : $base.'#'.$code,
-            'title' => is_string($title) ? $title : $code,
+            'title' => $title ?? $code,
             'status' => $status,
-            'detail' => is_string($detail) ? $detail : null,
+            'detail' => $detail,
             'code' => $code,
         ], static fn (mixed $value): bool => $value !== null);
 
         return new JsonResponse($body, $status, [...$headers, 'Content-Type' => 'application/problem+json'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    }
+
+    private static function message(string $key): ?string
+    {
+        $message = trans($key);
+
+        return is_string($message) && $message !== $key ? $message : null;
     }
 }

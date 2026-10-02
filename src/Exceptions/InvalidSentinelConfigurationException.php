@@ -51,4 +51,11 @@ final class InvalidSentinelConfigurationException extends SentinelException
     {
         return self::invalidValue($key, 'must name a cache store that supports atomic locks (redis, memcached, database, dynamodb, file or array)');
     }
+
+    public static function unknownProfile(string $profile): self
+    {
+        $shown = preg_match('/^[A-Za-z0-9._-]{1,64}$/D', $profile) === 1 ? $profile : '(invalid)';
+
+        return self::invalidValue('signatures.profiles', "has no profile [{$shown}]");
+    }
 }

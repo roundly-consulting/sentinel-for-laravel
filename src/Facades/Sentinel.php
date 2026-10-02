@@ -6,11 +6,16 @@ namespace RoundlyConsulting\Sentinel\Facades;
 
 use Closure;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Client\Response as ClientResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Facade;
+use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
 use RoundlyConsulting\Sentinel\Accessors\IdempotencyAccessor;
 use RoundlyConsulting\Sentinel\Accessors\KeysAccessor;
 use RoundlyConsulting\Sentinel\Accessors\LedgerAccessor;
 use RoundlyConsulting\Sentinel\Accessors\NoncesAccessor;
+use RoundlyConsulting\Sentinel\Accessors\SignaturesAccessor;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgementResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\BaselineOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointOptions;
@@ -40,9 +45,12 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\ScanReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SignedRouteRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\SigningOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\UpdateAndResealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
+use RoundlyConsulting\Sentinel\DataTransferObjects\VerifiedSignature;
+use RoundlyConsulting\Sentinel\Enums\SignatureRejection;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\ModelSeals;
 use RoundlyConsulting\Sentinel\SealHandle;
@@ -96,7 +104,13 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static bool consumeNonce(ConsumeNonceRequest $request)
  * @method static string signedRoute(SignedRouteRequest $request)
  * @method static PruneResult prune(PruneOptions|null $options = null)
+ * @method static SignaturesAccessor signatures()
+ * @method static RequestInterface signRequest(RequestInterface $request, string $keyId, SigningOptions|null $options = null)
+ * @method static VerifiedSignature verifyRequestSignature(Request $request, string|null $profile = null)
+ * @method static VerifiedSignature verifyResponseSignature(ResponseInterface|ClientResponse $response, string|null $profile = null)
  * @method static SentinelFake fakeStatus(Model $model, VerificationStatus $status, string|null $seal = null, list<string>|null $changed = null)
+ * @method static SentinelFake fakeVerifiedSignature(VerifiedSignature|null $signature = null)
+ * @method static SentinelFake rejectSignatures(SignatureRejection $reason)
  * @method static SentinelFake fakeStatusOnce(Model $model, VerificationStatus $status, string|null $seal = null, list<string>|null $changed = null)
  * @method static void assertSealed(Model $model, string|null $seal = null, Closure|null $callback = null)
  * @method static void assertNotSealed(Model $model, string|null $seal = null)
@@ -116,6 +130,7 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static void assertIdempotentRun(string $key, bool|null $replayed = null)
  * @method static void assertNonceIssued(string $purpose)
  * @method static void assertNonceConsumed(string $purpose)
+ * @method static void assertRequestSigned(string|null $keyId = null)
  * @method static list<RecordedCall> recorded(string|null $method = null)
  *
  * @see SentinelManager

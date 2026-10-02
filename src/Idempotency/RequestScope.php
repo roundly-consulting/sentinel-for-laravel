@@ -9,9 +9,11 @@ use Illuminate\Contracts\Container\Container;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
 use RoundlyConsulting\Sentinel\Contracts\IdempotencyScopeResolver;
+use RoundlyConsulting\Sentinel\DataTransferObjects\VerifiedSignature;
 
 /**
  * The default idempotency scope: `user:<guard>:<id>` for an authenticated user, else
+ * `sig:<ring>:<keyid>` for a request a verified HTTP signature vouches for, else
  * `ip:<address>` (TrustProxies-aware). Place `sentinel.idempotent` after `auth` so the user
  * is known.
  */
@@ -27,6 +29,12 @@ final readonly class RequestScope implements IdempotencyScopeResolver
             $guard = $this->container->bound('auth') ? $this->container->make('auth')->getDefaultDriver() : 'web';
 
             return 'user:'.$guard.':'.(string) $user->getAuthIdentifier();
+        }
+
+        $signature = $request->attributes->get('sentinel.signature');
+
+        if ($signature instanceof VerifiedSignature) {
+            return 'sig:'.$signature->ring.':'.$signature->keyId;
         }
 
         return 'ip:'.($request->ip() ?? 'unknown');

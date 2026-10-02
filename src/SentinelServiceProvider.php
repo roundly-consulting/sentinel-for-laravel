@@ -31,6 +31,7 @@ use RoundlyConsulting\Sentinel\Http\ClientMacros;
 use RoundlyConsulting\Sentinel\Http\CollectionMacros;
 use RoundlyConsulting\Sentinel\Http\Middleware\ConsumeSingleUseUrl;
 use RoundlyConsulting\Sentinel\Http\Middleware\EnsureIdempotency;
+use RoundlyConsulting\Sentinel\Http\Middleware\VerifyHttpSignature;
 use RoundlyConsulting\Sentinel\Http\Middleware\VerifySeals;
 use RoundlyConsulting\Sentinel\Idempotency\RequestScope;
 use RoundlyConsulting\Sentinel\Idempotency\ResponseVault;
@@ -110,6 +111,7 @@ final class SentinelServiceProvider extends PackageServiceProvider
         $router = $this->app->make('router');
         $router->aliasMiddleware('sentinel.verified', VerifySeals::class);
         $router->aliasMiddleware('sentinel.idempotent', EnsureIdempotency::class);
+        $router->aliasMiddleware('sentinel.signed', VerifyHttpSignature::class);
         $router->aliasMiddleware('sentinel.single-use', ConsumeSingleUseUrl::class);
 
         CollectionMacros::register();
@@ -159,6 +161,7 @@ final class SentinelServiceProvider extends PackageServiceProvider
                 'Anchors' => Settings::anchors() === [] ? 'none (whole-database rollback undetectable)' : implode(', ', Settings::anchors()),
                 'Idempotency store' => Settings::idempotencyStore(),
                 'Nonce store' => Settings::nonceStore(),
+                'Signature profiles' => (string) count(is_array(config('sentinel.signatures.profiles')) ? config('sentinel.signatures.profiles') : []),
                 'Registered models' => (string) count(Settings::models()),
             ];
         } catch (SentinelException) {

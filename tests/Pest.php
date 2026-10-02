@@ -2,11 +2,18 @@
 
 declare(strict_types=1);
 
+use GuzzleHttp\Psr7\Request as PsrRequest;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
+use Illuminate\Http\Request;
+use Psr\Http\Message\RequestInterface;
 use RoundlyConsulting\Sentinel\Concerns\HasSeals;
 use RoundlyConsulting\Sentinel\Contracts\Sealable;
+use RoundlyConsulting\Sentinel\DataTransferObjects\SigningOptions;
 use RoundlyConsulting\Sentinel\Definition\SealBuilder;
+use RoundlyConsulting\Sentinel\Enums\Algorithm;
+use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Invoice;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\PlainRecord;
 use RoundlyConsulting\Sentinel\Tests\KeyTypes\UuidKeyTestCase;
@@ -84,4 +91,48 @@ function corrupt(Closure $write): bool
 
         return false;
     }
+}
+
+const PARTNER_SECRET = 'base64:cGFydG5lci1zaGFyZWQtc2VjcmV0LTMyLWJ5dGVzLWxvbmctZm9yLWhtYWM=';
+
+/**
+ * An http ring on the config driver with one partner key.
+ */
+function partnerRing(string $kid = 'partner', Algorithm $algorithm = Algorithm::HmacSha256, string $material = PARTNER_SECRET): void
+{
+    config()->set('sentinel.keys.rings.http.driver', 'config');
+    config()->set('sentinel.keys.rings.http.key_id', $kid);
+    config()->set('sentinel.keys.rings.http.algorithm', $algorithm->value);
+    config()->set('sentinel.keys.rings.http.key', $material);
+    app(KeyStoreManager::class)->flush();
+}
+
+/**
+ * The PSR-7 request as Laravel would receive it.
+ */
+function received(RequestInterface $psr, array $server = []): Request
+{
+    $uri = $psr->getUri();
+    $server += [
+        'REQUEST_METHOD' => $psr->getMethod(),
+        'REQUEST_URI' => $uri->getPath().($uri->getQuery() === '' ? '' : '?'.$uri->getQuery()),
+        'QUERY_STRING' => $uri->getQuery(),
+        'HTTP_HOST' => $uri->getHost().($uri->getPort() === null ? '' : ':'.$uri->getPort()),
+        'HTTPS' => $uri->getScheme() === 'https' ? 'on' : 'off',
+        'SERVER_PORT' => $uri->getPort() ?? ($uri->getScheme() === 'https' ? 443 : 80),
+    ];
+
+    foreach ($psr->getHeaders() as $name => $values) {
+        $key = strtoupper(str_replace('-', '_', (string) $name));
+        $server[in_array($key, ['CONTENT_TYPE', 'CONTENT_LENGTH'], true) ? $key : 'HTTP_'.$key] = implode(', ', $values);
+    }
+
+    $body = (string) $psr->getBody();
+
+    return new Request([], [], [], [], [], $server, $body);
+}
+
+function signedPartnerRequest(?SigningOptions $options = null, string $uri = 'https://api.example.com/events?b=2&a=1', string $body = '{"event":"paid"}', array $headers = ['Content-Type' => 'application/json']): RequestInterface
+{
+    return Sentinel::signatures()->sign(new PsrRequest('POST', $uri, $headers, $body), 'partner', $options);
 }

@@ -30,5 +30,9 @@ return [
             'title' => 'Link not valid',
             'detail' => 'This link or one-time token is invalid, expired or already used.',
         ],
+        'signature_rejected' => [
+            'title' => 'Signature rejected',
+            'detail' => 'The request does not carry a valid HTTP message signature.',
+        ],
     ],
 ];

@@ -30,5 +30,9 @@ return [
             'title' => 'Neplatný odkaz',
             'detail' => 'Tento odkaz alebo jednorazový token je neplatný, expirovaný alebo už bol použitý.',
         ],
+        'signature_rejected' => [
+            'title' => 'Podpis bol odmietnutý',
+            'detail' => 'Požiadavka nemá platný podpis HTTP správy.',
+        ],
     ],
 ];
