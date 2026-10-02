@@ -139,4 +139,9 @@ it('reports configured and discovered models in about, and survives an unmigrate
     Artisan::call('about', ['--only' => 'sentinel']);
 
     expect(Artisan::output())->toMatch('/Sealable models\W+1 configured, discovery unavailable/');
+
+    config()->set('sentinel.ledger.connections', ['not-configured']);
+    Artisan::call('about', ['--only' => 'sentinel']);
+
+    expect(Artisan::output())->toMatch('/Sealable models\W+1 configured, discovery unavailable/');
 });

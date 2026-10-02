@@ -6,7 +6,6 @@ namespace RoundlyConsulting\Sentinel;
 
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Container\Container;
-use Illuminate\Database\QueryException;
 use Illuminate\Log\LogManager;
 use RoundlyConsulting\PackageToolkit\Concerns\RegistersBlueprintMacros;
 use RoundlyConsulting\PackageToolkit\Package;
@@ -229,7 +228,8 @@ final class SentinelServiceProvider extends PackageServiceProvider
 
         try {
             $discovery = ModelDiscovery::run();
-        } catch (QueryException) {
+        } catch (Throwable) {
+            // `about` must never fail: no tables yet, an unreachable or unknown connection.
             return "{$configured} configured, discovery unavailable (database)";
         }
 
