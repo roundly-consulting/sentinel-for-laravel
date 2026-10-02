@@ -29,7 +29,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, bcmath, intl, fileinfo
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, bcmath, intl, fileinfo, sodium
           coverage: xdebug
 
       - name: Install dependencies
@@ -45,8 +45,98 @@ jobs:
       - name: Execute tests
         run: vendor/bin/pest --coverage --min=90
 
-  # This template ships no migrations and no database access, so the `test-pgsql`
-  # real-engine leg every other roundly package carries is deliberately absent — a
-  # Postgres service for a suite that never opens a connection is pure cost. Add it back
-  # the moment the package gains migrations or touches the database (see the skill's
-  # "The test-pgsql real-engine leg" section for the job to copy in).
+  test-pgsql:
+    runs-on: ubuntu-latest
+    name: P8.4 - pgsql real-engine
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: testing
+          POSTGRES_USER: testing
+          POSTGRES_PASSWORD: secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.4
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, pgsql, pdo_pgsql, bcmath, intl, fileinfo, sodium
+          coverage: none
+
+      - name: Install dependencies
+        env:
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.COMPOSER_AUTH_TOKEN }}"}}'
+        run: composer update --prefer-stable --prefer-dist --no-interaction
+
+      - name: Execute tests against postgres
+        env:
+          # Without TESTING_DB_DRIVER the whole job would run in-memory SQLite and call
+          # itself a postgres leg. Check the skip count, not the colour.
+          TESTING_DB_DRIVER: pgsql
+          TESTING_DB_HOST: 127.0.0.1
+          TESTING_DB_PORT: 5432
+          TESTING_DB_DATABASE: testing
+          TESTING_DB_USERNAME: testing
+          TESTING_DB_PASSWORD: secret
+        # Coverage is enforced on the sqlite matrix; this is a correctness leg.
+        run: vendor/bin/pest --ci
+
+  test-mysql:
+    runs-on: ubuntu-latest
+    name: P8.4 - mysql real-engine
+
+    # Sentinel's correctness rests on locking reads under REPEATABLE READ, INSERT IGNORE
+    # affected counts, json and datetime(6) — exactly where MySQL and Postgres disagree.
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_DATABASE: testing
+          MYSQL_USER: testing
+          MYSQL_PASSWORD: secret
+          MYSQL_ROOT_PASSWORD: secret
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.4
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, mysql, pdo_mysql, bcmath, intl, fileinfo, sodium
+          coverage: none
+
+      - name: Install dependencies
+        env:
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.COMPOSER_AUTH_TOKEN }}"}}'
+        run: composer update --prefer-stable --prefer-dist --no-interaction
+
+      - name: Execute tests against mysql
+        env:
+          TESTING_DB_DRIVER: mysql
+          TESTING_DB_HOST: 127.0.0.1
+          TESTING_DB_PORT: 3306
+          TESTING_DB_DATABASE: testing
+          TESTING_DB_USERNAME: root
+          TESTING_DB_PASSWORD: secret
+        run: vendor/bin/pest --ci
