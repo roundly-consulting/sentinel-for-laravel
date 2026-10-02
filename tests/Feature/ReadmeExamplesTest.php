@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use GuzzleHttp\Psr7\Request as PsrRequest;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Http\Client\Request as ClientRequest;
@@ -9,30 +10,49 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
+use RoundlyConsulting\Sentinel\Actions\Keys\ImportKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\AcknowledgeTamperingAction;
+use RoundlyConsulting\Sentinel\Actions\Seals\SealModelAction;
 use RoundlyConsulting\Sentinel\Contracts\Anchor;
 use RoundlyConsulting\Sentinel\Contracts\KeyStore;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgeRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPayload;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ImportKeyRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
+use RoundlyConsulting\Sentinel\DataTransferObjects\SealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerifiedSignature;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
+use RoundlyConsulting\Sentinel\Enums\LedgerFindingKind;
 use RoundlyConsulting\Sentinel\Enums\Reaction;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
+use RoundlyConsulting\Sentinel\Events\TamperDetected;
+use RoundlyConsulting\Sentinel\Exceptions\IdempotentResponseUnavailableException;
+use RoundlyConsulting\Sentinel\Exceptions\IdempotentResultException;
 use RoundlyConsulting\Sentinel\Exceptions\NonceRejectedException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Facades\Sentinel as SentinelFacade;
+use RoundlyConsulting\Sentinel\Http\Middleware\EnsureIdempotency;
+use RoundlyConsulting\Sentinel\Http\Middleware\VerifyHttpSignature;
+use RoundlyConsulting\Sentinel\Http\Middleware\VerifySeals;
+use RoundlyConsulting\Sentinel\Jobs\Middleware\Idempotent;
+use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
+use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Keys\Stores\ConfigKeyStore;
 use RoundlyConsulting\Sentinel\Rules\IntactSeal;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Support\Settings;
 use RoundlyConsulting\Sentinel\Testing\SentinelFake;
+use RoundlyConsulting\Sentinel\Testing\SentinelTestKeys;
+use RoundlyConsulting\Sentinel\Testing\WithSentinelKeys;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Definitions\PartyIdentitySeal;
+use RoundlyConsulting\Sentinel\Tests\Fixtures\Jobs\ChargeJob;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Invoice;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\InvoiceLine;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Overrides\SafeOverride;
@@ -74,7 +94,16 @@ it('runs the quick start', function (): void {
         ->and($this->get("/invoices/{$invoice->id}")->status())->toBe(409)
         ->and(Sentinel::for($invoice)->by($admin)->because('INC-88: refund fixed by the DBA')->acknowledge()->acknowledged)->toBeTrue()
         ->and(Artisan::call('sentinel:checkpoint'))->toBe(0)
-        ->and(Artisan::call('sentinel:verify', ['--ledger' => true]))->toBe(0);
+        ->and(Artisan::call('sentinel:verify', ['--ledger' => true]))->toBe(0)
+        ->and(Artisan::call('sentinel:check'))->toBe(0)
+        ->and($result->changedColumns())->toBe(['amount']);
+});
+
+it('runs the guided installation', function (): void {
+    // Publishing is pinned in tests/Install (a sandboxed config/ and database/); here only
+    // the command's presence and its next steps.
+    expect(Artisan::all())->toHaveKey('sentinel:install')
+        ->and(Artisan::all()['sentinel:install']->getDefinition()->hasOption('force'))->toBeTrue();
 });
 
 it('compiles the seal declarations', function (): void {
@@ -162,6 +191,26 @@ it('runs the bulk examples', function (): void {
         )->resealed)->toBe(2)
         ->and($draft->refresh()->currency)->toBe('USD')
         ->and($seals->seals())->toBe(['financial', 'identity']);
+
+    $rows = [];
+    $tenant = $seals->scan(where: fn ($query) => $query->where('tenant_id', 7), progress: function (int $processed) use (&$rows): void {
+        $rows[] = $processed;
+    });
+
+    expect($tenant->scanned)->toBe(0)
+        ->and($rows)->toBe([]);
+});
+
+it('loads a tampered model for the acknowledgement screen', function (): void {
+    $class = definedBy(static fn ($seals) => $seals->seal('financial')->attributes('amount')->verifyOnRetrieve(Reaction::Throw));
+    $invoice = $class::query()->create(['amount' => '5.00']);
+    DB::table('invoices')->where('id', $invoice->getKey())->update(['amount' => '0.00']);
+
+    Route::bind('tamperedInvoice', fn (string $id) => Sentinel::model($class)->findOrFail($id));
+    Route::post('/admin/invoices/{tamperedInvoice}/acknowledge', static fn ($tamperedInvoice): string => Sentinel::acknowledge($tamperedInvoice, 'INC-7')->acknowledged ? 'ok' : 'no')
+        ->middleware(SubstituteBindings::class);
+
+    expect($this->post("/admin/invoices/{$invoice->getKey()}/acknowledge")->getContent())->toBe('ok');
 });
 
 it('runs the ledger examples', function (): void {
@@ -193,6 +242,18 @@ it('runs the middleware, rule, macro and scope examples', function (): void {
         ->and(Invoice::query()->withSeals()->get()->verifySeals()->allIntact())->toBeFalse()
         ->and(Invoice::query()->whereSealed()->count())->toBe(1)
         ->and(Invoice::query()->whereNotSealed('identity')->get())->toHaveCount(1);
+});
+
+it('runs the typed middleware examples', function (): void {
+    config()->set('sentinel.signatures.profiles.partners', config('sentinel.signatures.profiles.default'));
+    $invoice = invoice();
+    Route::put('/invoices/{invoice}', static fn (Invoice $invoice): string => 'ok')->middleware([SubstituteBindings::class, VerifySeals::using('invoice@financial')]);
+    Route::post('/orders', static fn (): string => 'ok')->middleware(EnsureIdempotency::required(ttl: 3600));
+    Route::post('/partner/events', static fn (): string => 'ok')->middleware(VerifyHttpSignature::profile('partners'));
+
+    expect($this->put("/invoices/{$invoice->id}")->status())->toBe(200)
+        ->and($this->postJson('/orders')->status())->toBe(400)
+        ->and($this->postJson('/partner/events')->status())->toBe(401);
 });
 
 it('runs the idempotency examples', function (): void {
@@ -231,7 +292,17 @@ it('runs the idempotency examples', function (): void {
     expect($result->value)->toBe(['charge' => 'ch_1'])
         ->and($result->replayed)->toBeFalse()
         ->and($again->replayed)->toBeTrue()
-        ->and(Sentinel::idempotency()->forget('charge:42', scope: 'billing'))->toBeTrue();
+        ->and($again->value)->toBe($result->value)
+        ->and(Sentinel::idempotency()->forget('charge:42', scope: 'billing'))->toBeTrue()
+        ->and(fn () => Sentinel::idempotency()->run('pdf:1', scope: 'billing', callback: static fn (): string => "%PDF\xB5"))->toThrow(IdempotentResultException::class)
+        ->and(fn () => Sentinel::idempotency()->run('pdf:1', scope: 'billing', callback: static fn (): string => "%PDF\xB5"))->toThrow(IdempotentResponseUnavailableException::class);
+
+    ChargeJob::$runs = 0;
+    ChargeJob::dispatch('evt_1');
+    ChargeJob::dispatch('evt_1');
+
+    expect(ChargeJob::$runs)->toBe(1)
+        ->and((new ChargeJob('evt_2'))->middleware()[0])->toBeInstanceOf(Idempotent::class);
 });
 
 it('runs the nonce and single-use URL examples', function (): void {
@@ -278,6 +349,30 @@ it('runs the message signature examples', function (): void {
         ->and(Sentinel::signatures()->contentDigest('{"hello": "world"}'))->toBe('sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:');
 });
 
+it('runs the partner import and signature reader examples', function (): void {
+    $partner = User::query()->create(['name' => 'ACME']);
+    $partnerKey = KeyMaterial::generate(Algorithm::Ed25519);
+    partnerRing('acme-2026-10', Algorithm::Ed25519, (string) $partnerKey->encodedPrivate());
+    $request = received(Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/partner/events', ['Content-Type' => 'application/json'], '{"event":"paid"}'), 'acme-2026-10'));
+    config()->set('sentinel.keys.rings.http.driver', 'database');
+    config()->set('sentinel.keys.rings.http.key', null);
+    app(KeyStoreManager::class)->flush();
+    $partnerPublicKeyPem = "-----BEGIN PUBLIC KEY-----\n".base64_encode("\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00".base64_decode(substr((string) $partnerKey->encodedPublic(), 7)))."\n-----END PUBLIC KEY-----\n";
+
+    Sentinel::keys()->ring('http')->import('acme-2026-10', Algorithm::Ed25519, $partnerPublicKeyPem, owner: $partner);
+
+    $read = [];
+    Route::post('/partner/events', static function (Request $request) use (&$read): string {
+        $read = [Sentinel::signatures()->current($request)?->keyId, Sentinel::signatures()->owner($request)?->getKey()];
+
+        return 'ok';
+    })->middleware('sentinel.signed');
+
+    expect(app(Kernel::class)->handle($request)->getStatusCode())->toBe(200)
+        ->and($read)->toBe(['acme-2026-10', $partner->id])
+        ->and(Artisan::all())->toHaveKey('sentinel:key:import');
+});
+
 it('runs the key management examples', function (): void {
     Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, 'acme-2025-10');
     Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, 'acme-2026-10');
@@ -315,6 +410,30 @@ it('runs the extension examples', function (): void {
         ->and(Sentinel::keys()->ring()->current()->keyId)->toBe('test-default');
 });
 
+it('runs the health check example', function (): void {
+    invoice();
+
+    $report = Sentinel::check();
+
+    expect($report->failed())->toBeFalse()
+        ->and($report->failures())->toBe([])
+        ->and(array_map(static fn ($check): string => $check->name, $report->warnings()))->toBe(['anchors'])
+        ->and(Artisan::call('sentinel:check', ['--strict' => true]))->toBe(1);
+});
+
+it('runs the event listener example', function (): void {
+    $invoice = invoice();
+    $seen = [];
+    Event::listen(function (TamperDetected $event) use (&$seen): void {
+        $seen = [$event->model()?->getKey(), $event->changedColumns()];
+    });
+    DB::table('invoices')->where('id', $invoice->id)->update(['amount' => '0.01']);
+
+    Sentinel::verify($invoice);
+
+    expect($seen)->toBe([$invoice->id, ['amount']]);
+});
+
 it('runs the examples without the facade', function (): void {
     $consumer = new class(app(SentinelManager::class))
     {
@@ -337,6 +456,17 @@ it('runs the examples without the facade', function (): void {
 
     expect($result->acknowledged)->toBeTrue()
         ->and(Sentinel::for($invoice)->history())->toHaveCount(3);
+
+    $partner = User::query()->create(['name' => 'ACME']);
+    $pem = (string) KeyMaterial::generate(Algorithm::Ed25519)->encodedPublic();
+
+    Sentinel::keys()->ring('http')->import('acme-2026-10', Algorithm::Ed25519, $pem, owner: $partner);
+    $imported = app(ImportKeyAction::class)->execute(new ImportKeyRequest('http', 'acme-2026-11', Algorithm::Ed25519, $pem, owner: $partner));
+    $sealed = app(SealModelAction::class)->execute(new SealRequest($invoice, reason: 'INC-1'));
+    Sentinel::for($invoice)->because('INC-1')->seal();
+
+    expect($imported->status)->toBe(KeyStatus::VerifyOnly)
+        ->and($sealed->seal)->toBe('financial');
 });
 
 it('runs the testing example', function (): void {
@@ -350,6 +480,20 @@ it('runs the testing example', function (): void {
 
     Sentinel::assertVerified($invoice);
     Sentinel::assertNothingAcknowledged();
+
+    $fake->fakeLedgerFindings(new LedgerFinding(LedgerFindingKind::ChainBroken, 3, 17, Invoice::class, 1, 'financial', 'previous digest', 'mysql'));
+    $this->artisan('sentinel:verify --ledger --allow-empty')->assertExitCode(1);
+});
+
+it('runs the real-keys testing example', function (): void {
+    config()->set('sentinel.keys.rings.default.key', null);
+    app(KeyStoreManager::class)->flush();
+
+    SentinelTestKeys::install(app(), Algorithm::Ed25519, rings: ['default', 'http']);
+
+    expect(Sentinel::verify(invoice())->isIntact())->toBeTrue()
+        ->and(Sentinel::keys()->ring('http')->current()->keyId)->toBe('test-http')
+        ->and(trait_exists(WithSentinelKeys::class))->toBeTrue();
 });
 
 // ── drift checks: everything the README names exists ────────────────────────────
@@ -379,7 +523,7 @@ it('documents only commands and options that exist', function (): void {
     preg_match_all('/^\| `(sentinel:[a-z:-]+)((?: \{[^}]+\})*)` \|/m', readme(), $rows, PREG_SET_ORDER);
     $commands = Artisan::all();
 
-    expect($rows)->toHaveCount(11);
+    expect($rows)->toHaveCount(14);
 
     foreach ($rows as [, $name, $arguments]) {
         expect($commands)->toHaveKey($name);
@@ -413,7 +557,7 @@ it('documents every configuration key, and only those', function (): void {
         expect(array_key_exists(explode('.', $key)[0], config('sentinel')) && config()->has("sentinel.{$key}"))->toBeTrue("sentinel.{$key} is not a configuration key");
     }
 
-    foreach (['context', 'key_type', 'actor_key_type', 'models', 'database.connection', 'keys.revoked', 'sealing.transaction_attempts', 'ledger.connections', 'idempotency.replayed_headers', 'nonces.length', 'problems.type_base', 'signatures.advertise', 'signatures.outbound.include_alg'] as $key) {
+    foreach (['context', 'key_type', 'actor_key_type', 'models', 'database.connection', 'keys.revoked', 'sealing.transaction_attempts', 'ledger.connections', 'idempotency.replayed_headers', 'nonces.length', 'problems.type_base', 'signatures.advertise', 'signatures.outbound.include_alg', 'schedule.enabled', 'schedule.checkpoint', 'schedule.verify', 'schedule.prune'] as $key) {
         expect($documented)->toContain($key);
     }
 });
@@ -437,7 +581,7 @@ it('names only registered middleware aliases, events and fake assertions', funct
 
     expect(array_unique($aliases[1]))->toHaveCount(4)
         ->and($events)->not->toBeEmpty()
-        ->and(array_unique($assertions[1]))->toHaveCount(19);
+        ->and(array_unique($assertions[1]))->toHaveCount(36);
 
     foreach (array_unique($aliases[1]) as $alias) {
         expect($registered)->toHaveKey($alias);

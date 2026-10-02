@@ -33,9 +33,12 @@ RFC 9421 HTTP message signatures.
   checkpoints and optionally published to external anchors, so deleted or rolled-back
   history is detectable.
 - **Keys** — HMAC-SHA-256/384/512, Ed25519 and ECDSA P-256/P-384 keys in named rings, from
-  the environment or encrypted database rows, with rotation, revocation and retirement.
-- **Requests** — `Idempotency-Key` handling, nonces, single-use signed URLs and HTTP message
-  signatures in and out.
+  the environment or encrypted database rows, with rotation, revocation and retirement —
+  and partner keys imported at runtime, bound to the partner model.
+- **Requests** — `Idempotency-Key` handling (HTTP and queued jobs), nonces, single-use signed
+  URLs and HTTP message signatures in and out.
+- **Operations** — a guided `sentinel:install`, a one-command health check
+  (`sentinel:check`) and upkeep that schedules itself.
 
 Built only on Laravel and three Roundly Tier-0 packages (`package-toolkit`, `enums`,
 `crypto`).
@@ -58,7 +61,7 @@ Built only on Laravel and three Roundly Tier-0 packages (`package-toolkit`, `enu
 - [Nonces and single-use URLs](#nonces-and-single-use-urls)
 - [HTTP message signatures](#http-message-signatures)
 - [Key management](#key-management)
-- [Commands and scheduling](#commands-and-scheduling)
+- [Commands, scheduling and the health check](#commands-scheduling-and-the-health-check)
 - [Events](#events)
 - [Extending](#extending)
 - [Without the facade](#without-the-facade)
@@ -75,7 +78,13 @@ Built only on Laravel and three Roundly Tier-0 packages (`package-toolkit`, `enu
 
 ```bash
 composer require roundly-consulting/sentinel-for-laravel
+php artisan sentinel:install
 ```
+
+`sentinel:install` publishes the configuration and the migrations, shows the morph key types
+to settle before migrating, generates the default ring's key when it has none (printed as
+environment lines — `.env` is never written) and prints the next steps. Running it again is
+harmless (`--force` overwrites published files). The same steps by hand:
 
 Publish and run the migrations (six tables, all prefixed `sentinel_`):
 
@@ -153,13 +162,16 @@ $invoice->update(['note' => 'x']);             // TamperedModelException: refuse
 Sentinel::for($invoice)->by($admin)->because('INC-88: refund fixed by the DBA')->acknowledge();
 ```
 
-Schedule the ledger checkpoints and a nightly scan (`routes/console.php`):
+Nothing to schedule: Sentinel registers its upkeep on the Laravel scheduler itself — a
+ledger checkpoint every minute, a full `sentinel:verify --ledger` and `sentinel:prune` daily
+(run `php artisan schedule:run` every minute as for any scheduled task; set
+`SENTINEL_SCHEDULE=false` to wire the commands yourself). `sentinel:verify` without arguments
+scans every sealable model it knows — those listed in `sentinel.models` and every class that
+has seals — and exits 2 when there is nothing to scan, so a misconfiguration never reports
+green. Then check the installation:
 
-```php
-use Illuminate\Support\Facades\Schedule;
-
-Schedule::command('sentinel:checkpoint')->everyMinute();
-Schedule::command('sentinel:verify --ledger')->hourly();
+```bash
+php artisan sentinel:check
 ```
 
 ## What it detects (threat model)
@@ -234,7 +246,7 @@ The published `config/sentinel.php` documents every key. All of them:
 | `context` | string | `''` | `SENTINEL_CONTEXT` | Application domain separator bound into every MAC. Changing it invalidates every seal (re-seal). |
 | `key_type` | `bigint`\|`uuid`\|`ulid` | `bigint` | `SENTINEL_KEY_TYPE` | Id type of sealed models in the morph columns (set before migrating). |
 | `actor_key_type` | `bigint`\|`uuid`\|`ulid` | `bigint` | `SENTINEL_ACTOR_KEY_TYPE` | Id type of actors, key owners and nonce subjects. |
-| `models` | list of class-strings | `[]` | — | Models `sentinel:verify` scans when given none. |
+| `models` | list of class-strings | `[]` | — | Models `sentinel:verify` scans first when given none; every class that has seals is discovered after them. |
 | `database.connection` | ?string | `null` | `SENTINEL_DB_CONNECTION` | Connection of `sentinel_keys`, `sentinel_idempotency_keys`, `sentinel_nonces`. |
 | `keys.default_ring` | string | `default` | `SENTINEL_DEFAULT_RING` | Ring used by seals that name none. |
 | `keys.revoked` | string (`ring:kid,…`) | `''` | `SENTINEL_REVOKED_KEYS` | Revoked keys — beats every driver, survives a restored key row. |
@@ -313,11 +325,21 @@ The published `config/sentinel.php` documents every key. All of them:
 | `signatures.outbound.tag` | ?string | `null` | — | `tag` parameter. |
 | `signatures.outbound.include_alg` | bool | `false` | — | Send the `alg` parameter. |
 | `signatures.advertise` | bool | `true` | `SENTINEL_ADVERTISE_SIGNATURE` | `Accept-Signature` on 401 responses. |
+| `schedule.enabled` | bool | `true` | `SENTINEL_SCHEDULE` | Register the upkeep tasks on the scheduler (off: schedule the commands yourself). |
+| `schedule.checkpoint` | frequency \| `off` | `everyMinute` | `SENTINEL_SCHEDULE_CHECKPOINT` | `sentinel:checkpoint` (only while the ledger is on) — the rollback window. |
+| `schedule.verify` | frequency \| `off` | `daily` | `SENTINEL_SCHEDULE_VERIFY` | `sentinel:verify --allow-empty --ledger`; `hourly` suits small tables. |
+| `schedule.prune` | frequency \| `off` | `daily` | `SENTINEL_SCHEDULE_PRUNE` | `sentinel:prune`. |
+
+Frequencies are `everyMinute`, `everyTwoMinutes`, `everyFiveMinutes`, `everyTenMinutes`,
+`everyFifteenMinutes`, `everyThirtyMinutes`, `hourly`, `everyTwoHours`, `everyThreeHours`,
+`everyFourHours`, `everySixHours`, `daily` and `weekly`; each task runs without overlapping and
+on one server.
 
 Booleans from the environment are read the way people write them: `true/false`, `on/off`,
 `yes/no`, `1/0`. An invalid value throws `InvalidSentinelConfigurationException` naming the
 key — security-relevant settings never fall back silently. `php artisan about` shows a
-Sentinel section (rings, driver, flags, anchors, stores — never key material).
+Sentinel section (rings, driver, signing key present or missing, flags, anchors, stores,
+sealable models, schedule — never key material).
 
 ## Declaring seals
 
@@ -385,9 +407,11 @@ Computed values that read related rows go stale when those rows change without a
 the owner. Re-seal the owner — `Sentinel::seal($invoice)` re-seals computed-only drift and
 records it — or touch it from the child's `saved` hook (`$line->invoice->touch()`).
 
-A definition is compiled once per process and validated as a whole: an unknown ring, an
-undeclared float, a closure that is not `static`, a duplicate field — every problem is listed
-in one `InvalidSealDefinitionException`. Values are canonicalized from what the database
+A definition is compiled once per process — when the model class boots, so an invalid one
+fails on the first `new` — and validated as a whole: an unknown ring, an undeclared float, a
+closure that is not `static`, a duplicate field — every problem is listed in one
+`InvalidSealDefinitionException`. Reading a model costs nothing extra unless one of its seals
+declares `verifyOnRetrieve()`. Values are canonicalized from what the database
 holds (read back under a row lock), typed and engine-portable — see the technical docs for
 the frozen `sentinel.seal/1` format.
 
@@ -414,8 +438,10 @@ the frozen `sentinel.seal/1` format.
 Sentinel::withoutSealing(fn () => Invoice::query()->create($row), reason: 'Legacy import');
 ```
 
-- **Overriding `save()` or `delete()`** in a sealable model: route the parent call through
-  `persistSealed()`, or the model refuses to boot:
+- **Overriding `save()` or `delete()`** in the class that uses `HasSeals`: route the parent
+  call through `persistSealed()`. A subclass simply calls `parent::save()`, which is the
+  sealed one. A save or delete that bypasses the sealed path is refused before anything is
+  written (`SealingMisconfiguredException`):
 
 ```php
 public function save(array $options = []): bool
@@ -446,6 +472,7 @@ $result = Sentinel::verify($invoice, 'financial');        // the same, flat
 $result->status;              // VerificationStatus::Intact, ::Tampered, …
 $result->reason;              // 'mac', 'seal_deleted', 'newer_version', … (null when intact)
 $result->changedAttributes;   // ['a:amount'] — names only, never values
+$result->changedColumns();    // ['amount'] (and changedComputed() for c:* fields)
 $result->isIntact();
 
 $invoice->isIntact();                                    // every seal
@@ -492,6 +519,15 @@ Other per-model operations on the handle: `seal()`, `unseal($reason)` (removes t
 an `unsealed` tombstone), `current()` (the stored seal row, unverified), `history($limit)`
 (ledger records), `definition()` and `name()`.
 
+A seal that verifies on retrieve with `Reaction::Throw` also refuses to load the tampered
+row — including in route-model binding. Load it for the acknowledgement screen with
+`find()` / `findOrFail()`, which suspend verify-on-retrieve (global scopes stay):
+
+```php
+Route::bind('tamperedInvoice', fn (string $id) => Sentinel::model(Invoice::class)->findOrFail($id));
+Route::post('/admin/invoices/{tamperedInvoice}/acknowledge', AcknowledgeInvoice::class);
+```
+
 ## Bulk operations
 
 `Sentinel::model(Invoice::class)` works on every row of a model:
@@ -500,6 +536,8 @@ an `unsealed` tombstone), `current()` (the stored seal row, unverified), `histor
 $seals = Sentinel::model(Invoice::class);
 
 $seals->scan();                                     // ScanReport: counts per status + findings
+$seals->scan(where: fn ($query) => $query->where('tenant_id', 7));   // only these rows, chunked
+$seals->scan(progress: fn (int $rows) => $bar->setProgress($rows));  // after every chunk
 $seals->sealMissing(reason: 'Initial baseline');    // adopt rows that were never sealed
 $seals->reseal();                                   // re-seal intact rows with the current key
 $seals->reseal(acknowledgeReason: 'INC-90');        // …and acknowledge the others
@@ -513,7 +551,10 @@ $seals->seals();                                    // ['financial', 'identity']
 
 Re-sealing **never launders**: rows that are not intact are skipped and reported unless an
 acknowledgement reason is given. `updateAndReseal()` verifies every selected row first and
-writes nothing if one is not intact.
+writes nothing if one is not intact. A scan's `where` is a closure receiving the model's query
+(global scopes off, as for the whole table) or a builder of that model; it filters, never
+orders. `reseal()` and `sealMissing()` take a `progress` callback too, and the long commands
+show a progress bar on a terminal.
 
 ## Ledger, checkpoints and anchors
 
@@ -551,6 +592,18 @@ Route::get('/invoices/{invoice}', ShowInvoice::class)->middleware('sentinel.veri
 Route::put('/invoices/{invoice}/lines/{line}', UpdateLine::class)->middleware('sentinel.verified:invoice@financial');
 ```
 
+The same with typed helpers that validate their parameters when the route is declared:
+
+```php
+use RoundlyConsulting\Sentinel\Http\Middleware\EnsureIdempotency;
+use RoundlyConsulting\Sentinel\Http\Middleware\VerifyHttpSignature;
+use RoundlyConsulting\Sentinel\Http\Middleware\VerifySeals;
+
+Route::put('/invoices/{invoice}', UpdateInvoice::class)->middleware(VerifySeals::using('invoice@financial'));
+Route::post('/orders', StoreOrder::class)->middleware(EnsureIdempotency::required(ttl: 3600));
+Route::post('/partner/events', PartnerEvents::class)->middleware(VerifyHttpSignature::profile('partners'));
+```
+
 Recommended order: `sentinel.signed` → `auth` → `sentinel.idempotent` → (bindings) →
 `sentinel.verified`.
 
@@ -585,10 +638,33 @@ For jobs, commands and webhooks:
 ```php
 $result = Sentinel::idempotency()->run("charge:{$order->id}", scope: 'billing', callback: fn () => $gateway->charge($order));
 
-$result->value;       // the callback's (JSON-encodable) result, replayed on repeats
+$result->value;       // the JSON round-trip of the callback's result — the same shape on every run
 $result->replayed;
 Sentinel::idempotency()->forget("charge:{$order->id}", scope: 'billing');
 ```
+
+`value` is always what a replay returns: objects become arrays, so code reading
+`$result->value['id']` works on the first run and on every retry. A callback that throws gives
+the key back. A callback that ran but returned something that cannot be stored (binary data,
+`INF`, a resource) is never run again — its key is completed without a result
+(`IdempotentResultException`), and a repeat is refused (`IdempotentResponseUnavailableException`,
+409) instead of repeating the side effect.
+
+Queued jobs run once per key with the `Idempotent` job middleware — a webhook redelivered as a
+second job, a double dispatch — where `ShouldBeUnique` only covers the time on the queue:
+
+```php
+use RoundlyConsulting\Sentinel\Jobs\Middleware\Idempotent;
+
+public function middleware(): array
+{
+    return [new Idempotent("stripe:{$this->event->id}", scope: 'webhooks')];
+}
+```
+
+A duplicate completes without running; one arriving while the first still runs is released
+back onto the queue; a job that throws, releases or fails itself gives the key back, so its
+retries run.
 
 Rejections are RFC 9457 `application/problem+json` responses with a `code` member. With
 `idempotency.transactional` on, the handler and the idempotency record commit in one
@@ -626,7 +702,11 @@ Partners sign requests with RFC 9421 HTTP Message Signatures (`hmac-sha256`, `ed
 ```php
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 
-$key = Sentinel::keys()->ring('http')->generate(Algorithm::Ed25519, keyId: 'acme-2026-10', owner: $partner);
+// The partner sends you their public key (PEM or base64:…) — import it, no deploy:
+Sentinel::keys()->ring('http')->import('acme-2026-10', Algorithm::Ed25519, $partnerPublicKeyPem, owner: $partner);
+
+// …or you generate the pair and share the public half:
+$key = Sentinel::keys()->ring('http')->generate(Algorithm::Ed25519, keyId: 'acme-2027-01', owner: $partner);
 $key->publicKey;      // base64:… — share it with the partner
 ```
 
@@ -637,7 +717,8 @@ there is a body:
 ```php
 Route::post('/partner/events', PartnerEvents::class)->middleware('sentinel.signed');
 
-$signature = $request->attributes->get('sentinel.signature');   // VerifiedSignature: keyId, algorithm, created, …
+$signature = Sentinel::signatures()->current($request);   // VerifiedSignature: keyId, algorithm, created, owner, …
+$partner = Sentinel::signatures()->owner($request);       // the key's owner model (database keys), or null
 ```
 
 A rejection answers 401 problem details with a generic `code` (the precise reason only with
@@ -672,6 +753,7 @@ SP 800-57: pending → active → verify-only → retired, plus revoked. `SENTIN
 
 ```php
 Sentinel::keys()->ring()->current();                        // KeyInfo of the signing key
+Sentinel::keys()->ring('http')->import('acme-2026-10', Algorithm::EcdsaP256Sha256, $pem, owner: $partner);
 Sentinel::keys()->ring('http')->all();
 Sentinel::keys()->ring('http')->rotate();
 Sentinel::keys()->ring('http')->revoke('acme-2026-10', reason: 'Partner offboarded');
@@ -679,27 +761,45 @@ Sentinel::keys()->ring('http')->retire('acme-2025-10');
 Sentinel::keys()->all();                                    // every ring
 ```
 
+**Importing keys.** `import()` (or `sentinel:key:import`) stores existing material in a ring's
+database store: a partner's public key (Ed25519 raw or SPKI PEM, ECDSA PEM) or an agreed HMAC
+secret, bound to the owner model and **verify-only** — it never signs, not as the ring's
+current key and not through `Http::withSignature()` — unless imported with `signing: true`
+(your own key pair moving from the environment into the database; private material is
+refused without it). The status is bound into the encrypted envelope, the kid must be free in
+the whole ring, and `KeyImported` is dispatched. A config-only ring takes verify-only keys in
+its `previous` list instead (`SENTINEL_HTTP_KEYS="acme|ed25519|base64:…"` with
+`SENTINEL_HTTP_KEY_DRIVER=chain`) — at the cost of a deploy per partner and no owner.
+
 Prefer the `config` driver for the default ring: database-driver keys are only as safe as
 `APP_KEY`. A verify-only node (asymmetric keys) configures `SENTINEL_KEY_ID`,
 `SENTINEL_ALGORITHM` and `SENTINEL_PUBLIC_KEY` without `SENTINEL_KEY`, and
 `SENTINEL_AUTO_SEAL=false`. Material never appears in exceptions, logs, events, `about`,
 `var_dump()` or serialized data.
 
-## Commands and scheduling
+## Commands, scheduling and the health check
 
 | Command | Purpose |
 |---|---|
-| `sentinel:verify {model?*} {--seal=} {--chunk=500} {--limit=} {--ledger} {--anchor=} {--check-schema} {--json} {--fail-on=*} {--max-findings=1000}` | Scan sealed rows (and the ledger); exit 1 on findings — for cron and CI. |
+| `sentinel:install {--force}` | Publish, generate the default key when missing, print the next steps. |
+| `sentinel:check {--json} {--strict}` | The installation health check; exit 1 on a failure (`--strict`: on a warning too). |
+| `sentinel:verify {model?*} {--seal=} {--chunk=500} {--limit=} {--ledger} {--anchor=} {--check-schema} {--json} {--fail-on=*} {--max-findings=1000} {--allow-empty}` | Scan sealed rows (and the ledger); exit 1 on findings, 2 when there is nothing to scan — for cron and CI. |
 | `sentinel:checkpoint {--connection=*} {--batch=}` | Fold pending ledger entries into checkpoints and publish them to the anchors. |
 | `sentinel:reseal {model} {--seal=} {--from-key=} {--only-outdated} {--upgrade-format} {--chunk=500} {--dry-run} {--acknowledge=}` | Re-seal after a rotation or definition change; never launders without `--acknowledge`. |
 | `sentinel:seal-missing {model} {--seal=} {--reason=} {--chunk=500}` | Baseline rows that were never sealed. |
 | `sentinel:inspect {model} {id} {--seal=} {--show-values} {--check-schema}` | One row: seal row, verdict, manifest, history, changed fields (values only with `--show-values`). |
 | `sentinel:prune {--idempotency} {--nonces} {--dry-run}` | Delete expired idempotency keys and nonces. |
 | `sentinel:key:generate {--ring=} {--algorithm=hmac-sha256} {--kid=} {--database} {--activate-at=} {--owner-type=} {--owner-id=} {--label=}` | Generate a key (environment lines, or a database row). |
+| `sentinel:key:import {kid} {--ring=} {--algorithm=} {--signing} {--file=} {--activate-at=} {--owner-type=} {--owner-id=} {--label=}` | Import a partner's (or your own) key; material from `--file` (PEM or `base64:…`) or a hidden prompt, never an argument. |
 | `sentinel:key:rotate {--ring=} {--algorithm=} {--activate-at=}` | Rotate a ring's signing key. |
 | `sentinel:key:revoke {kid} {--ring=} {--reason=}` | Revoke a key. |
 | `sentinel:key:retire {kid} {--ring=} {--force}` | Retire a key (refused while seals still use it). |
 | `sentinel:key:list {--ring=}` | The key inventory — never material. |
+
+**Scheduling** is automatic (see `schedule.*` under [Configuration](#configuration)):
+`sentinel:checkpoint` every minute, `sentinel:verify --allow-empty --ledger` and
+`sentinel:prune` daily, each without overlapping and on one server. To wire them yourself, set
+`SENTINEL_SCHEDULE=false` and add them to `routes/console.php`:
 
 ```php
 use Illuminate\Support\Facades\Schedule;
@@ -708,6 +808,31 @@ Schedule::command('sentinel:checkpoint')->everyMinute();
 Schedule::command('sentinel:verify --ledger')->hourly();
 Schedule::command('sentinel:prune')->daily();
 ```
+
+**The health check** reports every misconfiguration that silently weakens the guarantees, in
+one place:
+
+```php
+$report = Sentinel::check();          // HealthReport
+$report->failed();                    // any failure (warnings do not fail it)
+$report->failures();                  // list<HealthCheck>: name, status, message
+$report->warnings();
+```
+
+| Check | Fails when | Warns when |
+|---|---|---|
+| `configuration` | any setting or signature profile is invalid | — |
+| `signing_keys` | the default ring, the ledger ring or a ring a sealable model uses cannot sign (while `sealing.auto` is on) | the same on a verify-only node |
+| `app_key` | database keys or `idempotency.encrypt` need `APP_KEY` and it is empty | — |
+| `tables` | a `sentinel_*` table is missing on its connection | — |
+| `models` | a sealable model does not compile, or its table lacks a sealed column | there are no sealable models, or stored types no longer resolve |
+| `anchors` | a configured anchor is unreachable | none is configured |
+| `checkpoints` | — | ledger entries older than `ledger.backlog_warning_seconds` are not checkpointed |
+| `schedule` | — | scheduling is off and no `sentinel:checkpoint` is scheduled |
+| `retired_keys` | — | seals still use a revoked, retired or unknown key (counts per ring) |
+| `stores` | the idempotency or nonce store cannot be built | — |
+
+Messages name rings, tables and classes — never key material or key ids.
 
 ## Events
 
@@ -722,6 +847,7 @@ values, key material or request bodies — so they are safe for queued listeners
 | `SealRemoved` | after commit | sealable type/id, seal, `deleted`/`unsealed`, previous status |
 | `SealingSuspended` | sync | reason, actor |
 | `KeyGenerated`, `KeyRotated`, `KeyRevoked`, `KeyRetired` | after commit | ring, key id, algorithm (+ previous key id / reason and actor) |
+| `KeyImported` | after commit | ring, key id, algorithm, whether it signs, actor |
 | `KeyIntegrityViolated` | sync | ring, key id, driver |
 | `LedgerCheckpointed` | after commit | connection, seq, entries, root |
 | `LedgerIntegrityViolated` | sync | connection, `LedgerFinding`s |
@@ -729,7 +855,18 @@ values, key material or request bodies — so they are safe for queued listeners
 | `IdempotentRequestReplayed`, `IdempotencyRejected` | sync | method, route, status (+ `IdempotencyRejection`) |
 | `HttpSignatureRejected` | sync | `SignatureRejection`, key id, method, path |
 
-All live in `RoundlyConsulting\Sentinel\Events`.
+All live in `RoundlyConsulting\Sentinel\Events`. `ModelSealed`, `TamperDetected`,
+`TamperAcknowledged` and `SealRemoved` load their model with `model()` (morph-map aware,
+soft-deleted rows included, null after a hard delete) with verify-on-retrieve suspended, so a
+listener can load exactly the tampered row; `TamperDetected` and `TamperAcknowledged` name the
+changes with `changedColumns()` / `changedComputed()`:
+
+```php
+Event::listen(function (TamperDetected $event): void {
+    $invoice = $event->model();             // loads even under a Throw retrieve seal
+    $columns = $event->changedColumns();    // ['amount']
+});
+```
 
 ## Extending
 
@@ -751,13 +888,24 @@ two-person approval) in a service provider.
 
 ## Without the facade
 
-The facade, the injected manager and the actions run the same code:
+The facade, the injected manager and the actions run the same code — every action takes a
+public request object:
 
 ```php
+use RoundlyConsulting\Sentinel\Actions\Keys\ImportKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\AcknowledgeTamperingAction;
+use RoundlyConsulting\Sentinel\Actions\Seals\SealModelAction;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgeRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ImportKeyRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\SealRequest;
+use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\SentinelManager;
 
+// Facade
+Sentinel::keys()->ring('http')->import('acme-2026-10', Algorithm::Ed25519, $pem, owner: $partner);
+Sentinel::for($invoice)->because('INC-1')->seal();
+
+// Injected manager
 final class FixInvoice
 {
     public function __construct(private SentinelManager $sentinel) {}
@@ -768,23 +916,43 @@ final class FixInvoice
     }
 }
 
+// The raw actions
+app(ImportKeyAction::class)->execute(new ImportKeyRequest('http', 'acme-2026-10', Algorithm::Ed25519, $pem, owner: $partner));
+app(SealModelAction::class)->execute(new SealRequest($invoice, reason: 'INC-1'));   // null seal = the default one
 app(AcknowledgeTamperingAction::class)->execute(new AcknowledgeRequest(
     model: $invoice, seal: 'financial', reason: 'Ticket #412: corrected VAT via SQL', actor: $admin,
 ));
 ```
 
 Every facade method that seals, verifies or changes state (`seal`, `verify`, `acknowledge`,
-`scan`, `reseal`, `checkpoint`, `generateKey`, `runIdempotent`, `issueNonce`, `signRequest`, …)
-resolves one action from the container on each call; the handles, sub-accessors and model
-trait all go through the same manager — which is also why `Sentinel::fake()` sees every call.
+`scan`, `reseal`, `checkpoint`, `generateKey`, `importKey`, `check`, `runIdempotent`,
+`issueNonce`, `signRequest`, …) resolves one action from the container on each call — the
+signature actions take the profile by name; the handles, sub-accessors, model trait and job
+middleware all go through the same manager — which is also why `Sentinel::fake()` sees every
+call.
 
 ## Testing your application
 
-`Sentinel::fake()` swaps the manager (in the facade and the container) for a recording fake
-that needs no keys and writes no seals. It keeps production semantics where tests rely on
-them: definitions are compiled for real, the tampered-write policy applies to faked statuses,
-reasons, actors and the acknowledgement policy are enforced, and idempotency and nonces run
-the real state machine in memory.
+**Real seals in your suite.** A sealable model's factory needs a signing key; your test
+environment usually has none. Add `WithSentinelKeys` to your test case — every config ring
+without a key gets a fresh throwaway HMAC key before each test (process memory only):
+
+```php
+use RoundlyConsulting\Sentinel\Testing\WithSentinelKeys;
+
+uses(TestCase::class, RefreshDatabase::class, WithSentinelKeys::class)->in('Feature');
+```
+
+`SentinelTestKeys::install(app(), Algorithm::Ed25519, rings: ['http'])` does the same on demand
+— another algorithm, or a database ring (chained behind a config key, kid `test-<ring>`). A
+ring that already has a configured key is never touched.
+
+**The fake.** `Sentinel::fake()` swaps the manager (in the facade and the container) for a
+recording fake that needs no keys and writes no seals. It keeps production semantics where
+tests rely on them: definitions are compiled for real, the tampered-write policy applies to
+faked statuses, reasons, actors and the acknowledgement policy are enforced, key imports are
+validated and parsed as in production, and idempotency (the job middleware too) and nonces
+run the real state machine in memory.
 
 ```php
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
@@ -797,15 +965,23 @@ $this->get("/invoices/{$invoice->id}")->assertStatus(409);
 
 Sentinel::assertVerified($invoice);
 Sentinel::assertNothingAcknowledged();
+
+$fake->fakeLedgerFindings(new LedgerFinding(LedgerFindingKind::ChainBroken, 3, 17, Invoice::class, 1, 'financial', 'previous digest', 'mysql'));
+$this->artisan('sentinel:verify --ledger --allow-empty')->assertExitCode(1);
 ```
 
 Controls: `fakeStatus()` (sticky until the fake re-seals or acknowledges that seal, as
 production would), `fakeStatusOnce()`, `fakeVerifiedSignature()`, `rejectSignatures()`,
-`recorded()`. Assertions: `assertSealed`, `assertNotSealed`, `assertNothingSealed`,
-`assertVerified`, `assertNothingVerified`, `assertAcknowledged`, `assertNothingAcknowledged`,
-`assertUnsealed`, `assertSealingSuspended`, `assertKeyGenerated`, `assertKeyRotated`,
-`assertKeyRevoked`, `assertNoKeyChanges`, `assertCheckpointed`, `assertResealed`,
-`assertIdempotentRun`, `assertNonceIssued`, `assertNonceConsumed`, `assertRequestSigned`.
+`fakeLedgerFindings()` (what every ledger verification reports, until called again with
+none), `recorded()`. Assertions — each passes and fails like PHPUnit's:
+
+| Area | Assertions |
+|---|---|
+| Seals | `assertSealed`, `assertNotSealed`, `assertNothingSealed`, `assertVerified`, `assertNotVerified`, `assertNothingVerified`, `assertAcknowledged`, `assertNotAcknowledged`, `assertNothingAcknowledged`, `assertUnsealed`, `assertNothingUnsealed`, `assertSealingSuspended`, `assertSealingNotSuspended` |
+| Bulk and ledger | `assertScanned`, `assertResealed`, `assertNothingResealed`, `assertCheckpointed`, `assertLedgerVerified` |
+| Keys | `assertKeyGenerated`, `assertKeyImported`, `assertKeyRotated`, `assertKeyRevoked`, `assertKeyRetired`, `assertNoKeyChanges` |
+| Idempotency and nonces | `assertIdempotentRun`, `assertNoIdempotentRuns`, `assertIdempotencyKeyForgotten`, `assertNonceIssued`, `assertNoNoncesIssued`, `assertNonceConsumed`, `assertNonceNotConsumed`, `assertSingleUseUrlIssued`, `assertPruned` |
+| Signatures | `assertRequestSigned`, `assertNothingSigned`, `assertSignatureVerified` |
 
 ## Naming
 
