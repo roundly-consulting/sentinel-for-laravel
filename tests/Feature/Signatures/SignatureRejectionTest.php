@@ -11,10 +11,12 @@ use Illuminate\Support\Facades\Event;
 use Psr\Http\Message\RequestInterface;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SigningOptions;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
+use RoundlyConsulting\Sentinel\Enums\KeyStatus;
 use RoundlyConsulting\Sentinel\Enums\SignatureRejection;
 use RoundlyConsulting\Sentinel\Events\HttpSignatureRejected;
 use RoundlyConsulting\Sentinel\Exceptions\HttpSignatureException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
+use RoundlyConsulting\Sentinel\Exceptions\NoSigningKeyException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Http\Messages\PsrResponseView;
 use RoundlyConsulting\Sentinel\Http\Messages\SymfonyRequestView;
@@ -229,4 +231,20 @@ it('reads header components strictly and derives nothing a message lacks', funct
         ->and(fn () => ComponentResolver::value($response, '@method'))->toThrow(HttpSignatureException::class, 'unsupported_component')
         ->and(fn () => ComponentResolver::value($response, 'bad header'))->toThrow(HttpSignatureException::class, 'malformed')
         ->and(fn () => ComponentResolver::value(new SymfonyRequestView(Request::create('/')), '@status'))->toThrow(HttpSignatureException::class, 'unsupported_component');
+});
+
+it('verifies partners listed as verify-only config keys in a chained ring', function (): void {
+    partnerRing();
+    $request = received(signedPartnerRequest());
+
+    // The partner's secret only as a verify-only entry; database keys stay reachable.
+    config()->set('sentinel.keys.rings.http.driver', 'chain');
+    config()->set('sentinel.keys.rings.http.key_id', null);
+    config()->set('sentinel.keys.rings.http.key', null);
+    config()->set('sentinel.keys.rings.http.previous', 'partner|hmac-sha256|'.PARTNER_SECRET);
+    app(KeyStoreManager::class)->flush();
+
+    expect(rejection($request))->toBeNull()
+        ->and(Sentinel::keys()->ring('http')->find('partner')?->status)->toBe(KeyStatus::VerifyOnly)
+        ->and(fn () => Sentinel::signatures()->sign(new PsrRequest('GET', 'https://partner.example/'), 'partner'))->toThrow(NoSigningKeyException::class);
 });
