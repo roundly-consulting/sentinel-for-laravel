@@ -138,12 +138,24 @@ final class SentinelFake extends SentinelManager
 
     /**
      * Every verification of the model (one seal, or all when null) returns this status until
-     * changed. An acknowledgement clears it.
+     * changed — or until the fake re-seals or acknowledges that seal, which leaves it intact,
+     * as in production.
      *
      * @param  list<string>|null  $changed
      */
     public function fakeStatus(Model $model, VerificationStatus $status, ?string $seal = null, ?array $changed = null): static
     {
+        if ($seal === null) {
+            // A status for every seal replaces what was scripted or settled per seal.
+            $prefix = $this->identity($model, '');
+
+            foreach (array_keys($this->sticky) as $identity) {
+                if (str_starts_with($identity, $prefix)) {
+                    unset($this->sticky[$identity]);
+                }
+            }
+        }
+
         $this->sticky[$this->identity($model, $seal)] = new FakedStatus($status, $changed);
 
         return $this;
@@ -259,7 +271,7 @@ final class SentinelFake extends SentinelManager
             return $this->record('acknowledge', [$model, $compiled->name, $reason, $request->actor], new AcknowledgementResult(false, $before));
         }
 
-        unset($this->sticky[$this->identity($model, $compiled->name)], $this->sticky[$this->identity($model, null)]);
+        $this->settle($model, $compiled->name);
 
         return $this->record('acknowledge', [$model, $compiled->name, $reason, $request->actor], new AcknowledgementResult(
             true, $before, $this->synthetic($model, $compiled, SealEvent::Acknowledged),
@@ -963,7 +975,21 @@ final class SentinelFake extends SentinelManager
 
     private function recordSeal(Model $model, CompiledSeal $seal, SealEvent $event, ?string $reason = null, ?Model $actor = null): SealResult
     {
-        return $this->record('seal', [$model, $seal->name, $reason, $actor], $this->synthetic($model, $seal, $event));
+        $result = $this->record('seal', [$model, $seal->name, $reason, $actor], $this->synthetic($model, $seal, $event));
+        $this->settle($model, $seal->name);
+
+        return $result;
+    }
+
+    /**
+     * A seal the fake recorded covers the model as it is now, so — as in production — that
+     * seal verifies intact afterwards. Statuses scripted for the model's other seals stay.
+     */
+    private function settle(Model $model, string $seal): void
+    {
+        if (isset($this->sticky[$this->identity($model, $seal)]) || isset($this->sticky[$this->identity($model, null)])) {
+            $this->sticky[$this->identity($model, $seal)] = new FakedStatus(VerificationStatus::Intact, null);
+        }
     }
 
     private function synthetic(Model $model, CompiledSeal $seal, SealEvent $event): SealResult

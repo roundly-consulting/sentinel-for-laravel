@@ -209,3 +209,28 @@ it('keeps production validation in the fake (fake parity, §12.4)', function ():
     // create (2) + explicit seal (1) + skip (0) + reseal (2) + auto off (0); deletes record none.
     expect(count($fake->recorded('seal')))->toBe(5);
 });
+
+it('settles a faked status once the fake re-seals, and lets a new status for every seal replace it', function (): void {
+    $fake = Sentinel::fake();
+    config()->set('sentinel.sealing.on_tampered_write', 'reseal');
+    $invoice = Invoice::query()->create(['number' => 'F-5']);
+    $fake->fakeStatus($invoice, VerificationStatus::Tampered);
+
+    $invoice->update(['note' => 're-sealed under the reseal policy']);
+
+    expect(Sentinel::verify($invoice, 'financial')->status)->toBe(VerificationStatus::Intact)
+        ->and(Sentinel::verify($invoice, 'identity')->status)->toBe(VerificationStatus::Intact);
+
+    $fake->fakeStatus($invoice, VerificationStatus::Stale);
+    $fake->fakeStatus($invoice, VerificationStatus::Missing, 'identity');
+
+    expect(Sentinel::verify($invoice, 'financial')->status)->toBe(VerificationStatus::Stale)
+        ->and(Sentinel::verify($invoice, 'identity')->status)->toBe(VerificationStatus::Missing);
+
+    $fake->fakeStatus($invoice, VerificationStatus::Tampered, 'financial');
+    Sentinel::for($invoice, 'financial')->because('INC-5')->acknowledge();
+
+    // Acknowledging one seal leaves the other seal's scripted status alone.
+    expect(Sentinel::verify($invoice, 'financial')->status)->toBe(VerificationStatus::Intact)
+        ->and(Sentinel::verify($invoice, 'identity')->status)->toBe(VerificationStatus::Missing);
+});
