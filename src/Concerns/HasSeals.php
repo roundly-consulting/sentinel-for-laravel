@@ -8,6 +8,7 @@ use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use ReflectionClass;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgementResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SealResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
@@ -26,7 +27,8 @@ use Throwable;
  * `Sentinel::fake()` sees it.
  *
  * Reserved names: seal, verifySeal, verifySealOrFail, isIntact, acknowledgeTampering,
- * persistSealed, sentinelSeals, and the scopes whereSealed / whereNotSealed / withSeals.
+ * persistSealed, sentinelSeals, sentinelCanWaitForBoot, and the scopes whereSealed /
+ * whereNotSealed / withSeals.
  *
  * @mixin Model
  *
@@ -60,7 +62,7 @@ trait HasSeals
             }
         });
 
-        static::registerModelEvent('booted', static function (): void {
+        $hook = static function (): void {
             try {
                 $verifies = app(SentinelManager::class)->verifiesOnRetrieve(static::class);
             } catch (Throwable $exception) {
@@ -76,7 +78,35 @@ trait HasSeals
                     app(SentinelManager::class)->retrieved($model);
                 });
             }
+        };
+
+        if (static::sentinelCanWaitForBoot()) {
+            // Runs even when the class first boots inside withoutEvents() — a factory's
+            // createQuietly() — where model events (`booted` included) are muted.
+            static::whenBooted($hook);
+
+            return;
+        }
+
+        // Laravel < 12.8 has no whenBooted(), and a model cannot be built mid-boot: hook every
+        // class and decide on the first read (compiled once; an invalid definition fails closed).
+        static::retrieved(static function (Model $model): void {
+            $manager = app(SentinelManager::class);
+
+            if ($manager->verifiesOnRetrieve($model::class)) {
+                $manager->retrieved($model);
+            }
         });
+    }
+
+    /**
+     * Whether Eloquent offers whenBooted() (Laravel 12.8+).
+     *
+     * @internal
+     */
+    protected static function sentinelCanWaitForBoot(): bool
+    {
+        return (new ReflectionClass(Model::class))->hasMethod('whenBooted');
     }
 
     /**

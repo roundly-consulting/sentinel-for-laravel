@@ -2,9 +2,13 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
+use RoundlyConsulting\Sentinel\Concerns\HasSeals;
+use RoundlyConsulting\Sentinel\Contracts\Sealable;
+use RoundlyConsulting\Sentinel\Definition\SealBuilder;
 use RoundlyConsulting\Sentinel\Enums\Reaction;
 use RoundlyConsulting\Sentinel\Enums\VerificationContext;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
@@ -202,4 +206,46 @@ it('records only the retrieve seals of a class with mixed seals under the fake',
     $class::query()->find($model->getKey());
 
     expect(array_map(static fn ($call): string => $call->arguments[1], $fake->recorded('verify')))->toBe(['guarded']);
+});
+
+it('hooks verify-on-retrieve even when the class first boots inside withoutEvents (createQuietly)', function (): void {
+    $class = retrieving(Reaction::Throw);
+
+    // The class boots here, with events muted — as a factory's createQuietly() does.
+    $model = Model::withoutEvents(static fn () => $class::query()->create(['number' => 'q-1', 'amount' => '5.00']));
+    DB::table('invoices')->where('id', $model->getKey())->update(['amount' => '0.00']);
+
+    expect(Event::hasListeners("eloquent.retrieved: {$class}"))->toBeTrue()
+        ->and(fn () => $class::query()->find($model->getKey()))->toThrow(TamperedModelException::class);
+});
+
+it('hooks every class and decides on the first read where Eloquent has no whenBooted()', function (): void {
+    // Laravel 12.0–12.7: the trait cannot compile before the first read.
+    $define = static fn (bool $guarded): Closure => $guarded
+        ? static fn ($seals) => $seals->seal('guarded')->attributes('number', 'amount')->verifyOnRetrieve(Reaction::Throw)
+        : static fn ($seals) => $seals->seal('plain')->attributes('number', 'amount');
+    $legacy = static function (Closure $define): string {
+        $class = 'LegacyBoot'.bin2hex(random_bytes(4));
+        eval('final class '.$class.' extends '.Model::class.' implements '.Sealable::class.' {
+            use '.HasSeals::class.';
+            public static ?Closure $define = null;
+            protected $table = "invoices";
+            protected $guarded = [];
+            protected $casts = ["amount" => "decimal:2"];
+            public static function defineSeals('.SealBuilder::class.' $seals): void { (self::$define)($seals); }
+            protected static function sentinelCanWaitForBoot(): bool { return false; }
+        }');
+        $class::$define = $define;
+
+        return $class;
+    };
+    $guarded = $legacy($define(true));
+    $plain = $legacy($define(false));
+    $a = $guarded::query()->create(['number' => 'l-1', 'amount' => '5.00']);
+    $b = $plain::query()->create(['number' => 'l-2', 'amount' => '5.00']);
+    DB::table('invoices')->update(['amount' => '0.00']);
+
+    expect(Event::hasListeners("eloquent.retrieved: {$plain}"))->toBeTrue()
+        ->and($plain::query()->find($b->getKey()))->not->toBeNull()
+        ->and(fn () => $guarded::query()->find($a->getKey()))->toThrow(TamperedModelException::class);
 });
