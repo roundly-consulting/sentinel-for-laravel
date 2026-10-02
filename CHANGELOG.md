@@ -47,9 +47,12 @@ Initial public release.
 - `Sentinel::fake()`: a recording fake for application tests that keeps production
   semantics — real definitions, the tampered-write policy applied to scripted statuses
   (`fakeStatus()`, `fakeStatusOnce()`), enforced reasons and policies, and the real
-  idempotency and nonce state machines in memory — with an assertion for every operation
-  (sealing, verification, acknowledgement, keys, checkpoints, re-sealing, idempotency, nonces,
-  signed requests).
+  idempotency and nonce state machines in memory — with a passing-and-failing
+  assertion for every operation and for its absence (36: sealing, verification,
+  acknowledgement, unsealing, suspension, scans, re-sealing, keys including imports and
+  retirements, checkpoints and ledger verification, idempotency, nonces, single-use URLs,
+  pruning, signing and inbound signature verification) and `fakeLedgerFindings()` to script
+  ledger violations.
 - Keyed, chained ledger checkpoints (`sentinel:checkpoint`, `Sentinel::ledger()->checkpoint()`)
   published to external anchors (`cache`, `filesystem`, `log`, or custom ones through
   `Sentinel::extendAnchor()`), so deleted, rewritten or rolled-back ledger history — and,
@@ -88,3 +91,45 @@ Initial public release.
   RFC's Appendix B test vectors.
 - A README covering installation, every configuration key, the threat model (what is and
   is not detected) and the full public API.
+- Partner onboarding without a deploy: `Sentinel::keys()->ring('http')->import()`,
+  `Sentinel::importKey()` and `sentinel:key:import` store a partner's public key (Ed25519 raw
+  or SPKI PEM, ECDSA PEM) or an agreed HMAC secret in a ring's database store, bound to the
+  partner model and verify-only unless imported with `signing: true`; `KeyImported` event.
+- `Sentinel::signatures()->current($request)` and `->owner($request)` (also
+  `Sentinel::verifiedSignature()` / `signatureOwner()`): the verified signature and the model
+  owning its key.
+- `sentinel:check` and `Sentinel::check()`: one health report for configuration, signing keys,
+  `APP_KEY`, tables, models, anchors, checkpoint backlog, scheduling, seals on retired keys and
+  stores (`--json`, `--strict`); `php artisan about` shows whether the default ring can sign
+  and how the upkeep is scheduled.
+- Self-scheduling upkeep (`sentinel.schedule`, `SENTINEL_SCHEDULE*`): checkpoints every
+  minute, a full verify and pruning daily — each frequency configurable or `off`.
+- `sentinel:verify` without arguments scans every sealable model Sentinel knows
+  (`Sentinel::sealables()`: `sentinel.models`, then every class that has seals), warns about
+  stored types that no longer resolve, and exits 2 when there is nothing to scan
+  (`--allow-empty` accepts an empty run).
+- `sentinel:install`: publishes, generates the default key when missing and prints the next
+  steps.
+- The `Idempotent` queue-job middleware: a job dispatched twice runs once; an in-flight
+  duplicate is released back onto the queue.
+- Idempotent runs return the JSON round-trip of the callback's result on the first run and on
+  every replay; a callback whose result cannot be stored never runs a second time.
+- `WithSentinelKeys` and `SentinelTestKeys::install()`: real throwaway keys for a host's test
+  suite, so sealable factories seal for real.
+- Scoped scans (`Sentinel::model()->scan(where: …)`), progress callbacks for scans, re-seals
+  and baselines, and progress bars on the long commands.
+- `Sentinel::model()->find()` / `findOrFail()` load a model with verify-on-retrieve suspended,
+  for acknowledgement screens and route bindings.
+- Typed middleware parameters: `VerifySeals::using()`, `EnsureIdempotency::optional()` /
+  `required()` and `VerifyHttpSignature::profile()`, validated when the route is declared.
+- `changedColumns()` / `changedComputed()` on verification results and tamper events, and
+  `model()` on `ModelSealed`, `TamperDetected`, `TamperAcknowledged` and `SealRemoved`.
+- The actions take public request objects (`SealRequest`, `VerifyRequest`,
+  `VerifyManyRequest` with an optional seal; signature profiles by name), so the raw-action
+  style needs no internals.
+- Reading sealable models costs nothing extra unless a seal verifies on retrieve, and the
+  stateless engine services are built once per request or job; a subclass may override
+  `save()` / `delete()` by calling `parent::`.
+- Error messages that say what to do next: the declared seals of a model, the environment
+  variables of a ring without a signing key (and `WithSentinelKeys` in tests), the format of
+  verify-only keys for a read-only ring.
