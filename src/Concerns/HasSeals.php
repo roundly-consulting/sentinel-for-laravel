@@ -16,6 +16,7 @@ use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Models\Seal;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\SealingScope;
+use Throwable;
 
 /**
  * Seals on an Eloquent model (implement `Sealable` alongside). Every Eloquent write path —
@@ -34,11 +35,16 @@ use RoundlyConsulting\Sentinel\Support\SealingScope;
 trait HasSeals
 {
     /**
-     * A `saving` / `deleting` guard: every Eloquent save and delete of the model must run
-     * inside `persistSealed()` — HasSeals' own save() and delete() do, and so does an override
-     * that calls `persistSealed()` or (in a subclass) `parent::save()`. An override that skips
-     * it is refused before anything is written. Every retrieved model passes the manager's
-     * verify-on-retrieve hook (a no-op unless a seal declares verifyOnRetrieve()).
+     * Two hooks per sealable class:
+     *
+     *  - a `saving` / `deleting` guard: every Eloquent save and delete of the model must run
+     *    inside `persistSealed()` — HasSeals' own save() and delete() do, and so does an
+     *    override that calls `persistSealed()` or (in a subclass) `parent::save()`. An
+     *    override that skips it is refused before anything is written.
+     *  - verify-on-retrieve, registered only when a seal declares `verifyOnRetrieve()`
+     *    (other classes pay nothing on reads). The definition compiles once the class has
+     *    booted — a model cannot be instantiated while it boots — so an invalid definition
+     *    fails on the first `new`; the hook then stays registered and keeps failing closed.
      */
     public static function bootHasSeals(): void
     {
@@ -54,8 +60,22 @@ trait HasSeals
             }
         });
 
-        static::retrieved(static function (Model $model): void {
-            app(SentinelManager::class)->retrieved($model);
+        static::registerModelEvent('booted', static function (): void {
+            try {
+                $verifies = app(SentinelManager::class)->verifiesOnRetrieve(static::class);
+            } catch (Throwable $exception) {
+                static::retrieved(static function (Model $model): void {
+                    app(SentinelManager::class)->retrieved($model);
+                });
+
+                throw $exception;
+            }
+
+            if ($verifies) {
+                static::retrieved(static function (Model $model): void {
+                    app(SentinelManager::class)->retrieved($model);
+                });
+            }
         });
     }
 

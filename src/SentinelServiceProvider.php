@@ -9,6 +9,7 @@ use Illuminate\Log\LogManager;
 use RoundlyConsulting\PackageToolkit\Concerns\RegistersBlueprintMacros;
 use RoundlyConsulting\PackageToolkit\Package;
 use RoundlyConsulting\PackageToolkit\PackageServiceProvider;
+use RoundlyConsulting\Sentinel\Canonical\FieldTagger;
 use RoundlyConsulting\Sentinel\Commands\CheckpointCommand;
 use RoundlyConsulting\Sentinel\Commands\InspectCommand;
 use RoundlyConsulting\Sentinel\Commands\KeyGenerateCommand;
@@ -25,6 +26,11 @@ use RoundlyConsulting\Sentinel\Contracts\IdempotencyScopeResolver;
 use RoundlyConsulting\Sentinel\Contracts\IdempotencyStore;
 use RoundlyConsulting\Sentinel\Contracts\NonceStore;
 use RoundlyConsulting\Sentinel\Definition\DefinitionRegistry;
+use RoundlyConsulting\Sentinel\Engine\DocumentBuilder;
+use RoundlyConsulting\Sentinel\Engine\LedgerWriter;
+use RoundlyConsulting\Sentinel\Engine\ReadBack;
+use RoundlyConsulting\Sentinel\Engine\Sealer;
+use RoundlyConsulting\Sentinel\Engine\Verifier;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\SentinelException;
 use RoundlyConsulting\Sentinel\Http\ClientMacros;
@@ -39,6 +45,7 @@ use RoundlyConsulting\Sentinel\Idempotency\Stores\CacheIdempotencyStore;
 use RoundlyConsulting\Sentinel\Idempotency\Stores\DatabaseIdempotencyStore;
 use RoundlyConsulting\Sentinel\Keys\KeyCache;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
+use RoundlyConsulting\Sentinel\Keys\Signers;
 use RoundlyConsulting\Sentinel\Ledger\AnchorManager;
 use RoundlyConsulting\Sentinel\Nonces\Stores\CacheNonceStore;
 use RoundlyConsulting\Sentinel\Nonces\Stores\DatabaseNonceStore;
@@ -93,6 +100,13 @@ final class SentinelServiceProvider extends PackageServiceProvider
         $this->app->scoped(KeyCache::class);
         // Suspension flags: never outlive the request or job that set them.
         $this->app->scoped(SealingScope::class);
+
+        // Stateless engine services (final readonly, no key material of their own): built
+        // once per request / job instead of once per verified row, and flushed with the
+        // scope — never process-wide, so an Octane worker cannot carry one into the next.
+        foreach ([Verifier::class, Sealer::class, DocumentBuilder::class, LedgerWriter::class, ReadBack::class, FieldTagger::class, Signers::class] as $service) {
+            $this->app->scoped($service);
+        }
         // Host-rebindable (e.g. an approval flow).
         $this->app->bindIf(AcknowledgementPolicy::class, GateAcknowledgementPolicy::class);
         $this->app->bindIf(IdempotencyScopeResolver::class, RequestScope::class);

@@ -2,9 +2,25 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
+use RoundlyConsulting\Sentinel\Canonical\FieldTagger;
+use RoundlyConsulting\Sentinel\Engine\DocumentBuilder;
+use RoundlyConsulting\Sentinel\Engine\LedgerWriter;
+use RoundlyConsulting\Sentinel\Engine\ReadBack;
+use RoundlyConsulting\Sentinel\Engine\Sealer;
+use RoundlyConsulting\Sentinel\Engine\Verifier;
+use RoundlyConsulting\Sentinel\Events\ModelSealed;
+use RoundlyConsulting\Sentinel\Events\TamperDetected;
+use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Keys\KeyCache;
+use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
+use RoundlyConsulting\Sentinel\Keys\SealingKey;
+use RoundlyConsulting\Sentinel\Keys\Signers;
 use RoundlyConsulting\Sentinel\SentinelManager;
+use RoundlyConsulting\Sentinel\Support\SealingScope;
 
 /**
  * §10 item 35 (keys part): decrypted keys live in a scoped cache that Laravel resets between
@@ -42,4 +58,58 @@ it('holds no key cache inside the singleton manager', function (): void {
     );
 
     expect($properties)->not->toContain(KeyCache::class);
+});
+
+/**
+ * I-5: the stateless engine services are scoped — one instance per request / job, never
+ * process-wide — and their scoped collaborators are replaced with them.
+ */
+it('scopes the stateless engine services to the request or job', function (string $service): void {
+    $first = app($service);
+
+    expect(app($service))->toBe($first);
+
+    app()->forgetScopedInstances();
+
+    expect(app($service))->not->toBe($first);
+})->with([Verifier::class, Sealer::class, DocumentBuilder::class, LedgerWriter::class, ReadBack::class, FieldTagger::class, Signers::class]);
+
+it('keeps no decrypted key and no stale scope in the scoped engine services', function (): void {
+    invoice();
+    $builder = app(DocumentBuilder::class);
+    $scope = (new ReflectionProperty(DocumentBuilder::class, 'scope'))->getValue($builder);
+
+    expect($scope)->toBe(app(SealingScope::class));
+
+    app()->forgetScopedInstances();
+
+    expect((new ReflectionProperty(DocumentBuilder::class, 'scope'))->getValue(app(DocumentBuilder::class)))->toBe(app(SealingScope::class))
+        ->not->toBe($scope);
+
+    foreach ([Verifier::class, Sealer::class, DocumentBuilder::class, LedgerWriter::class, ReadBack::class, FieldTagger::class, Signers::class] as $service) {
+        $reflection = new ReflectionClass($service);
+        $types = array_map(static fn (ReflectionProperty $property): string => (string) $property->getType(), $reflection->getProperties());
+
+        expect($reflection->isReadOnly())->toBeTrue("{$service} is not readonly")
+            ->and($types)->not->toContain(KeyCache::class)
+            ->and($types)->not->toContain(SealingKey::class)
+            ->and($types)->not->toContain(KeyMaterial::class);
+    }
+});
+
+it('reports to an event fake or log spy installed after the scoped engine was built', function (): void {
+    $invoice = invoice();
+    Sentinel::verify($invoice);
+    DB::table('invoices')->where('id', $invoice->id)->update(['amount' => '0.01']);
+
+    Event::fake([TamperDetected::class, ModelSealed::class]);
+    $log = Log::spy();
+    $log->shouldReceive('channel')->andReturn($log);
+
+    Sentinel::verify($invoice);
+    Sentinel::seal(invoice());
+
+    Event::assertDispatched(TamperDetected::class);
+    Event::assertDispatched(ModelSealed::class);
+    $log->shouldHaveReceived('warning')->once();
 });

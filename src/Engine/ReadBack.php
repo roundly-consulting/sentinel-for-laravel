@@ -19,7 +19,7 @@ use Illuminate\Database\Eloquent\Model;
  *
  * @internal
  */
-final class ReadBack
+final readonly class ReadBack
 {
     /**
      * @param  list<string>  $columns

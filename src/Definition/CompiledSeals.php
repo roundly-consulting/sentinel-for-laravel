@@ -48,6 +48,21 @@ final readonly class CompiledSeals
     }
 
     /**
+     * Whether any seal declares `verifyOnRetrieve()` — only then does the class need a
+     * `retrieved` listener.
+     */
+    public function verifiesOnRetrieve(): bool
+    {
+        foreach ($this->seals as $seal) {
+            if ($seal->verifiesOnRetrieve) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * @return list<CompiledSeal>
      */
     public function auto(): array

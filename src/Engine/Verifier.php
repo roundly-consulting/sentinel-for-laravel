@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Sentinel\Engine;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
@@ -44,6 +45,10 @@ use RoundlyConsulting\Sentinel\Support\Tables;
  * from the key. Fails closed: anything unreadable is a finding, never "intact". Read-only,
  * except that the pre-write check locks the seal row.
  *
+ * Bound scoped (one per request / job); the event dispatcher and the log are resolved when
+ * used, so a test's `Event::fake()` / `Log::spy()` after the first verification still sees
+ * every finding.
+ *
  * @internal
  */
 final readonly class Verifier
@@ -56,8 +61,7 @@ final readonly class Verifier
         private DocumentBuilder $documents,
         private LedgerWriter $ledger,
         private Sealer $sealer,
-        private Dispatcher $events,
-        private LogManager $log,
+        private Container $container,
     ) {}
 
     /**
@@ -90,7 +94,7 @@ final readonly class Verifier
 
     public function dispatchTamperDetected(VerificationResult $result): void
     {
-        $this->events->dispatch(new TamperDetected(
+        $this->container->make(Dispatcher::class)->dispatch(new TamperDetected(
             $result->sealableType, $result->sealableId, $result->seal, $result->status, $result->reason,
             $result->changedAttributes, $result->context, $result->keyId,
         ));
@@ -98,7 +102,7 @@ final readonly class Verifier
 
     public function logFinding(VerificationResult $result): void
     {
-        $this->log->channel(Settings::logChannel())->warning('Sentinel: a sealed model is not intact.', [
+        $this->container->make(LogManager::class)->channel(Settings::logChannel())->warning('Sentinel: a sealed model is not intact.', [
             'sealable_type' => $result->sealableType,
             'sealable_id' => $result->sealableId,
             'seal' => $result->seal,

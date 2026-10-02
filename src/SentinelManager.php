@@ -354,6 +354,19 @@ class SentinelManager
     }
 
     /**
+     * Whether the class declares a verify-on-retrieve seal (`HasSeals` registers its
+     * `retrieved` hook only then). Compiles the definition.
+     *
+     * @internal
+     *
+     * @param  class-string<Model>  $class
+     */
+    public function verifiesOnRetrieve(string $class): bool
+    {
+        return $this->container->make(DefinitionRegistry::class)->for($class)->verifiesOnRetrieve();
+    }
+
+    /**
      * The `retrieved` hook of `HasSeals` (verify-on-retrieve).
      *
      * @internal

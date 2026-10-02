@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Sentinel\Engine;
 
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -46,7 +47,7 @@ final readonly class Sealer
         private LedgerWriter $ledger,
         private ReadBack $readBack,
         private DocumentBuilder $documents,
-        private Dispatcher $events,
+        private Container $container,
     ) {}
 
     /**
@@ -110,7 +111,7 @@ final readonly class Sealer
         // An eager-loaded copy of the seal rows is stale now.
         $model->unsetRelation('sentinelSeals');
 
-        $this->events->dispatch(new ModelSealed(
+        $this->container->make(Dispatcher::class)->dispatch(new ModelSealed(
             $model->getMorphClass(), $model->getKey(), $seal->name, $version, $key->keyId, $event, $actor?->getMorphClass(), $actor?->getKey(),
         ));
 
@@ -156,7 +157,7 @@ final readonly class Sealer
             $model->unsetRelation('sentinelSeals');
         }
 
-        $this->events->dispatch(new SealRemoved($model->getMorphClass(), $model->getKey(), $seal->name, $event, $previousStatus));
+        $this->container->make(Dispatcher::class)->dispatch(new SealRemoved($model->getMorphClass(), $model->getKey(), $seal->name, $event, $previousStatus));
 
         return $sealRow !== null;
     }

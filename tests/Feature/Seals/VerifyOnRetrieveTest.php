@@ -9,6 +9,7 @@ use RoundlyConsulting\Sentinel\Enums\Reaction;
 use RoundlyConsulting\Sentinel\Enums\VerificationContext;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Events\TamperDetected;
+use RoundlyConsulting\Sentinel\Exceptions\InvalidSealDefinitionException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 
@@ -130,4 +131,62 @@ it('applies faked statuses and reactions under the fake', function (): void {
         ->and(Sentinel::withoutVerification(static fn () => $class::query()->find($model->getKey())))->not->toBeNull();
 
     $fake->assertVerified($model, 'guarded');
+});
+
+/**
+ * I-5: only classes with a verify-on-retrieve seal pay for a `retrieved` listener.
+ */
+it('registers the retrieved hook only for classes that verify on retrieve', function (): void {
+    $plain = definedBy(static fn ($seals) => $seals->seal('plain')->attributes('number', 'amount'));
+    $guarded = retrieving(Reaction::Throw);
+
+    new $plain;
+    new $guarded;
+
+    expect(Event::hasListeners("eloquent.retrieved: {$plain}"))->toBeFalse()
+        ->and(Event::hasListeners("eloquent.retrieved: {$guarded}"))->toBeTrue()
+        ->and(Event::hasListeners("eloquent.saving: {$plain}"))->toBeTrue();
+
+    $model = $plain::query()->create(['number' => 'p-1', 'amount' => '1.00']);
+    DB::table('invoices')->where('id', $model->getKey())->update(['amount' => '0.00']);
+
+    // Still sealed on save; reads are not verified — explicit verification still sees it.
+    expect($plain::query()->find($model->getKey()))->not->toBeNull()
+        ->and(Sentinel::verify($model)->status)->toBe(VerificationStatus::Tampered);
+});
+
+it('records retrieve verifications under the fake only for classes that verify on retrieve', function (): void {
+    $plain = definedBy(static fn ($seals) => $seals->seal('plain')->attributes('number'));
+    $guarded = retrieving(Reaction::Throw);
+    $a = $plain::query()->create(['number' => 'a']);
+    $b = $guarded::query()->create(['number' => 'b']);
+    $fake = Sentinel::fake();
+
+    $plain::query()->find($a->getKey());
+    $guarded::query()->find($b->getKey());
+
+    $fake->assertVerified($b, 'guarded');
+
+    expect($fake->recorded('verify'))->toHaveCount(1);
+});
+
+it('fails on the first new of a class whose definition is invalid, and keeps failing closed on reads', function (): void {
+    $invalid = definedBy(static fn ($seals) => $seals->seal('broken')->attributes('bad-column'));
+
+    expect(fn () => new $invalid)->toThrow(InvalidSealDefinitionException::class, 'invalid column [bad-column]');
+
+    // The class has booted: later instances construct, but every sealed path still refuses.
+    DB::table('invoices')->insert(['id' => 4242, 'number' => 'x']);
+
+    expect(new $invalid)->toBeInstanceOf($invalid)
+        ->and(fn () => $invalid::query()->find(4242))->toThrow(InvalidSealDefinitionException::class)
+        ->and(fn () => $invalid::query()->create(['number' => 'y']))->toThrow(InvalidSealDefinitionException::class)
+        ->and(Event::hasListeners("eloquent.retrieved: {$invalid}"))->toBeTrue();
+});
+
+it('compiles the definition once when the registry instantiates a class that has not booted yet', function (): void {
+    $guarded = retrieving(Reaction::Throw);
+
+    expect(Sentinel::model($guarded)->seals())->toBe(['guarded'])
+        ->and(Event::hasListeners("eloquent.retrieved: {$guarded}"))->toBeTrue();
 });
