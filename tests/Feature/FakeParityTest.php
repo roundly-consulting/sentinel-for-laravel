@@ -5,12 +5,15 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
+use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
+use RoundlyConsulting\Sentinel\Enums\LedgerFindingKind;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyKeyReusedException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
+use RoundlyConsulting\Sentinel\Models\LedgerEntry;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Testing\SentinelFake;
@@ -45,6 +48,23 @@ final class ParityRun
         }
 
         DB::table('invoices')->where('id', $invoice->id)->update(['amount' => '0.01']);
+    }
+
+    /**
+     * Rewrite a ledger entry behind the application's back (the fake scripts the finding a
+     * real verification reports for it).
+     */
+    public function rewriteLedger(Invoice $invoice): void
+    {
+        $manager = app(SentinelManager::class);
+
+        if ($this->fake && $manager instanceof SentinelFake) {
+            $manager->fakeLedgerFindings(new LedgerFinding(LedgerFindingKind::EntryInvalid, null, 1, Invoice::class, $invoice->id, 'financial', 'mac', 'testing'));
+
+            return;
+        }
+
+        LedgerEntry::query()->where('sealable_id', $invoice->id)->where('seal', 'financial')->toBase()->update(['reason' => 'rewritten']);
     }
 
     /**
@@ -257,6 +277,19 @@ it('behaves exactly like the real manager', function (Closure $scenario): void {
         });
 
         return [$report->scanned, array_map(static fn ($count): string => $count->status->value.':'.$count->count, $report->counts), $progress];
+    }],
+    'ledger verification of a rewritten entry' => [static function (ParityRun $run): array {
+        $run->rewriteLedger(invoice());
+        $report = Sentinel::ledger()->verify(entities: false);
+
+        try {
+            $report->throwIfViolated();
+            $thrown = null;
+        } catch (Throwable $exception) {
+            $thrown = $exception::class;
+        }
+
+        return [$report->clean(), array_map(static fn (LedgerFinding $finding): string => $finding->kind->value, $report->violations()), $thrown];
     }],
     'client nonce remembered twice' => [static fn (): array => [
         app(SentinelManager::class)->rememberNonce('http:partner', 'n-1', Clock::now()->addMinutes(5)),

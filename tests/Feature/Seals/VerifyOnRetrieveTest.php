@@ -190,3 +190,16 @@ it('compiles the definition once when the registry instantiates a class that has
     expect(Sentinel::model($guarded)->seals())->toBe(['guarded'])
         ->and(Event::hasListeners("eloquent.retrieved: {$guarded}"))->toBeTrue();
 });
+
+it('records only the retrieve seals of a class with mixed seals under the fake', function (): void {
+    $class = definedBy(static function ($seals): void {
+        $seals->seal('guarded')->attributes('number')->verifyOnRetrieve(Reaction::Throw);
+        $seals->seal('plain')->attributes('amount');
+    });
+    $model = $class::query()->create(['number' => 'M-1', 'amount' => '1.00']);
+    $fake = Sentinel::fake();
+
+    $class::query()->find($model->getKey());
+
+    expect(array_map(static fn ($call): string => $call->arguments[1], $fake->recorded('verify')))->toBe(['guarded']);
+});
