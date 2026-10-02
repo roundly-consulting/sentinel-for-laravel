@@ -7,6 +7,7 @@ namespace RoundlyConsulting\Sentinel\Commands;
 use Illuminate\Console\Command;
 use RoundlyConsulting\Sentinel\Commands\Concerns\ReadsOptions;
 use RoundlyConsulting\Sentinel\Commands\Concerns\ReportsReseals;
+use RoundlyConsulting\Sentinel\Commands\Concerns\ShowsProgress;
 use RoundlyConsulting\Sentinel\DataTransferObjects\BaselineOptions;
 use RoundlyConsulting\Sentinel\Exceptions\SentinelException;
 use RoundlyConsulting\Sentinel\SentinelManager;
@@ -20,6 +21,7 @@ final class SealMissingCommand extends Command
 {
     use ReadsOptions;
     use ReportsReseals;
+    use ShowsProgress;
 
     protected $signature = 'sentinel:seal-missing
         {model : A model class or morph alias}
@@ -40,13 +42,17 @@ final class SealMissingCommand extends Command
         }
 
         try {
+            $progress = $this->progress();
             $report = $sentinel->sealMissing(new BaselineOptions(
                 $this->sealableClass($this->stringArgument('model')), $this->stringOption('seal'), $reason, $this->intOption('chunk', 1, 100000) ?? 500,
+                progress: $progress,
             ));
         } catch (SentinelException $exception) {
             $this->components->error($exception->getMessage());
 
             return self::INVALID;
+        } finally {
+            $this->finishProgress();
         }
 
         return $this->reportReseal($report, 'Baselined');

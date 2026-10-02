@@ -21,12 +21,13 @@ final class BulkQuery
     /**
      * @param  class-string<Model>  $class
      * @param  (Closure(Builder<Model>): mixed)|Builder<Model>  $query
+     * @param  Builder<Model>|null  $base  what a closure receives (default: `$class::query()`)
      * @return Builder<Model>
      */
-    public static function resolve(string $class, Closure|Builder $query): Builder
+    public static function resolve(string $class, Closure|Builder $query, ?Builder $base = null): Builder
     {
         if ($query instanceof Closure) {
-            $builder = $class::query();
+            $builder = $base ?? $class::query();
             $returned = $query($builder);
 
             $query = $returned instanceof Builder ? $returned : $builder;

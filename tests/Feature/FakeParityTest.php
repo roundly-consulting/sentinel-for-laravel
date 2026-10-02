@@ -243,6 +243,21 @@ it('behaves exactly like the real manager', function (Closure $scenario): void {
 
         return [ChargeJob::$runs];
     }],
+    'scoped scan with progress' => [static function (ParityRun $run): array {
+        // Each run its own tenant: the real run's rows are still there when the fake runs.
+        $tenant = $run->fake ? 17 : 7;
+        invoice(['tenant_id' => $tenant]);
+        invoice(['tenant_id' => $tenant]);
+        $run->tamper(invoice(['tenant_id' => $tenant]));
+        invoice(['tenant_id' => $tenant + 1]);
+        $progress = [];
+
+        $report = Sentinel::model(Invoice::class)->scan('financial', chunk: 2, where: static fn ($query) => $query->where('tenant_id', $tenant), progress: static function (int $processed) use (&$progress): void {
+            $progress[] = $processed;
+        });
+
+        return [$report->scanned, array_map(static fn ($count): string => $count->status->value.':'.$count->count, $report->counts), $progress];
+    }],
     'client nonce remembered twice' => [static fn (): array => [
         app(SentinelManager::class)->rememberNonce('http:partner', 'n-1', Clock::now()->addMinutes(5)),
         app(SentinelManager::class)->rememberNonce('http:partner', 'n-1', Clock::now()->addMinutes(5)),

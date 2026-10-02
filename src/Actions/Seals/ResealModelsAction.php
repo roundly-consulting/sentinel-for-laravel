@@ -64,12 +64,15 @@ final readonly class ResealModelsAction
 
         $tally = ['resealed' => 0, 'acknowledged' => 0, 'skipped' => 0, 'failed' => 0];
         $skipped = [];
+        $processed = 0;
 
-        $this->scope->withoutVerification(function () use ($options, $seals, $reason, $actor, $current, &$tally, &$skipped): void {
+        $this->scope->withoutVerification(function () use ($options, $seals, $reason, $actor, $current, &$tally, &$skipped, &$processed): void {
             $options->model::query()->withoutGlobalScopes()->with('sentinelSeals')->chunkById(
                 max(1, $options->chunk),
-                function (Collection $models) use ($options, $seals, $reason, $actor, $current, &$tally, &$skipped): void {
+                function (Collection $models) use ($options, $seals, $reason, $actor, $current, &$tally, &$skipped, &$processed): void {
                     foreach ($models as $model) {
+                        $processed++;
+
                         foreach ($seals as $seal) {
                             $outcome = $this->one($model, $seal, $options, $reason, $actor, $current[$seal->name]);
 
@@ -84,6 +87,8 @@ final readonly class ResealModelsAction
                             }
                         }
                     }
+
+                    $options->progress?->__invoke($processed);
                 },
             );
         });

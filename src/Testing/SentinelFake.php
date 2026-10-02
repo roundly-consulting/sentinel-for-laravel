@@ -411,19 +411,30 @@ final class SentinelFake extends SentinelManager
     // ── bulk ──────────────────────────────────────────────────────────────────
 
     /**
-     * Faked statuses over every row of the models (the rows are read; nothing is written).
+     * Faked statuses over every row of the models — or the rows a `where` selects (the rows are
+     * read; nothing is written). Progress is reported per chunk, as in production.
      */
     public function scan(ScanOptions $options): ScanReport
     {
+        if ($options->where !== null && count($options->models) !== 1) {
+            throw SealingMisconfiguredException::whereNeedsOneModel();
+        }
+
         $counts = [];
         $findings = [];
         $scanned = 0;
+        $processed = 0;
 
         foreach ($options->models as $class) {
             $compiled = $this->container->make(DefinitionRegistry::class)->for($class);
             $seals = $options->seal === null ? $compiled->all() : [$compiled->get($options->seal)];
+            $base = $class::query()->withoutGlobalScopes();
+            $query = $options->where === null ? $base : BulkQuery::resolve($class, $options->where, $base);
+            $rows = $this->rows($query->reorder(), $options->limit === null ? null : max(0, $options->limit - $processed));
 
-            foreach ($this->rows($class::query()->withoutGlobalScopes(), $options->limit) as $model) {
+            foreach ($rows as $index => $model) {
+                $processed++;
+
                 foreach ($seals as $seal) {
                     $result = $this->faked($model, $seal, VerificationContext::Command);
                     $scanned++;
@@ -432,6 +443,10 @@ final class SentinelFake extends SentinelManager
                     if ($result->failed() && count($findings) < $options->maxFindings) {
                         $findings[] = $result;
                     }
+                }
+
+                if ($options->progress !== null && (($index + 1) % max(1, $options->chunk) === 0 || $index === count($rows) - 1)) {
+                    ($options->progress)($processed);
                 }
             }
         }
@@ -458,8 +473,9 @@ final class SentinelFake extends SentinelManager
         $reason = $options->acknowledgeReason === null ? null : Reasons::normalize($options->acknowledgeReason);
         $resealed = $acknowledged = 0;
         $skipped = [];
+        $rows = $this->rows($options->model::query()->withoutGlobalScopes());
 
-        foreach ($this->rows($options->model::query()->withoutGlobalScopes()) as $model) {
+        foreach ($rows as $index => $model) {
             foreach ($seals as $seal) {
                 $verdict = $this->faked($model, $seal, VerificationContext::Command);
 
@@ -470,6 +486,8 @@ final class SentinelFake extends SentinelManager
                     default => $skipped[] = $verdict,
                 };
             }
+
+            $this->progress($options->progress, $index, count($rows), $options->chunk);
         }
 
         return $this->record('reseal', $options, new ResealReport($resealed, $acknowledged, count($skipped), 0, $skipped, $options->dryRun));
@@ -544,12 +562,15 @@ final class SentinelFake extends SentinelManager
         $this->container->make(Runtime::class)->actor($options->actor);
         $resealed = 0;
         $skipped = [];
+        $rows = $this->rows($options->model::query()->withoutGlobalScopes());
 
-        foreach ($this->rows($options->model::query()->withoutGlobalScopes()) as $model) {
+        foreach ($rows as $index => $model) {
             foreach ($seals as $seal) {
                 $verdict = $this->faked($model, $seal, VerificationContext::Command);
                 $verdict->status === VerificationStatus::Missing ? $skipped[] = $verdict : $resealed++;
             }
+
+            $this->progress($options->progress, $index, count($rows), $options->chunk);
         }
 
         return $this->record('sealMissing', $options, new ResealReport(resealed: $resealed, skipped: count($skipped), skippedResults: $skipped));
@@ -1166,6 +1187,19 @@ final class SentinelFake extends SentinelManager
         );
 
         return array_values($models->all());
+    }
+
+    /**
+     * Report progress after each full chunk and after the last row, as the chunked
+     * production runs do.
+     *
+     * @param  (Closure(int): void)|null  $progress
+     */
+    private function progress(?Closure $progress, int $index, int $total, int $chunk): void
+    {
+        if ($progress !== null && (($index + 1) % max(1, $chunk) === 0 || $index === $total - 1)) {
+            $progress($index + 1);
+        }
     }
 
     private function compiled(Model $model, ?string $seal): CompiledSeal

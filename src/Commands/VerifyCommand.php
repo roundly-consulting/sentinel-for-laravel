@@ -7,6 +7,7 @@ namespace RoundlyConsulting\Sentinel\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Console\Isolatable;
 use RoundlyConsulting\Sentinel\Commands\Concerns\ReadsOptions;
+use RoundlyConsulting\Sentinel\Commands\Concerns\ShowsProgress;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerVerifyOptions;
@@ -35,6 +36,7 @@ use RoundlyConsulting\Sentinel\Support\Settings;
 final class VerifyCommand extends Command implements Isolatable
 {
     use ReadsOptions;
+    use ShowsProgress;
 
     protected $signature = 'sentinel:verify
         {model?* : Model classes or morph aliases (none: every sealable model — sentinel.models, then every class that has seals)}
@@ -76,10 +78,17 @@ final class VerifyCommand extends Command implements Isolatable
             $chunk = $this->intOption('chunk', 1, 100000) ?? 500;
             $anchor = $this->stringOption('anchor');
 
-            $scan = $sentinel->scan(new ScanOptions(
-                $models, $this->stringOption('seal'), $chunk, true, $this->intOption('limit'),
-                $this->intOption('max-findings', 0, 1000000) ?? 1000, (bool) $this->option('check-schema'),
-            ));
+            $limit = $this->intOption('limit');
+            $maxFindings = $this->intOption('max-findings', 0, 1000000) ?? 1000;
+
+            try {
+                $scan = $sentinel->scan(new ScanOptions(
+                    $models, $this->stringOption('seal'), $chunk, true, $limit, $maxFindings, (bool) $this->option('check-schema'),
+                    progress: $this->progress((bool) $this->option('json')),
+                ));
+            } finally {
+                $this->finishProgress();
+            }
 
             $ledger = $this->option('ledger') ? $sentinel->verifyLedger(new LedgerVerifyOptions(
                 null, true, max($chunk, 100), $anchor === null ? null : AnchorCodec::decode($anchor),

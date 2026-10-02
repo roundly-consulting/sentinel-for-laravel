@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Sentinel\DataTransferObjects;
 
+use Closure;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -14,6 +15,7 @@ final readonly class BaselineOptions
 {
     /**
      * @param  class-string<Model>  $model
+     * @param  (Closure(int): void)|null  $progress  called after each chunk with the rows processed so far
      */
     public function __construct(
         public string $model,
@@ -21,5 +23,6 @@ final readonly class BaselineOptions
         public string $reason,
         public int $chunk = 500,
         public ?Model $actor = null,
+        public ?Closure $progress = null,
     ) {}
 }

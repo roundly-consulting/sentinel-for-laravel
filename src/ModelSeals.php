@@ -47,16 +47,30 @@ final readonly class ModelSeals
     }
 
     /**
-     * Verify every row (one seal, or every seal when null).
+     * Verify every row — or only those `where` selects: a closure receiving the model's query
+     * (global scopes off), or a builder of this model — in chunks (one seal, or every seal
+     * when null). `progress` receives the rows processed so far after each chunk.
+     *
+     * @param  (Closure(Builder<Model>): mixed)|Builder<Model>|null  $where
+     * @param  (Closure(int): void)|null  $progress
      */
-    public function scan(?string $seal = null, int $chunk = 500, bool $checkLedger = true): ScanReport
-    {
-        return $this->manager->scan(new ScanOptions([$this->model], $this->name($seal), $chunk, $checkLedger));
+    public function scan(
+        ?string $seal = null,
+        int $chunk = 500,
+        bool $checkLedger = true,
+        Closure|Builder|null $where = null,
+        ?int $limit = null,
+        int $maxFindings = 1000,
+        ?Closure $progress = null,
+    ): ScanReport {
+        return $this->manager->scan(new ScanOptions([$this->model], $this->name($seal), $chunk, $checkLedger, $limit, $maxFindings, where: $where, progress: $progress));
     }
 
     /**
      * Re-seal intact/outdated rows with the current key; other rows are skipped and reported
      * — or acknowledged with `acknowledgeReason`.
+     *
+     * @param  (Closure(int): void)|null  $progress
      */
     public function reseal(
         ?string $seal = null,
@@ -66,8 +80,9 @@ final readonly class ModelSeals
         bool $dryRun = false,
         ?string $acknowledgeReason = null,
         ?Model $actor = null,
+        ?Closure $progress = null,
     ): ResealReport {
-        return $this->manager->reseal(new ResealOptions($this->model, $this->name($seal), $fromKeyId, $onlyOutdated, $chunk, $dryRun, $acknowledgeReason, $actor));
+        return $this->manager->reseal(new ResealOptions($this->model, $this->name($seal), $fromKeyId, $onlyOutdated, $chunk, $dryRun, $acknowledgeReason, $actor, progress: $progress));
     }
 
     /**
@@ -93,10 +108,12 @@ final readonly class ModelSeals
 
     /**
      * Seal rows that were never sealed (no seal row, no ledger history).
+     *
+     * @param  (Closure(int): void)|null  $progress
      */
-    public function sealMissing(string $reason, ?string $seal = null, int $chunk = 500, ?Model $actor = null): ResealReport
+    public function sealMissing(string $reason, ?string $seal = null, int $chunk = 500, ?Model $actor = null, ?Closure $progress = null): ResealReport
     {
-        return $this->manager->sealMissing(new BaselineOptions($this->model, $this->name($seal), $reason, $chunk, $actor));
+        return $this->manager->sealMissing(new BaselineOptions($this->model, $this->name($seal), $reason, $chunk, $actor, $progress));
     }
 
     /**

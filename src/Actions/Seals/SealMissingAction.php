@@ -52,13 +52,16 @@ final readonly class SealMissingAction
         $actor = $this->runtime->actor($options->actor);
         $tally = ['resealed' => 0, 'skipped' => 0, 'failed' => 0];
         $skipped = [];
+        $processed = 0;
 
-        $this->scope->withoutVerification(function () use ($options, $seals, $reason, $actor, &$tally, &$skipped): void {
+        $this->scope->withoutVerification(function () use ($options, $seals, $reason, $actor, &$tally, &$skipped, &$processed): void {
             foreach ($seals as $seal) {
                 $options->model::query()->withoutGlobalScopes()
                     ->whereDoesntHave('sentinelSeals', static fn (Builder $rows) => $rows->where('seal', $seal->name))
-                    ->chunkById(max(1, $options->chunk), function (Collection $models) use ($seal, $reason, $actor, &$tally, &$skipped): void {
+                    ->chunkById(max(1, $options->chunk), function (Collection $models) use ($options, $seal, $reason, $actor, &$tally, &$skipped, &$processed): void {
                         foreach ($models as $model) {
+                            $processed++;
+
                             $outcome = $this->baseline($model, $seal, $reason, $actor);
 
                             if ($outcome instanceof VerificationResult) {
@@ -71,6 +74,8 @@ final readonly class SealMissingAction
                                 $tally[$outcome]++;
                             }
                         }
+
+                        $options->progress?->__invoke($processed);
                     });
             }
         });

@@ -65,6 +65,11 @@ final class SealingMisconfiguredException extends SentinelException
         return new self("[{$shown}] is not a model class or morph alias.");
     }
 
+    public static function whereNeedsOneModel(): self
+    {
+        return new self('A scan narrowed with `where` must scan exactly one model class.');
+    }
+
     public static function invalidColumn(string $column): self
     {
         $shown = preg_match('/^[A-Za-z0-9_.]{1,64}$/D', $column) === 1 ? $column : '(invalid)';

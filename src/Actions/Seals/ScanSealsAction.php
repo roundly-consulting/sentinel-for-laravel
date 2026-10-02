@@ -15,13 +15,15 @@ use RoundlyConsulting\Sentinel\Engine\Verifier;
 use RoundlyConsulting\Sentinel\Enums\VerificationContext;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
+use RoundlyConsulting\Sentinel\Support\BulkQuery;
 use RoundlyConsulting\Sentinel\Support\SealingScope;
 use RoundlyConsulting\Sentinel\Support\Settings;
 
 /**
  * Verify every row of the given models in chunks (soft-deleted rows and rows hidden by
- * global scopes included) — the engine behind `sentinel:verify`. Strict seals report rows
- * that were never sealed. Read-only; every failure is reported as it is found.
+ * global scopes included) — the engine behind `sentinel:verify` — or only the rows a `where`
+ * selects (one model). Strict seals report rows that were never sealed. Read-only; every
+ * failure is reported as it is found.
  */
 final readonly class ScanSealsAction
 {
@@ -33,6 +35,10 @@ final readonly class ScanSealsAction
 
     public function execute(ScanOptions $options): ScanReport
     {
+        if ($options->where !== null && count($options->models) !== 1) {
+            throw SealingMisconfiguredException::whereNeedsOneModel();
+        }
+
         $state = ['scanned' => 0, 'rows' => 0, 'truncated' => false];
         $counts = [];
         $findings = [];
@@ -47,9 +53,15 @@ final readonly class ScanSealsAction
                     $this->checkSchema($class, $seals);
                 }
 
-                $class::query()->withoutGlobalScopes()->with('sentinelSeals')->chunkById($chunk, function (Collection $models) use ($options, $seals, &$state, &$counts, &$findings): bool {
+                $base = $class::query()->withoutGlobalScopes();
+                $query = $options->where === null ? $base : BulkQuery::resolve($class, $options->where, $base);
+
+                // The scan's own order (by key, chunk after chunk) — a where filters only.
+                $query->reorder()->with('sentinelSeals')->chunkById($chunk, function (Collection $models) use ($options, $seals, &$state, &$counts, &$findings): bool {
                     foreach ($models as $model) {
                         if ($options->limit !== null && $state['rows'] >= $options->limit) {
+                            $options->progress?->__invoke((int) $state['rows']);
+
                             return false;
                         }
 
@@ -65,6 +77,8 @@ final readonly class ScanSealsAction
                             }
                         }
                     }
+
+                    $options->progress?->__invoke((int) $state['rows']);
 
                     return true;
                 });
