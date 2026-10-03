@@ -511,9 +511,20 @@ final class Settings
         return Config::boolean('sentinel.idempotency.store_server_errors', false);
     }
 
+    /**
+     * The handler and the record commit in one database transaction — which only a store
+     * writing to that database takes part in: a cache record is not rolled back when the
+     * COMMIT fails, and its completed response would be replayed for work that never happened.
+     */
     public static function idempotencyTransactional(): bool
     {
-        return Config::boolean('sentinel.idempotency.transactional', false);
+        $transactional = Config::boolean('sentinel.idempotency.transactional', false);
+
+        if ($transactional && self::idempotencyStore() !== 'database') {
+            throw InvalidSentinelConfigurationException::invalidValue('idempotency.transactional', 'needs idempotency.store = database — a cache record is not rolled back with the transaction');
+        }
+
+        return $transactional;
     }
 
     public static function idempotencyEncrypt(): bool

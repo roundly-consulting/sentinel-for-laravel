@@ -303,7 +303,7 @@ The published `config/sentinel.php` documents every key. All of them:
 | `idempotency.accept_unquoted` | bool | `true` | `SENTINEL_IDEMPOTENCY_ACCEPT_UNQUOTED` | Accept bare (unquoted) keys. |
 | `idempotency.store_client_errors` | bool | `true` | — | Store and replay 4xx responses. |
 | `idempotency.store_server_errors` | bool | `false` | — | Store 5xx responses (default: release the key). |
-| `idempotency.transactional` | bool | `false` | `SENTINEL_IDEMPOTENCY_TRANSACTIONAL` | Handler and record in one transaction. |
+| `idempotency.transactional` | bool | `false` | `SENTINEL_IDEMPOTENCY_TRANSACTIONAL` | Handler and record in one transaction. Needs `idempotency.store = database` (a cache record is not rolled back with a failed COMMIT) — refused otherwise. |
 | `idempotency.encrypt` | bool | `true` | `SENTINEL_IDEMPOTENCY_ENCRYPT` | Encrypt stored responses. |
 | `idempotency.max_response_bytes` | int 1024–67108864 | `1048576` | — | Larger responses are not replayable. |
 | `idempotency.replayed_headers` | list of header names | `content-type`, `content-language`, `location`, `etag`, `last-modified`, `cache-control` | — | Headers stored and replayed (`set-cookie` never). |
@@ -768,7 +768,7 @@ back onto the queue — the first run holds the key for its job's `$timeout`, el
 back, so its retries run.
 
 Rejections are RFC 9457 `application/problem+json` responses with a `code` member. With
-`idempotency.transactional` on, the handler and the idempotency record commit in one
+`idempotency.transactional` on (database store only), the handler and the idempotency record commit in one
 transaction (exactly once for that connection's writes — at the cost of holding the
 transaction for the request).
 

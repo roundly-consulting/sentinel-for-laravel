@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use RoundlyConsulting\Sentinel\Contracts\IdempotencyStore;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentRequest;
+use RoundlyConsulting\Sentinel\Enums\HealthStatus;
 use RoundlyConsulting\Sentinel\Enums\IdempotencyOutcome;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidIdempotencyKeyException;
+use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Idempotency\ResponseSnapshot;
 use RoundlyConsulting\Sentinel\Idempotency\ResponseVault;
@@ -18,6 +21,7 @@ use RoundlyConsulting\Sentinel\Idempotency\Stores\DatabaseIdempotencyStore;
 use RoundlyConsulting\Sentinel\Jobs\Middleware\Idempotent;
 use RoundlyConsulting\Sentinel\Models\IdempotencyKey;
 use RoundlyConsulting\Sentinel\Support\Clock;
+use RoundlyConsulting\Sentinel\Support\Settings;
 use RoundlyConsulting\Sentinel\Testing\InMemoryIdempotencyStore;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\User;
 
@@ -250,4 +254,41 @@ it('holds a run() key for its lease (dual-review O-13)', function (): void {
     expect($runs)->toBe(1)
         ->and(fn () => new Idempotent('k', lease: 0))->toThrow(InvalidIdempotencyKeyException::class)
         ->and(fn () => Sentinel::idempotency()->run('k', 's', static fn () => 1, lease: 86401))->toThrow(InvalidIdempotencyKeyException::class);
+});
+
+it('refuses the transactional mode with a store the transaction cannot roll back (dual-review O-26)', function (): void {
+    config()->set('sentinel.idempotency.transactional', true);
+    config()->set('sentinel.idempotency.store', 'cache');
+
+    expect(fn () => Settings::idempotencyTransactional())->toThrow(InvalidSentinelConfigurationException::class, 'idempotency.transactional')
+        ->and(Sentinel::check()->get('configuration')?->status)->toBe(HealthStatus::Failure);
+
+    config()->set('sentinel.idempotency.store', 'database');
+
+    expect(Settings::idempotencyTransactional())->toBeTrue();
+});
+
+it('never replays a response whose transaction failed to commit (dual-review O-26)', function (): void {
+    $db = DB::connection();
+
+    if ($db->getDriverName() !== 'pgsql') {
+        $this->markTestSkipped('needs a deferred constraint that fails at COMMIT (PostgreSQL)');
+    }
+
+    config()->set('sentinel.idempotency.transactional', true);
+    $db->statement('CREATE TABLE review_parents (id integer primary key)');
+    $db->statement('CREATE TABLE review_children (id serial primary key, parent_id integer REFERENCES review_parents(id) DEFERRABLE INITIALLY DEFERRED)');
+    Route::post('/charge', static function () use ($db) {
+        $db->table('review_children')->insert(['parent_id' => 999]);
+
+        return response()->json(['charged' => true], 201);
+    })->middleware('sentinel.idempotent');
+    $user = User::query()->create(['name' => 'u']);
+
+    $first = $this->actingAs($user)->postJson('/charge', [], ['Idempotency-Key' => '"charge-key-00000000001"']);
+    $retry = $this->actingAs($user)->postJson('/charge', [], ['Idempotency-Key' => '"charge-key-00000000001"']);
+
+    expect($first->getStatusCode())->toBe(500)
+        ->and($db->table('review_children')->count())->toBe(0)
+        ->and($retry->headers->get('Idempotent-Replayed'))->toBeNull();
 });
