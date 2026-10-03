@@ -31,6 +31,9 @@ use RoundlyConsulting\Sentinel\Support\Settings;
  */
 final readonly class DatabaseIdempotencyStore implements IdempotencyStore
 {
+    /** The store a stored response is bound to. */
+    private const string NAME = 'database';
+
     public function __construct(
         private ResponseVault $vault,
         private LogManager $log,
@@ -75,7 +78,7 @@ final readonly class DatabaseIdempotencyStore implements IdempotencyStore
             ->toBase()
             ->update([
                 'status' => IdempotencyKey::COMPLETED,
-                'response' => $snapshot->replayable ? $this->vault->seal($snapshot) : null,
+                'response' => $snapshot->replayable ? $this->vault->seal($snapshot, $request, self::NAME) : null,
                 'response_status' => $snapshot->status,
                 'replayable' => $snapshot->replayable,
                 'completed_at' => Clock::database($now),
@@ -133,7 +136,7 @@ final readonly class DatabaseIdempotencyStore implements IdempotencyStore
             return new IdempotencyDecision(IdempotencyOutcome::Unavailable);
         }
 
-        $transition = StateMachine::begin($record, $request, $now, $token, $lock, $this->vault->open(...));
+        $transition = StateMachine::begin($record, $request, $now, $token, $lock, fn (string $payload): ?ResponseSnapshot => $this->vault->open($payload, $request, self::NAME));
 
         if ($transition->record === null) {
             return $transition->decision;

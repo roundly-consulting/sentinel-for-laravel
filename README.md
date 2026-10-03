@@ -714,7 +714,8 @@ first request runs; repeats replay the stored response with `Idempotent-Replayed
 same key with another payload answers **422**, a request still in flight **409** with
 `Retry-After`. 5xx responses release the key so the client may retry. Keys expire
 `idempotency.ttl` seconds (24 hours by default) after they were first seen; `Set-Cookie` is
-never stored; stored responses are encrypted. Keys are scoped to the user (or the verified
+never stored; stored responses are encrypted and bound to their key, so a response copied to
+another key — or planted as plaintext — is never replayed. Keys are scoped to the user (or the verified
 signature key, or the IP) and the route.
 
 ```php

@@ -35,6 +35,9 @@ use RoundlyConsulting\Sentinel\Support\Settings;
  */
 final readonly class CacheIdempotencyStore implements IdempotencyStore
 {
+    /** The store a stored response is bound to. */
+    private const string NAME = 'cache';
+
     private LockProvider $locks;
 
     public function __construct(
@@ -59,7 +62,8 @@ final readonly class CacheIdempotencyStore implements IdempotencyStore
 
             $now = Clock::now();
             $transition = StateMachine::begin(
-                $record, $request, $now, $this->random->token(43), Settings::idempotencyLockSeconds(), $this->vault->open(...),
+                $record, $request, $now, $this->random->token(43), Settings::idempotencyLockSeconds(),
+                fn (string $payload): ?ResponseSnapshot => $this->vault->open($payload, $request, self::NAME),
             );
 
             if ($transition->record !== null) {
@@ -81,7 +85,7 @@ final readonly class CacheIdempotencyStore implements IdempotencyStore
 
             $now = Clock::now();
             $this->save($request->keyDigest, $record->completedWith(
-                $snapshot->replayable ? $this->vault->seal($snapshot) : null, $snapshot->status, $snapshot->replayable, $now,
+                $snapshot->replayable ? $this->vault->seal($snapshot, $request, self::NAME) : null, $snapshot->status, $snapshot->replayable, $now,
             ), $now);
 
             return true;
