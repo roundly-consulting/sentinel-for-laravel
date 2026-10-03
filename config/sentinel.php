@@ -13,8 +13,10 @@ return [
     |
     | An application-level domain separator bound into every seal, ledger entry,
     | checkpoint and field tag. Two applications that share signing keys but use
-    | different contexts can never forge each other's seals. Changing it
-    | invalidates every existing seal — re-seal with `sentinel:reseal`.
+    | different contexts can never forge each other's seals. Set it once:
+    | changing it invalidates every existing seal (re-adopt them with
+    | `sentinel:reseal --acknowledge="context change"`) and, permanently, every
+    | ledger entry and checkpoint written before — a new context is a new ledger.
     |
     */
 

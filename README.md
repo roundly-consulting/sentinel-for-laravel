@@ -249,7 +249,7 @@ The published `config/sentinel.php` documents every key. All of them:
 
 | Key | Type | Default | Env | Purpose |
 |---|---|---|---|---|
-| `context` | string (UTF-8, ≤ 255 bytes) | `''` | `SENTINEL_CONTEXT` | Application domain separator bound into every MAC. Changing it invalidates every seal (re-seal). |
+| `context` | string (UTF-8, ≤ 255 bytes) | `''` | `SENTINEL_CONTEXT` | Application domain separator bound into every MAC. Set it once: changing it invalidates every seal (re-seal with `--acknowledge`) and, for good, every ledger entry and checkpoint written before — a new context means a new ledger. |
 | `key_type` | `bigint`\|`uuid`\|`ulid` | `bigint` | `SENTINEL_KEY_TYPE` | Id type of sealed models in the morph columns (set before migrating). |
 | `actor_key_type` | `bigint`\|`uuid`\|`ulid` | `bigint` | `SENTINEL_ACTOR_KEY_TYPE` | Id type of actors, key owners and nonce subjects. |
 | `models` | list of class-strings | `[]` | — | Models `sentinel:verify` scans first when given none; every class that has seals is discovered after them. |

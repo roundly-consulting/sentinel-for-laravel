@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Artisan;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerVerifyOptions;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
@@ -10,6 +11,7 @@ use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Models\Checkpoint;
 use RoundlyConsulting\Sentinel\Models\Key;
 use RoundlyConsulting\Sentinel\Models\LedgerEntry;
+use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Invoice;
 use RoundlyConsulting\Sentinel\Tests\TestCase;
 
 /**
@@ -68,4 +70,20 @@ it('refuses Eloquent updates and deletes of ledger rows with model events muted 
         ->and(fn () => $checkpoint->updateQuietly(['root' => 'x']))->toThrow(LedgerIsAppendOnlyException::class, 'cannot be updated')
         ->and(fn () => $checkpoint->deleteQuietly())->toThrow(LedgerIsAppendOnlyException::class, 'cannot be deleted')
         ->and(LedgerEntry::query()->whereKey($entry->id)->value('reason'))->not->toBe('rewritten');
+});
+
+it('binds the context into the whole ledger: it is set once, for the ledger\'s lifetime (dual-review O-36)', function (): void {
+    $invoice = invoice();
+    Sentinel::checkpoint();
+    config()->set('sentinel.context', 'renamed-app');
+
+    // Seals can be re-adopted under a new context …
+    expect(Artisan::call('sentinel:reseal', ['model' => Invoice::class, '--acknowledge' => 'context change']))->toBe(0)
+        ->and(Sentinel::verify($invoice)->isIntact())->toBeTrue();
+
+    // … but the ledger written under the old one never verifies again (documented: the
+    // context is permanent for a ledger's lifetime).
+    $kinds = array_values(array_unique(array_map(static fn (LedgerFinding $finding): string => $finding->kind->value, Sentinel::verifyLedger()->violations())));
+
+    expect($kinds)->toContain('entry_invalid')->toContain('checkpoint_invalid');
 });
