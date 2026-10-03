@@ -278,12 +278,16 @@ final class Normalizer
             throw CanonicalizationException::invalidDatetime();
         }
 
-        $written = "{$year}-{$month}-{$day}T{$hour}:{$minute}:{$second}.{$fraction}Z";
+        // A zone-less value is taken as written — no shift, app.timezone never leaks in — and
+        // keeps no zone designator: Laravel reads it in app.timezone, so it must never share a
+        // canonical form with the UTC instant it only resembles. An offset-bearing value (pgsql
+        // timestamptz in any session zone, or `Z`) becomes UTC with a `Z`.
+        if ($offset === '') {
+            return "{$year}-{$month}-{$day}T{$hour}:{$minute}:{$second}.{$fraction}";
+        }
 
-        // A zone-less value is taken as written (no shift — app.timezone never leaks in);
-        // an offset-bearing value (pgsql timestamptz in any session zone) becomes UTC.
-        if ($offset === '' || $offset === 'Z') {
-            return $written;
+        if ($offset === 'Z') {
+            return "{$year}-{$month}-{$day}T{$hour}:{$minute}:{$second}.{$fraction}Z";
         }
 
         $parts = str_split(str_replace(':', '', substr($offset, 1)), 2);
@@ -302,11 +306,22 @@ final class Normalizer
             return $raw->format('Y-m-d');
         }
 
-        if (! is_string($raw) || preg_match(self::DATE, $raw, $m) !== 1 || ! checkdate((int) $m[2], (int) $m[3], (int) $m[1])) {
-            throw CanonicalizationException::invalidDate();
+        if (is_string($raw) && preg_match(self::DATE, $raw, $m) === 1 && checkdate((int) $m[2], (int) $m[3], (int) $m[1])) {
+            return "{$m[1]}-{$m[2]}-{$m[3]}";
         }
 
-        return "{$m[1]}-{$m[2]}-{$m[3]}";
+        // A time other than midnight (SQLite keeps what Laravel's date cast writes): keep it, as
+        // a datetime — never dropped, so a changed time is a change even where the column was
+        // declared a date without a cast.
+        if (is_string($raw) && preg_match(self::DATETIME, $raw) === 1) {
+            try {
+                return $this->datetime($raw);
+            } catch (CanonicalizationException) {
+                throw CanonicalizationException::invalidDate();
+            }
+        }
+
+        throw CanonicalizationException::invalidDate();
     }
 
     private function json(mixed $raw): string

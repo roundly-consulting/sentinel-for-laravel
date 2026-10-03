@@ -121,13 +121,13 @@ it('refuses anything else as a boolean', function (mixed $raw): void {
     expect(fn () => canonical(SealType::boolean(), $raw))->toThrow(CanonicalizationException::class, 'not_boolean');
 })->with([2, 'yes', 'on', 1.0, '']);
 
-it('takes zone-less datetimes as written and converts offset-bearing ones to UTC', function (mixed $raw, string $expected): void {
+it('takes zone-less datetimes as written, without a zone, and converts offset-bearing ones to UTC (dual-review O-14)', function (mixed $raw, string $expected): void {
     expect(canonical(SealType::datetime(), $raw))->toBe(['a:col', 'dt', $expected]);
 })->with([
-    'mysql / sqlite' => ['2026-10-02 18:30:00', '2026-10-02T18:30:00.000000Z'],
-    'pgsql trimmed fraction' => ['2026-10-02 18:30:00.5', '2026-10-02T18:30:00.500000Z'],
-    'mysql datetime(6)' => ['2026-10-02 18:30:00.123456', '2026-10-02T18:30:00.123456Z'],
-    'T separator' => ['2026-10-02T18:30:00', '2026-10-02T18:30:00.000000Z'],
+    'mysql / sqlite' => ['2026-10-02 18:30:00', '2026-10-02T18:30:00.000000'],
+    'pgsql trimmed fraction' => ['2026-10-02 18:30:00.5', '2026-10-02T18:30:00.500000'],
+    'mysql datetime(6)' => ['2026-10-02 18:30:00.123456', '2026-10-02T18:30:00.123456'],
+    'T separator' => ['2026-10-02T18:30:00', '2026-10-02T18:30:00.000000'],
     'Z' => ['2026-10-02 18:30:00Z', '2026-10-02T18:30:00.000000Z'],
     'timestamptz +02' => ['2026-10-02 20:30:00+02', '2026-10-02T18:30:00.000000Z'],
     'timestamptz in New York' => ['2026-10-02 14:30:00.25-04', '2026-10-02T18:30:00.250000Z'],
@@ -142,7 +142,7 @@ it('is independent of app.timezone', function (): void {
     date_default_timezone_set('Pacific/Kiritimati');
 
     try {
-        expect(canonical(SealType::datetime(), '2026-10-02 18:30:00'))->toBe(['a:col', 'dt', '2026-10-02T18:30:00.000000Z'])
+        expect(canonical(SealType::datetime(), '2026-10-02 18:30:00'))->toBe(['a:col', 'dt', '2026-10-02T18:30:00.000000'])
             ->and(canonical(SealType::datetime(), '2026-10-02 20:30:00+02:00'))->toBe(['a:col', 'dt', '2026-10-02T18:30:00.000000Z']);
     } finally {
         date_default_timezone_set('UTC');
@@ -153,18 +153,30 @@ it('refuses values that are not datetimes', function (mixed $raw): void {
     expect(fn () => canonical(SealType::datetime(), $raw))->toThrow(CanonicalizationException::class, 'invalid_datetime');
 })->with(['2026-13-01 00:00:00', '2026-02-30 00:00:00', '2026-10-02', 'infinity', '2026-10-02 24:00:00', '2026-10-02 18:30:00 BC', '2026-10-02 18:30:60', 12345]);
 
-it('normalizes dates', function (mixed $raw, string $expected): void {
+it('normalizes dates, keeping a time other than midnight as a datetime (dual-review F-5)', function (mixed $raw, string $expected): void {
     expect(canonical(SealType::date(), $raw))->toBe(['a:col', 'date', $expected]);
 })->with([
     ['2026-10-02', '2026-10-02'],
     ['2026-10-02 00:00:00', '2026-10-02'],
     ['2026-10-02T00:00:00.000000', '2026-10-02'],
     [CarbonImmutable::parse('2026-10-02 00:00:00', 'Europe/Bratislava'), '2026-10-02'],
+    'sqlite keeps the time a date cast wrote' => ['2026-10-02 10:00:00', '2026-10-02T10:00:00.000000'],
+    'with a fraction' => ['2026-10-02 10:00:00.25', '2026-10-02T10:00:00.250000'],
+    'with an offset' => ['2026-10-02 12:00:00+02:00', '2026-10-02T10:00:00.000000Z'],
 ]);
 
 it('refuses values that are not dates', function (mixed $raw): void {
     expect(fn () => canonical(SealType::date(), $raw))->toThrow(CanonicalizationException::class, 'invalid_date');
-})->with(['2026-10-02 10:00:00', '2026-02-29', 'x', 20261002]);
+})->with(['2026-02-29', 'x', 20261002, '2026-10-02 24:00:00', '2026-02-30 10:00:00']);
+
+it('never gives a zone-less datetime and a UTC instant the same canonical form (dual-review O-14)', function (SealType $type): void {
+    expect(canonical($type, '2026-01-15 10:00:00'))->not->toBe(canonical($type, '2026-01-15T10:00:00Z'))
+        ->and(canonical($type, '2026-01-15 10:00:00'))->not->toBe(canonical($type, '2026-01-15 11:00:00+01:00'))
+        ->and(canonical($type, '2026-01-15T10:00:00Z'))->toBe(canonical($type, '2026-01-15 11:00:00+01:00'));
+})->with([
+    'datetime' => [SealType::datetime()],
+    'date with a time' => [SealType::date()],
+]);
 
 it('canonicalizes JSON text and PHP structures', function (mixed $raw, string $expected): void {
     expect(canonical(SealType::json(), $raw))->toBe(['a:col', 'json', $expected]);

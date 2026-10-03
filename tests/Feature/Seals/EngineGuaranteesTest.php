@@ -230,7 +230,8 @@ it('canonicalizes datetimes and declared floats to the same bytes on every engin
     $message = app(DocumentBuilder::class)->build($record, $seal, $seal->fields, $row, 'default', 'k', Algorithm::HmacSha256, 1, null, CarbonImmutable::now());
     $tuples = array_column(array_map(static fn ($field): array => $field->tuple(), $message->fields), null, 0);
 
-    expect($tuples['a:happened_at'])->toBe(['a:happened_at', 'dt', '2026-10-02T18:30:00.500000Z'])
+    // A zone-less column: taken as written, no zone designator (dual-review O-14).
+    expect($tuples['a:happened_at'])->toBe(['a:happened_at', 'dt', '2026-10-02T18:30:00.500000'])
         ->and($tuples['a:ratio'])->toBe(['a:ratio', 'flt:3', '0.250'])
         ->and(Sentinel::verify($record)->isIntact())->toBeTrue();
 });
