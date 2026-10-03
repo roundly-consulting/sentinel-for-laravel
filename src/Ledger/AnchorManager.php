@@ -128,15 +128,16 @@ final class AnchorManager
     }
 
     /**
-     * A required anchor setting: the default only when absent; blank or non-string throws
-     * rather than silently anchoring under the default key or path.
+     * A required anchor setting: the default when not set (absent, null or blank — an empty
+     * env value); a non-string throws rather than silently anchoring under the default key
+     * or path.
      */
     private static function required(string $key, mixed $value, string $default): string
     {
-        $value ??= $default;
+        $value = Settings::nullIfBlank($value) ?? $default;
 
-        if (! is_string($value) || trim($value) === '') {
-            throw InvalidSentinelConfigurationException::invalidValue($key, 'must be a non-empty string');
+        if (! is_string($value)) {
+            throw InvalidSentinelConfigurationException::invalidValue($key, 'must be a string');
         }
 
         return $value;

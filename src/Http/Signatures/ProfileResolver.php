@@ -26,9 +26,10 @@ final class ProfileResolver
         }
 
         $prefix = "signatures.profiles.{$name}";
-        $ring = config("sentinel.signatures.profiles.{$name}.ring") ?? 'http';
-        $label = config("sentinel.signatures.profiles.{$name}.label");
-        $tag = config("sentinel.signatures.profiles.{$name}.tag");
+        // Not set (absent, null or blank) reads as the default: the `http` ring, no label, no tag.
+        $ring = Settings::nullIfBlank(config("sentinel.signatures.profiles.{$name}.ring")) ?? 'http';
+        $label = Settings::nullIfBlank(config("sentinel.signatures.profiles.{$name}.label"));
+        $tag = Settings::nullIfBlank(config("sentinel.signatures.profiles.{$name}.tag"));
 
         if (! is_string($ring) || ! in_array($ring, Settings::rings(), true)) {
             throw InvalidSentinelConfigurationException::invalidValue("{$prefix}.ring", 'must name a configured key ring');
@@ -47,7 +48,7 @@ final class ProfileResolver
             $ring,
             is_string($label) ? $label : null,
             is_string($tag) ? $tag : null,
-            self::components("{$prefix}.components", config("sentinel.signatures.profiles.{$name}.components") ?? []),
+            self::components("{$prefix}.components", Settings::nullIfBlank(config("sentinel.signatures.profiles.{$name}.components")) ?? []),
             Settings::flag("signatures.profiles.{$name}.require_query", config("sentinel.signatures.profiles.{$name}.require_query"), true),
             Settings::flag("signatures.profiles.{$name}.require_content_digest", config("sentinel.signatures.profiles.{$name}.require_content_digest"), true),
             Settings::flag("signatures.profiles.{$name}.require_nonce", config("sentinel.signatures.profiles.{$name}.require_nonce"), true),
@@ -60,7 +61,7 @@ final class ProfileResolver
 
     public static function defaultProfile(): string
     {
-        $name = config('sentinel.signatures.default_profile') ?? 'default';
+        $name = Settings::nullIfBlank(config('sentinel.signatures.default_profile')) ?? 'default';
 
         return is_string($name) ? $name : throw InvalidSentinelConfigurationException::invalidValue('signatures.default_profile', 'must be a profile name');
     }
@@ -89,7 +90,7 @@ final class ProfileResolver
 
     private static function seconds(string $key, mixed $value, int $minimum, int $maximum, int $default): int
     {
-        $value ??= $default;
+        $value = Settings::nullIfBlank($value) ?? $default;
         $seconds = is_int($value) ? $value : (is_string($value) && preg_match('/^\d{1,6}$/D', $value) === 1 ? (int) $value : null);
 
         if ($seconds === null || $seconds < $minimum || $seconds > $maximum) {

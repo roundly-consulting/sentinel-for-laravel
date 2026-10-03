@@ -13,7 +13,7 @@ return new class extends Migration
     {
         $connection = config('sentinel.database.connection');
 
-        return is_string($connection) && $connection !== '' ? $connection : null;
+        return is_string($connection) && trim($connection) !== '' ? $connection : null;
     }
 
     public function up(): void

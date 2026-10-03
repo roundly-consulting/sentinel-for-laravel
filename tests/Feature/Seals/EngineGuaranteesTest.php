@@ -99,35 +99,52 @@ it('stores and seals UTC regardless of the process and app time zones', function
 });
 
 /**
- * §10 item 56: env strings are booleans the way a human means them.
+ * §10 item 56: env strings are booleans the way a human means them. Each switch carries its
+ * shipped default, which a key that is not set — absent, null or blank (`SENTINEL_X=`) — reads as.
  */
-it('reads every boolean switch the way an env string means it', function (string $key, Closure $read, string|bool $value, bool $expected): void {
+dataset('sentinel switches', [
+    ['sentinel.sealing.auto', fn () => Settings::autoSeal(), true],
+    ['sentinel.sealing.allow_suspension', fn () => Settings::allowSuspension(), true],
+    ['sentinel.sealing.field_tags', fn () => Settings::fieldTags(), true],
+    ['sentinel.verification.check_ledger', fn () => Settings::checkLedger(), true],
+    ['sentinel.verification.outdated_is_intact', fn () => Settings::outdatedIsIntact(), true],
+    ['sentinel.ledger.enabled', fn () => Settings::ledgerEnabled(), true],
+    ['sentinel.verification.retrieve_checks_ledger', fn () => Settings::retrieveChecksLedger(), false],
+    ['sentinel.idempotency.accept_unquoted', fn () => Settings::idempotencyAcceptsUnquoted(), true],
+    ['sentinel.idempotency.store_client_errors', fn () => Settings::storesClientErrors(), true],
+    ['sentinel.idempotency.store_server_errors', fn () => Settings::storesServerErrors(), false],
+    ['sentinel.idempotency.transactional', fn () => Settings::idempotencyTransactional(), false],
+    ['sentinel.idempotency.encrypt', fn () => Settings::idempotencyEncrypt(), true],
+    ['sentinel.signatures.advertise', fn () => Settings::advertisesSignatures(), true],
+    ['sentinel.signatures.outbound.include_alg', fn () => Settings::outboundIncludesAlg(), false],
+    ['sentinel.signatures.profiles.default.require_query', fn () => ProfileResolver::resolve()->requireQuery, true],
+    ['sentinel.signatures.profiles.default.require_content_digest', fn () => ProfileResolver::resolve()->requireContentDigest, true],
+    ['sentinel.signatures.profiles.default.require_nonce', fn () => ProfileResolver::resolve()->requireNonce, true],
+    ['sentinel.schedule.enabled', fn () => Settings::scheduleEnabled(), true],
+]);
+
+it('reads every boolean switch the way an env string means it', function (string $key, Closure $read, bool $default, string|bool $value, bool $expected): void {
     config()->set($key, $value);
 
     expect($read())->toBe($expected);
-})->with([
-    ['sentinel.sealing.auto', fn () => Settings::autoSeal()],
-    ['sentinel.sealing.allow_suspension', fn () => Settings::allowSuspension()],
-    ['sentinel.sealing.field_tags', fn () => Settings::fieldTags()],
-    ['sentinel.verification.check_ledger', fn () => Settings::checkLedger()],
-    ['sentinel.verification.outdated_is_intact', fn () => Settings::outdatedIsIntact()],
-    ['sentinel.ledger.enabled', fn () => Settings::ledgerEnabled()],
-    ['sentinel.verification.retrieve_checks_ledger', fn () => Settings::retrieveChecksLedger()],
-    ['sentinel.idempotency.accept_unquoted', fn () => Settings::idempotencyAcceptsUnquoted()],
-    ['sentinel.idempotency.store_client_errors', fn () => Settings::storesClientErrors()],
-    ['sentinel.idempotency.store_server_errors', fn () => Settings::storesServerErrors()],
-    ['sentinel.idempotency.transactional', fn () => Settings::idempotencyTransactional()],
-    ['sentinel.idempotency.encrypt', fn () => Settings::idempotencyEncrypt()],
-    ['sentinel.signatures.advertise', fn () => Settings::advertisesSignatures()],
-    ['sentinel.signatures.outbound.include_alg', fn () => Settings::outboundIncludesAlg()],
-    ['sentinel.signatures.profiles.default.require_query', fn () => ProfileResolver::resolve()->requireQuery],
-    ['sentinel.signatures.profiles.default.require_content_digest', fn () => ProfileResolver::resolve()->requireContentDigest],
-    ['sentinel.signatures.profiles.default.require_nonce', fn () => ProfileResolver::resolve()->requireNonce],
-    ['sentinel.schedule.enabled', fn () => Settings::scheduleEnabled()],
-])->with([
-    ['off', false], ['no', false], ['0', false], ['false', false], ['', false], [false, false],
+})->with('sentinel switches')->with([
+    ['off', false], ['no', false], ['0', false], ['false', false], [false, false],
     ['on', true], ['yes', true], ['1', true], ['true', true], [true, true],
 ]);
+
+it('reads a blank or absent switch as not set, so its shipped default applies', function (string $key, Closure $read, bool $default, ?string $unset): void {
+    config()->set($key, $unset);
+
+    expect($read())->toBe($default);
+})->with('sentinel switches')->with([
+    'null' => [null], 'empty' => [''], 'whitespace' => ['  '],
+]);
+
+it('still refuses a junk switch spelling instead of reading the default', function (string $key, Closure $read): void {
+    config()->set($key, 'disabled');
+
+    expect($read)->toThrow(InvalidSentinelConfigurationException::class, $key);
+})->with('sentinel switches');
 
 it('validates the integer and enum sealing settings', function (): void {
     config()->set('sentinel.sealing.on_tampered_write', 'launder');

@@ -19,18 +19,20 @@ use RoundlyConsulting\Sentinel\Keys\RingConfig;
 /**
  * Validated readers for `config/sentinel.php`. Every value is checked at first use and an
  * invalid one throws {@see InvalidSentinelConfigurationException} — never a silent fallback
- * on a security-relevant key. Booleans go through the toolkit's boolean reader, which is
- * strict (`SENTINEL_X=off` means off, `SENTINEL_X=disabled` throws — a typo never reads as
- * the default), integers through its range checks.
+ * on a security-relevant key. A key that is not set — absent, null or blank (`''` or
+ * whitespace, what a host's `SENTINEL_X=` gives) — takes its shipped default. Booleans go
+ * through the toolkit's boolean reader, which is strict (`SENTINEL_X=off` means off,
+ * `SENTINEL_X=disabled` throws — a typo never reads as the default), integers through its
+ * range checks.
  */
 final class Settings
 {
     /**
      * A strict boolean (the toolkit's `boolean()` reader): `true`/`false`, `on`/`off`, `yes`/`no`, `1`/`0`
-     * (any case) and `''` (false); null — an absent key — is the default, and anything else
-     * throws instead of silently reading as the default (`SENTINEL_ALLOW_SUSPENSION=disabled`
-     * must never leave suspension on). Callers read the value with `config()` themselves, so
-     * the key stays visible to the config contract.
+     * (any case); not set — absent, null or blank (`''`, a host's `SENTINEL_X=`) — is the
+     * default, and anything else throws instead of silently reading as the default
+     * (`SENTINEL_ALLOW_SUSPENSION=disabled` must never leave suspension on). Callers read the
+     * value with `config()` themselves, so the key stays visible to the config contract.
      *
      * @param  string  $key  the key under `sentinel.`, for the error message
      */
@@ -40,12 +42,22 @@ final class Settings
     }
 
     /**
+     * The value, or null when it is not set: a blank string (`''` or whitespace — what a
+     * host's `SENTINEL_X=` puts in config) means the same as an absent key, so the caller's
+     * default applies.
+     */
+    public static function nullIfBlank(mixed $value): mixed
+    {
+        return is_string($value) && trim($value) === '' ? null : $value;
+    }
+
+    /**
      * The application context bound into every MAC (`sentinel.context`). Changing it
      * invalidates every seal, by design: two apps sharing keys cannot forge each other's.
      */
     public static function context(): string
     {
-        $value = config('sentinel.context');
+        $value = self::nullIfBlank(config('sentinel.context'));
 
         if ($value === null) {
             return '';
@@ -64,9 +76,9 @@ final class Settings
      */
     public static function keyConnection(): ?string
     {
-        $value = config('sentinel.database.connection');
+        $value = self::nullIfBlank(config('sentinel.database.connection'));
 
-        if ($value === null || $value === '') {
+        if ($value === null) {
             return null;
         }
 
@@ -79,7 +91,7 @@ final class Settings
 
     public static function defaultRing(): string
     {
-        $value = config('sentinel.keys.default_ring') ?? 'default';
+        $value = self::nullIfBlank(config('sentinel.keys.default_ring')) ?? 'default';
 
         if (! is_string($value) || ! Identifiers::isRing($value)) {
             throw InvalidSentinelConfigurationException::invalidValue('keys.default_ring', 'must be a ring name ([a-z][a-z0-9_-]{0,63})');
@@ -102,14 +114,14 @@ final class Settings
     public static function signatureRings(): array
     {
         $profiles = config('sentinel.signatures.profiles') ?? [];
-        $rings = [config('sentinel.signatures.outbound.ring') ?? 'http'];
+        $rings = [self::nullIfBlank(config('sentinel.signatures.outbound.ring')) ?? 'http'];
 
         if (! is_array($profiles)) {
             throw InvalidSentinelConfigurationException::invalidValue('signatures.profiles', 'must be an array of profiles');
         }
 
         foreach ($profiles as $name => $profile) {
-            $rings[] = is_array($profile) ? ($profile['ring'] ?? 'http') : null;
+            $rings[] = is_array($profile) ? (self::nullIfBlank($profile['ring'] ?? null) ?? 'http') : null;
 
             // A ring that is not a name cannot be checked against the sealing rings, so it
             // is refused rather than skipped (skipping it would let a partner ring vouch).
@@ -177,16 +189,17 @@ final class Settings
             throw SealingMisconfiguredException::unknownRing($ring);
         }
 
-        $driver = config("sentinel.keys.rings.{$ring}.driver");
+        // Not set (absent, null or blank) reads as the default — or, for the driver, as missing.
+        $driver = self::nullIfBlank(config("sentinel.keys.rings.{$ring}.driver"));
         $algorithms = config("sentinel.keys.rings.{$ring}.algorithms");
-        $keyId = config("sentinel.keys.rings.{$ring}.key_id");
-        $algorithm = config("sentinel.keys.rings.{$ring}.algorithm") ?? Algorithm::HmacSha256->value;
-        $key = config("sentinel.keys.rings.{$ring}.key");
-        $publicKey = config("sentinel.keys.rings.{$ring}.public_key");
-        $previous = config("sentinel.keys.rings.{$ring}.previous") ?? '';
+        $keyId = self::nullIfBlank(config("sentinel.keys.rings.{$ring}.key_id"));
+        $algorithm = self::nullIfBlank(config("sentinel.keys.rings.{$ring}.algorithm")) ?? Algorithm::HmacSha256->value;
+        $key = self::nullIfBlank(config("sentinel.keys.rings.{$ring}.key"));
+        $publicKey = self::nullIfBlank(config("sentinel.keys.rings.{$ring}.public_key"));
+        $previous = self::nullIfBlank(config("sentinel.keys.rings.{$ring}.previous")) ?? '';
         $drivers = config("sentinel.keys.rings.{$ring}.drivers") ?? ['config', 'database'];
 
-        if (! is_string($driver) || $driver === '') {
+        if (! is_string($driver)) {
             throw InvalidSentinelConfigurationException::invalidValue("keys.rings.{$ring}.driver", 'must be a driver name');
         }
 
@@ -214,10 +227,10 @@ final class Settings
             $ring,
             $driver,
             self::algorithms($ring, $algorithms),
-            $keyId === '' ? null : $keyId,
+            $keyId,
             $pinned,
-            $key === '' ? null : $key,
-            $publicKey === '' ? null : $publicKey,
+            $key,
+            $publicKey,
             $previous,
             self::drivers($ring, $drivers),
         );
@@ -281,7 +294,7 @@ final class Settings
 
     public static function onTamperedWrite(): TamperedWritePolicy
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->enum('sentinel.sealing.on_tampered_write', TamperedWritePolicy::class);
+        return Config::using(InvalidSentinelConfigurationException::class)->enum('sentinel.sealing.on_tampered_write', TamperedWritePolicy::class, TamperedWritePolicy::Refuse);
     }
 
     public static function reasonMaxLength(): int
@@ -353,7 +366,7 @@ final class Settings
      */
     public static function ledgerRing(): string
     {
-        $ring = config('sentinel.ledger.ring') ?? self::defaultRing();
+        $ring = self::nullIfBlank(config('sentinel.ledger.ring')) ?? self::defaultRing();
 
         if (! is_string($ring) || ! in_array($ring, self::rings(), true)) {
             throw InvalidSentinelConfigurationException::invalidValue('ledger.ring', 'must name a configured key ring');
@@ -461,7 +474,7 @@ final class Settings
 
     public static function retrieveReaction(): Reaction
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->enum('sentinel.verification.retrieve_reaction', Reaction::class);
+        return Config::using(InvalidSentinelConfigurationException::class)->enum('sentinel.verification.retrieve_reaction', Reaction::class, Reaction::Throw);
     }
 
     public static function retrieveChecksLedger(): bool
@@ -479,7 +492,7 @@ final class Settings
      */
     public static function verifiedAborts(): bool
     {
-        $reaction = config('sentinel.middleware.verified_reaction') ?? 'abort';
+        $reaction = self::nullIfBlank(config('sentinel.middleware.verified_reaction')) ?? 'abort';
 
         return match ($reaction) {
             'abort' => true,
@@ -503,12 +516,12 @@ final class Settings
 
     public static function idempotencyHeader(): string
     {
-        return self::headerName('idempotency.header', config('sentinel.idempotency.header') ?? 'Idempotency-Key');
+        return self::headerName('idempotency.header', self::nullIfBlank(config('sentinel.idempotency.header')) ?? 'Idempotency-Key');
     }
 
     public static function replayHeader(): string
     {
-        return self::headerName('idempotency.replay_header', config('sentinel.idempotency.replay_header') ?? 'Idempotent-Replayed');
+        return self::headerName('idempotency.replay_header', self::nullIfBlank(config('sentinel.idempotency.replay_header')) ?? 'Idempotent-Replayed');
     }
 
     /**
@@ -516,7 +529,7 @@ final class Settings
      */
     public static function idempotencyMethods(): array
     {
-        $methods = config('sentinel.idempotency.methods') ?? ['POST', 'PATCH'];
+        $methods = self::nullIfBlank(config('sentinel.idempotency.methods')) ?? ['POST', 'PATCH'];
 
         if (! is_array($methods) || ! array_is_list($methods) || $methods === []) {
             throw InvalidSentinelConfigurationException::invalidValue('idempotency.methods', 'must be a non-empty list of HTTP methods');
@@ -603,7 +616,7 @@ final class Settings
      */
     public static function replayedHeaders(): array
     {
-        $headers = config('sentinel.idempotency.replayed_headers') ?? [];
+        $headers = self::nullIfBlank(config('sentinel.idempotency.replayed_headers')) ?? [];
 
         if (! is_array($headers) || ! array_is_list($headers)) {
             throw InvalidSentinelConfigurationException::invalidValue('idempotency.replayed_headers', 'must be a list of header names');
@@ -655,7 +668,7 @@ final class Settings
 
     private static function storeName(string $key, mixed $store): string
     {
-        $store ??= 'database';
+        $store = self::nullIfBlank($store) ?? 'database';
 
         if (! is_string($store) || preg_match('/^[a-z][a-z0-9_-]{0,63}$/D', $store) !== 1) {
             throw InvalidSentinelConfigurationException::invalidValue($key, 'must be database, cache or the name of a bound store');
@@ -665,8 +678,8 @@ final class Settings
     }
 
     /**
-     * A string or null: blank (an empty env value) reads as null, and anything that is not
-     * a string throws rather than silently reading as null.
+     * A string or null: not set — absent, null or blank (an empty env value) — reads as
+     * null, and anything that is not a string throws rather than silently reading as null.
      */
     public static function optionalString(string $key, mixed $value): ?string
     {
@@ -689,7 +702,7 @@ final class Settings
 
     public static function outboundRing(): string
     {
-        $ring = config('sentinel.signatures.outbound.ring') ?? 'http';
+        $ring = self::nullIfBlank(config('sentinel.signatures.outbound.ring')) ?? 'http';
 
         if (! is_string($ring) || ! in_array($ring, self::rings(), true)) {
             throw InvalidSentinelConfigurationException::invalidValue('signatures.outbound.ring', 'must name a configured key ring');
@@ -700,7 +713,7 @@ final class Settings
 
     public static function outboundLabel(): string
     {
-        $label = config('sentinel.signatures.outbound.label') ?? 'sig1';
+        $label = self::nullIfBlank(config('sentinel.signatures.outbound.label')) ?? 'sig1';
 
         if (! is_string($label) || ! ProfileResolver::isLabel($label)) {
             throw InvalidSentinelConfigurationException::invalidValue('signatures.outbound.label', 'must be a signature label ([a-z*][a-z0-9_-.*]*)');
@@ -714,7 +727,7 @@ final class Settings
      */
     public static function outboundComponents(): array
     {
-        $components = ProfileResolver::components('signatures.outbound.components', config('sentinel.signatures.outbound.components') ?? []);
+        $components = ProfileResolver::components('signatures.outbound.components', self::nullIfBlank(config('sentinel.signatures.outbound.components')) ?? []);
 
         // A signature that covers nothing authenticates no part of the request.
         return $components !== [] ? $components : throw InvalidSentinelConfigurationException::invalidValue('signatures.outbound.components', 'must name at least one component');
@@ -722,19 +735,20 @@ final class Settings
 
     public static function outboundDigest(): DigestAlgorithm
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->enum('sentinel.signatures.outbound.digest', DigestAlgorithm::class);
+        return Config::using(InvalidSentinelConfigurationException::class)->enum('sentinel.signatures.outbound.digest', DigestAlgorithm::class, DigestAlgorithm::Sha256);
     }
 
     public static function outboundExpiresIn(): ?int
     {
-        return config('sentinel.signatures.outbound.expires_in') === null
+        // Not set (absent, null or blank) is no expiry, never the 300-second fallback.
+        return self::nullIfBlank(config('sentinel.signatures.outbound.expires_in')) === null
             ? null
             : Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.signatures.outbound.expires_in', 300, min: 1, max: 86400);
     }
 
     public static function outboundTag(): ?string
     {
-        $tag = config('sentinel.signatures.outbound.tag');
+        $tag = self::nullIfBlank(config('sentinel.signatures.outbound.tag'));
 
         if ($tag !== null && (! is_string($tag) || ! ProfileResolver::isTag($tag))) {
             throw InvalidSentinelConfigurationException::invalidValue('signatures.outbound.tag', 'must be a printable ASCII string or null');
@@ -763,21 +777,25 @@ final class Settings
 
     /**
      * The scheduler frequency method of one upkeep task (`checkpoint`, `verify`, `prune`), or
-     * null when the task is off.
+     * null when the task is off (`off` or null). A blank value is not set, so the task keeps
+     * its shipped frequency — an empty `SENTINEL_SCHEDULE_CHECKPOINT=` never silently widens
+     * the window in which a rollback goes unseen.
      */
     public static function scheduleFrequency(string $task): ?string
     {
         // Literal keys: each one is read (and pinned by the config contract) on its own.
-        $value = match ($task) {
-            'checkpoint' => config('sentinel.schedule.checkpoint'),
-            'verify' => config('sentinel.schedule.verify'),
-            'prune' => config('sentinel.schedule.prune'),
+        [$value, $default] = match ($task) {
+            'checkpoint' => [config('sentinel.schedule.checkpoint'), 'everyMinute'],
+            'verify' => [config('sentinel.schedule.verify'), 'daily'],
+            'prune' => [config('sentinel.schedule.prune'), 'daily'],
             default => throw InvalidSentinelConfigurationException::invalidValue('schedule', "has no task [{$task}]"),
         };
 
-        if ($value === null || $value === '' || $value === 'off') {
+        if ($value === null || $value === 'off') {
             return null;
         }
+
+        $value = self::nullIfBlank($value) ?? $default;
 
         if (! is_string($value) || ! in_array($value, self::FREQUENCIES, true)) {
             throw InvalidSentinelConfigurationException::invalidValue("schedule.{$task}", 'must be off or one of '.implode(', ', self::FREQUENCIES));

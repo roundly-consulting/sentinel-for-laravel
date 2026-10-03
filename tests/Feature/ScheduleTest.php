@@ -52,7 +52,13 @@ it('takes the configured frequencies, and turns single tasks off', function (): 
         ->and($events['sentinel:checkpoint']->expression)->toBe('*/5 * * * *')
         ->and($events['sentinel:verify --allow-empty --ledger']->expression)->toBe('0 * * * *');
 
+    // Blank is not set: the shipped daily verify, never silently off. Only null or `off` is off.
     config()->set('sentinel.schedule.verify', '');
+
+    expect(array_keys(sentinelEvents()))->toBe(['sentinel:checkpoint', 'sentinel:verify --allow-empty --ledger'])
+        ->and(sentinelEvents()['sentinel:verify --allow-empty --ledger']->expression)->toBe('0 0 * * *');
+
+    config()->set('sentinel.schedule.verify', null);
 
     expect(array_keys(sentinelEvents()))->toBe(['sentinel:checkpoint']);
 });

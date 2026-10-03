@@ -370,7 +370,7 @@ final readonly class CheckInstallationAction
     private static function cacheAnchorPlacement(): ?array
     {
         $configured = config('sentinel.ledger.anchor_drivers.cache.store');
-        $store = is_string($configured) && $configured !== '' ? $configured : config('cache.default');
+        $store = is_string($configured) && trim($configured) !== '' ? $configured : config('cache.default');
         $driver = is_string($store) ? config("cache.stores.{$store}.driver") : null;
         $ledger = array_map(Tables::connectionName(...), Settings::ledgerConnections());
         $connection = config("cache.stores.{$store}.connection") ?? config('database.default');

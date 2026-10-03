@@ -397,7 +397,8 @@ return [
     | Frequencies: everyMinute, everyTwoMinutes, everyFiveMinutes,
     | everyTenMinutes, everyFifteenMinutes, everyThirtyMinutes, hourly,
     | everyTwoHours, everyThreeHours, everyFourHours, everySixHours, daily,
-    | weekly — or off. Set `enabled` to false to schedule the commands yourself.
+    | weekly — or off (a blank value is not set, so the default applies). Set
+    | `enabled` to false to schedule the commands yourself.
     |
     */
 

@@ -2,7 +2,11 @@
 
 declare(strict_types=1);
 
+use RoundlyConsulting\Sentinel\Enums\Algorithm;
+use RoundlyConsulting\Sentinel\Enums\DigestAlgorithm;
 use RoundlyConsulting\Sentinel\Enums\HealthStatus;
+use RoundlyConsulting\Sentinel\Enums\Reaction;
+use RoundlyConsulting\Sentinel\Enums\TamperedWritePolicy;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
@@ -157,8 +161,92 @@ it('refuses a mistyped anchor setting instead of anchoring with the default (str
         ->toThrow(InvalidSentinelConfigurationException::class, "ledger.anchor_drivers.{$anchor}.{$key}");
 })->with([
     'cache store not a string' => ['cache', 'store', ['redis']],
-    'cache key blank' => ['cache', 'key', ''],
+    'cache key not a string' => ['cache', 'key', ['sentinel']],
     'filesystem disk not a string' => ['filesystem', 'disk', 5],
-    'filesystem path blank' => ['filesystem', 'path', ' '],
+    'filesystem path not a string' => ['filesystem', 'path', 7],
     'log channel not a string' => ['log', 'channel', false],
+]);
+
+/*
+ * Owner decision (blank means not set): a host's blank value — `SENTINEL_X=` puts `''` in
+ * config — is the same as leaving the key out, so the shipped default applies. Junk still
+ * throws (covered above); only blank changed.
+ */
+it('reads blank scalar settings as not set, so the shipped defaults apply (strict config)', function (string $blank): void {
+    foreach ([
+        'sentinel.context', 'sentinel.database.connection', 'sentinel.keys.default_ring',
+        'sentinel.sealing.on_tampered_write', 'sentinel.verification.retrieve_reaction', 'sentinel.ledger.ring',
+        'sentinel.middleware.verified_reaction', 'sentinel.idempotency.store', 'sentinel.idempotency.header',
+        'sentinel.idempotency.replay_header', 'sentinel.idempotency.methods', 'sentinel.idempotency.replayed_headers',
+        'sentinel.nonces.store', 'sentinel.signatures.outbound.ring', 'sentinel.signatures.outbound.label',
+        'sentinel.signatures.outbound.digest', 'sentinel.signatures.outbound.expires_in', 'sentinel.signatures.outbound.tag',
+        'sentinel.signatures.default_profile',
+    ] as $key) {
+        config()->set($key, $blank);
+    }
+
+    expect(Settings::context())->toBe('')
+        ->and(Settings::keyConnection())->toBeNull()
+        ->and(Settings::defaultRing())->toBe('default')
+        ->and(Settings::onTamperedWrite())->toBe(TamperedWritePolicy::Refuse)
+        ->and(Settings::retrieveReaction())->toBe(Reaction::Throw)
+        ->and(Settings::ledgerRing())->toBe('default')
+        ->and(Settings::verifiedAborts())->toBeTrue()
+        ->and(Settings::idempotencyStore())->toBe('database')
+        ->and(Settings::idempotencyHeader())->toBe('Idempotency-Key')
+        ->and(Settings::replayHeader())->toBe('Idempotent-Replayed')
+        ->and(Settings::idempotencyMethods())->toBe(['POST', 'PATCH'])
+        ->and(Settings::replayedHeaders())->toBe([])
+        ->and(Settings::nonceStore())->toBe('database')
+        ->and(Settings::outboundRing())->toBe('http')
+        ->and(Settings::outboundLabel())->toBe('sig1')
+        ->and(Settings::outboundDigest())->toBe(DigestAlgorithm::Sha256)
+        ->and(Settings::outboundExpiresIn())->toBeNull()
+        ->and(Settings::outboundTag())->toBeNull()
+        ->and(ProfileResolver::defaultProfile())->toBe('default');
+})->with(['empty' => [''], 'whitespace' => ['  ']]);
+
+it('reads blank ring settings as not set (strict config)', function (): void {
+    config()->set('sentinel.keys.rings.default.key_id', '');
+    config()->set('sentinel.keys.rings.default.algorithm', ' ');
+    config()->set('sentinel.keys.rings.default.public_key', '');
+    config()->set('sentinel.keys.rings.default.previous', '');
+
+    $ring = Settings::ring('default');
+
+    expect($ring->keyId)->toBeNull()
+        ->and($ring->algorithm)->toBe(Algorithm::HmacSha256)
+        ->and($ring->publicKey)->toBeNull()
+        ->and($ring->previous)->toBe('');
+
+    // The driver has no default: blank is missing, and missing still throws.
+    config()->set('sentinel.keys.rings.default.driver', '');
+    expect(fn () => Settings::ring('default'))->toThrow(InvalidSentinelConfigurationException::class, 'keys.rings.default.driver');
+});
+
+it('reads blank signature profile settings as not set (strict config)', function (): void {
+    config()->set('sentinel.signatures.profiles.default.ring', '');
+    config()->set('sentinel.signatures.profiles.default.label', '');
+    config()->set('sentinel.signatures.profiles.default.tag', ' ');
+    config()->set('sentinel.signatures.profiles.default.max_age', '');
+    config()->set('sentinel.signatures.profiles.default.clock_skew', ' ');
+
+    $profile = ProfileResolver::resolve();
+
+    expect($profile->ring)->toBe('http')
+        ->and($profile->label)->toBeNull()
+        ->and($profile->tag)->toBeNull()
+        ->and($profile->maxAge)->toBe(300)
+        ->and($profile->clockSkew)->toBe(30)
+        ->and(Settings::signatureRings())->toContain('http');
+});
+
+it('reads a blank anchor key or path as the shipped one (strict config)', function (string $anchor, string $key): void {
+    config()->set('sentinel.ledger.anchors', $anchor);
+    config()->set("sentinel.ledger.anchor_drivers.{$anchor}.{$key}", '');
+
+    expect(app(AnchorManager::class)->build($anchor))->not->toBeNull();
+})->with([
+    'cache key' => ['cache', 'key'],
+    'filesystem path' => ['filesystem', 'path'],
 ]);
