@@ -37,6 +37,16 @@ final class SealingMisconfiguredException extends SentinelException
         return new self("[{$class}] overrides {$method}() without sealing; call \$this->persistSealed(fn () => parent::{$method}(...)) from the override.");
     }
 
+    /**
+     * The second line of the save()/delete() guard: a write that reached Eloquent's insert,
+     * update or delete with model events muted (saveQuietly(), deleteQuietly(),
+     * withoutEvents()), where the saving / deleting listeners never run.
+     */
+    public static function writeOutsideSealedPath(string $class): self
+    {
+        return new self("[{$class}] was written outside the sealed write path — an override of save() or delete() that skips it, reached with model events muted; call \$this->persistSealed(fn () => parent::save(...)) from the override.");
+    }
+
     public static function middlewareParameter(string $parameter): self
     {
         $shown = preg_match('/^[A-Za-z0-9_]{1,64}$/D', $parameter) === 1 ? $parameter : '(invalid)';

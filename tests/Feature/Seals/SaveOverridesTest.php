@@ -113,3 +113,41 @@ it('lets quiet writes through the sealed path, and refuses nothing under the fak
 
     expect(fn () => UnsafeOverride::query()->create(['name' => 'x']))->toThrow(SealingMisconfiguredException::class, 'overrides save()');
 });
+
+it('refuses an unsafe override reached with model events muted (dual-review O-17)', function (Closure $write): void {
+    $record = UnsafeOverride::query()->getModel()->newInstance(['name' => 'quiet']);
+
+    expect(fn () => $write($record))->toThrow(SealingMisconfiguredException::class, 'outside the sealed write path')
+        ->and(DB::table('plain_records')->where('name', 'quiet')->exists())->toBeFalse();
+})->with([
+    'saveQuietly()' => [static fn (Model $model): mixed => $model->saveQuietly()],
+    'withoutEvents()' => [static fn (Model $model): mixed => Model::withoutEvents(static fn (): mixed => $model->save())],
+]);
+
+it('refuses an unsafe update or delete override reached with model events muted (dual-review O-17)', function (): void {
+    $sealed = SafeOverride::query()->create(['name' => 'kept']);
+    $update = UnsafeOverride::query()->findOrFail($sealed->getKey());
+    $update->name = 'unsealed';
+    $delete = UnsafeDeleteOverride::query()->findOrFail($sealed->getKey());
+
+    expect(fn () => $update->saveQuietly())->toThrow(SealingMisconfiguredException::class, 'outside the sealed write path')
+        ->and(fn () => $delete->deleteQuietly())->toThrow(SealingMisconfiguredException::class, 'outside the sealed write path')
+        ->and(DB::table('plain_records')->where('id', $sealed->getKey())->value('name'))->toBe('kept')
+        ->and(LedgerEntry::query()->where('event', 'deleted')->count())->toBe(0);
+});
+
+it('keeps every quiet write path of a sealable working (dual-review O-17)', function (): void {
+    $record = record();
+    $record->name = 'quiet';
+    $record->saveQuietly();
+    $record->updateQuietly(['code' => 'Q1']);
+    $record->incrementQuietly('count');
+    $record->touchQuietly();
+    $copy = $record->replicateQuietly();
+    $copy->save();
+
+    expect(Sentinel::verify($record->fresh())->status)->toBe(VerificationStatus::Intact)
+        ->and(Sentinel::verify($copy)->status)->toBe(VerificationStatus::Intact)
+        ->and($record->deleteQuietly())->toBeTrue()
+        ->and(LedgerEntry::query()->where('sealable_id', $record->getKey())->orderByDesc('version')->firstOrFail()->event->value)->toBe('deleted');
+});

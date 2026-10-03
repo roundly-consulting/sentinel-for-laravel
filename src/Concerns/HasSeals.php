@@ -27,8 +27,10 @@ use Throwable;
  * `Sentinel::fake()` sees it.
  *
  * Reserved names: seal, verifySeal, verifySealOrFail, isIntact, acknowledgeTampering,
- * persistSealed, sentinelSeals, sentinelCanWaitForBoot, and the scopes whereSealed /
- * whereNotSealed / withSeals.
+ * persistSealed, sentinelSeals, sentinelCanWaitForBoot, sentinelRefuseUnsealedWrite, and the
+ * scopes whereSealed / whereNotSealed / withSeals. The trait also overrides Eloquent's
+ * getAttributesForInsert() and getKeyForSaveQuery() (a class that redefines either, or a
+ * setKeysForSaveQuery() that never calls the latter, keeps only the event-based guard).
  *
  * @mixin Model
  *
@@ -202,6 +204,40 @@ trait HasSeals
     public function scopeWithSeals(Builder $query): void
     {
         $query->with('sentinelSeals');
+    }
+
+    /**
+     * The guard's second line: every insert reads its attributes here, every update and
+     * delete (soft or hard) keys its query here (through setKeysForSaveQuery()) — with model
+     * events muted too, where the `saving` / `deleting` listeners never run.
+     *
+     * @return array<string, mixed>
+     */
+    protected function getAttributesForInsert()
+    {
+        $this->sentinelRefuseUnsealedWrite();
+
+        return parent::getAttributesForInsert();
+    }
+
+    /**
+     * @return mixed
+     */
+    protected function getKeyForSaveQuery()
+    {
+        $this->sentinelRefuseUnsealedWrite();
+
+        return parent::getKeyForSaveQuery();
+    }
+
+    /**
+     * @internal
+     */
+    protected function sentinelRefuseUnsealedWrite(): void
+    {
+        if (! app(SealingScope::class)->isWriting($this)) {
+            throw SealingMisconfiguredException::writeOutsideSealedPath(static::class);
+        }
     }
 
     /**
