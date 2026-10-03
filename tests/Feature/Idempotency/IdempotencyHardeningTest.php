@@ -5,12 +5,18 @@ declare(strict_types=1);
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Route;
+use RoundlyConsulting\Sentinel\Contracts\IdempotencyStore;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentRequest;
 use RoundlyConsulting\Sentinel\Enums\IdempotencyOutcome;
+use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
+use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Idempotency\ResponseSnapshot;
 use RoundlyConsulting\Sentinel\Idempotency\ResponseVault;
 use RoundlyConsulting\Sentinel\Idempotency\Stores\CacheIdempotencyStore;
+use RoundlyConsulting\Sentinel\Idempotency\Stores\DatabaseIdempotencyStore;
 use RoundlyConsulting\Sentinel\Models\IdempotencyKey;
+use RoundlyConsulting\Sentinel\Support\Clock;
+use RoundlyConsulting\Sentinel\Testing\InMemoryIdempotencyStore;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\User;
 
 /**
@@ -129,3 +135,53 @@ it('completes the key as unreplayable when the response cannot be stored after t
         ->and($retry->getStatusCode())->toBe(409)
         ->and($runs)->toBe(1);
 });
+
+it('never lets a key\'s TTL end a live lease (dual-review O-27)', function (): void {
+    config()->set('sentinel.idempotency.lock_seconds', 600);
+    $runs = 0;
+    $refused = 0;
+
+    Sentinel::idempotency()->run('export-42-abcdef', 'exports', function () use (&$runs, &$refused): null {
+        $runs++;
+        $this->travel(61)->seconds();
+
+        try {
+            Sentinel::idempotency()->run('export-42-abcdef', 'exports', static function () use (&$runs): null {
+                $runs++;
+
+                return null;
+            }, ttl: 60);
+        } catch (IdempotencyRequestInProgressException) {
+            $refused++;
+        }
+
+        return null;
+    }, ttl: 60);
+
+    expect($runs)->toBe(1)
+        ->and($refused)->toBe(1);
+});
+
+it('never prunes, nor lets the cache drop, a key whose lease is live (dual-review O-27)', function (Closure $make): void {
+    config()->set('sentinel.idempotency.lock_seconds', 600);
+    /** @var IdempotencyStore $store */
+    $store = $make();
+    $request = new IdempotentRequest('digest-live', 'scope', 'fp', 60);
+    $owner = $store->begin($request);
+
+    $this->travel(61)->seconds();
+
+    expect($store->prune(Clock::now()))->toBe(0)
+        ->and($store->begin($request)->outcome)->toBe(IdempotencyOutcome::InProgress)
+        ->and($store->complete($request->ownedBy((string) $owner->ownerToken), new ResponseSnapshot(200, [], 'done')))->toBeTrue();
+
+    $this->travel(600)->seconds();
+
+    // Completed and past its TTL: it goes, and the key is fresh again.
+    expect($store->prune(Clock::now()))->toBe($store instanceof CacheIdempotencyStore ? 0 : 1)
+        ->and($store->begin($request)->outcome)->toBe(IdempotencyOutcome::Proceed);
+})->with([
+    'database' => [static fn (): IdempotencyStore => app(DatabaseIdempotencyStore::class)],
+    'cache' => [static fn (): IdempotencyStore => new CacheIdempotencyStore(cache()->store('array'), app(ResponseVault::class), app('log'))],
+    'in-memory (the fake)' => [static fn (): IdempotencyStore => new InMemoryIdempotencyStore],
+]);

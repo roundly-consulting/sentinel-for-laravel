@@ -73,7 +73,7 @@ final class InMemoryIdempotencyStore implements IdempotencyStore
 
     public function prune(CarbonImmutable $now): int
     {
-        $expired = array_keys(array_filter($this->records, static fn (IdempotencyRecord $record): bool => $record->expiresAt->lte($now)));
+        $expired = array_keys(array_filter($this->records, static fn (IdempotencyRecord $record): bool => $record->expired($now)));
 
         foreach ($expired as $digest) {
             unset($this->records[$digest], $this->responses[$digest]);

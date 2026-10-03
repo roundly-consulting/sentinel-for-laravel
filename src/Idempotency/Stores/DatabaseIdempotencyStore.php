@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Sentinel\Idempotency\Stores;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Log\LogManager;
 use RoundlyConsulting\Crypto\Random\Csprng;
 use RoundlyConsulting\Sentinel\Casts\UtcDateTime;
@@ -113,12 +114,26 @@ final readonly class DatabaseIdempotencyStore implements IdempotencyStore
 
     public function prune(CarbonImmutable $now): int
     {
-        return IdempotencyKey::query()->where('expires_at', '<=', Clock::database($now))->toBase()->delete();
+        return self::expired($now)->toBase()->delete();
     }
 
     public function countExpired(CarbonImmutable $now): int
     {
-        return IdempotencyKey::query()->where('expires_at', '<=', Clock::database($now))->count();
+        return self::expired($now)->count();
+    }
+
+    /**
+     * Past their TTL — and not held by a live lease (the request that owns one is running).
+     *
+     * @return Builder<IdempotencyKey>
+     */
+    private static function expired(CarbonImmutable $now): Builder
+    {
+        $at = Clock::database($now);
+
+        return IdempotencyKey::query()->where('expires_at', '<=', $at)->where(
+            static fn (Builder $query) => $query->where('status', IdempotencyKey::COMPLETED)->orWhere('locked_until', '<=', $at),
+        );
     }
 
     private function decide(IdempotentRequest $request, CarbonImmutable $now, string $token, int $lock): ?IdempotencyDecision

@@ -16,7 +16,7 @@ use RoundlyConsulting\Sentinel\Enums\IdempotencyOutcome;
  * the fake's in-memory one — so they can never disagree. Each store calls it while holding its
  * own lock on the key (a row lock, a cache lock).
  *
- *     no record / expired      → own it (proceed)
+ *     no record / expired      → own it (proceed) — never while a live lease holds it
  *     another fingerprint      → reused (422)
  *     completed, replayable    → replay
  *     completed, unreplayable  → unavailable (409)
@@ -32,7 +32,7 @@ final class StateMachine
      */
     public static function begin(?IdempotencyRecord $record, IdempotentRequest $request, CarbonImmutable $now, string $token, int $lockSeconds, Closure $open): Transition
     {
-        if ($record === null || $record->expiresAt->lte($now)) {
+        if ($record === null || $record->expired($now)) {
             return new Transition(
                 new IdempotencyDecision(IdempotencyOutcome::Proceed, ownerToken: $token, firstSeenAt: $now),
                 IdempotencyRecord::owned($request->scope, $request->fingerprint, $token, $now, $lockSeconds, $request->ttl),

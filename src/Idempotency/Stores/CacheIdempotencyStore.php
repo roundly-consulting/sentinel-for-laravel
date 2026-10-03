@@ -193,7 +193,7 @@ final readonly class CacheIdempotencyStore implements IdempotencyStore
             'completed_at' => $record->completedAt === null ? null : Clock::database($record->completedAt),
             'expires_at' => Clock::database($record->expiresAt),
             'created_at' => Clock::database($record->createdAt),
-        ], max(1, $record->expiresAt->getTimestamp() - $now->getTimestamp()));
+        ], max(1, $record->keepUntil()->getTimestamp() - $now->getTimestamp()));
     }
 
     private static function key(string $digest): string

@@ -33,6 +33,23 @@ final readonly class IdempotencyRecord
         return new self($scope, $fingerprint, false, $token, $now->addSeconds($lockSeconds), null, null, true, null, $now->addSeconds($ttl), $now);
     }
 
+    /**
+     * A key ends with its TTL — but never while a live lease still holds it: the request that
+     * owns it is running, and a duplicate must not run beside it.
+     */
+    public function expired(CarbonImmutable $now): bool
+    {
+        return $this->expiresAt->lte($now) && ($this->completed || $this->lockedUntil->lte($now));
+    }
+
+    /**
+     * Until when the record must be kept: its TTL, or the end of a live lease when later.
+     */
+    public function keepUntil(): CarbonImmutable
+    {
+        return ! $this->completed && $this->lockedUntil->gt($this->expiresAt) ? $this->lockedUntil : $this->expiresAt;
+    }
+
     public function leasedTo(string $token, CarbonImmutable $now, int $lockSeconds): self
     {
         return new self(
