@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
@@ -14,6 +15,7 @@ use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidIdempotencyKeyException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Idempotency\RequestFingerprint;
 use RoundlyConsulting\Sentinel\Idempotency\ResponseSnapshot;
 use RoundlyConsulting\Sentinel\Idempotency\ResponseVault;
 use RoundlyConsulting\Sentinel\Idempotency\Stores\CacheIdempotencyStore;
@@ -291,4 +293,30 @@ it('never replays a response whose transaction failed to commit (dual-review O-2
     expect($first->getStatusCode())->toBe(500)
         ->and($db->table('review_children')->count())->toBe(0)
         ->and($retry->headers->get('Idempotent-Replayed'))->toBeNull();
+});
+
+it('fingerprints a multipart request by its fields and files (dual-review O-28)', function (): void {
+    $server = ['REQUEST_METHOD' => 'POST', 'REQUEST_URI' => '/upload', 'CONTENT_TYPE' => 'multipart/form-data; boundary=fixed'];
+    $file = static fn (string $name, string $contents): UploadedFile => UploadedFile::fake()->createWithContent($name, $contents);
+    // As PHP builds them: fields in $_POST, files in $_FILES, the raw body empty.
+    $request = static fn (array $fields, array $files = []): Request => new Request([], $fields, [], [], $files, $server, '');
+
+    $base = RequestFingerprint::request($request(['amount' => '10'], ['doc' => $file('a.pdf', 'first')]));
+
+    expect(RequestFingerprint::request($request(['amount' => '10'], ['doc' => $file('a.pdf', 'first')])))->toBe($base)
+        ->and(RequestFingerprint::request($request(['amount' => '99999'], ['doc' => $file('a.pdf', 'first')])))->not->toBe($base)
+        ->and(RequestFingerprint::request($request(['amount' => '10'], ['doc' => $file('a.pdf', 'other')])))->not->toBe($base)
+        ->and(RequestFingerprint::request($request(['amount' => '10'], ['doc' => $file('b.pdf', 'first')])))->not->toBe($base)
+        ->and(RequestFingerprint::request($request(['amount' => '10'])))->not->toBe($base)
+        ->and(RequestFingerprint::request($request(['amount' => ['10']], ['doc' => $file('a.pdf', 'first')])))->not->toBe($base)
+        ->and(RequestFingerprint::request($request(['amount' => "\xff"])))->not->toBe(RequestFingerprint::request($request(['amount' => '["b","_w"]'])))
+        ->and(RequestFingerprint::request($request(['nested' => ['a' => '1']], ['docs' => [$file('x.txt', 'x')]])))->not->toBe(RequestFingerprint::request($request(['nested' => ['a' => '1']], ['docs' => [$file('x.txt', 'y')]])));
+});
+
+it('keeps the fingerprint of a request with a raw body as it was (dual-review O-28)', function (): void {
+    $server = ['REQUEST_METHOD' => 'POST', 'REQUEST_URI' => '/orders', 'CONTENT_TYPE' => 'application/json'];
+
+    // A body PHP did read: the bags are not consulted, so a parsed copy cannot double count.
+    expect(RequestFingerprint::request(new Request([], ['amount' => '10'], [], [], [], $server, '{"amount":10}')))
+        ->toBe(RequestFingerprint::request(new Request([], [], [], [], [], $server, '{"amount":10}')));
 });
