@@ -2,12 +2,15 @@
 
 declare(strict_types=1);
 
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
+use RoundlyConsulting\Sentinel\Actions\Idempotency\CompleteIdempotentRequestAction;
 use RoundlyConsulting\Sentinel\Contracts\IdempotencyStore;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotencyDecision;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentRequest;
 use RoundlyConsulting\Sentinel\Enums\HealthStatus;
 use RoundlyConsulting\Sentinel\Enums\IdempotencyOutcome;
@@ -26,6 +29,7 @@ use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Support\Settings;
 use RoundlyConsulting\Sentinel\Testing\InMemoryIdempotencyStore;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\User;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Idempotency defects found by the dual review.
@@ -319,4 +323,42 @@ it('keeps the fingerprint of a request with a raw body as it was (dual-review O-
     // A body PHP did read: the bags are not consulted, so a parsed copy cannot double count.
     expect(RequestFingerprint::request(new Request([], ['amount' => '10'], [], [], [], $server, '{"amount":10}')))
         ->toBe(RequestFingerprint::request(new Request([], [], [], [], [], $server, '{"amount":10}')));
+});
+
+it('rethrows when even an unreplayable completion cannot be stored (dual-review O-12)', function (): void {
+    $store = new class implements IdempotencyStore
+    {
+        public int $completions = 0;
+
+        public function begin(IdempotentRequest $request): IdempotencyDecision
+        {
+            throw new LogicException('unused');
+        }
+
+        public function complete(IdempotentRequest $request, ResponseSnapshot $snapshot): bool
+        {
+            $this->completions++;
+
+            throw new RuntimeException('store down');
+        }
+
+        public function release(IdempotentRequest $request): void {}
+
+        public function forget(string $keyDigest): bool
+        {
+            return false;
+        }
+
+        public function prune(CarbonImmutable $now): int
+        {
+            return 0;
+        }
+    };
+
+    // A streamed response is unreplayable already: there is nothing smaller to fall back to.
+    $action = new CompleteIdempotentRequestAction($store);
+    $request = new IdempotentRequest('digest-down', 'scope', 'fp', 60, 'owner');
+
+    expect(fn () => $action->execute($request, new StreamedResponse(static function (): void {})))->toThrow(RuntimeException::class, 'store down')
+        ->and($store->completions)->toBe(1);
 });

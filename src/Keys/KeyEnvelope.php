@@ -154,23 +154,25 @@ final readonly class KeyEnvelope
         return $data;
     }
 
+    /**
+     * The associated data already proved the row's columns are the ones the envelope was
+     * sealed with; this proves the sealed plaintext agrees with them too (an envelope is only
+     * ever written by {@see apply()}, so a disagreement means one was forged with the key).
+     * The row's dates were read once by {@see associatedData()}, so they read here.
+     */
     private static function assertBound(Key $row, EnvelopeData $data): void
     {
-        try {
-            $columns = [
-                'ring' => [$row->ring, $data->ring],
-                'kid' => [$row->kid, $data->keyId],
-                'algorithm' => [$row->algorithm, $data->algorithm],
-                'status' => [$row->status, $data->status],
-                'activates_at' => [Clock::iso($row->activates_at), Clock::iso($data->activatesAt)],
-                'signs_until' => [self::isoOrNull($row->signs_until), self::isoOrNull($data->signsUntil)],
-                'verifies_until' => [self::isoOrNull($row->verifies_until), self::isoOrNull($data->verifiesUntil)],
-                'revoked_at' => [self::isoOrNull($row->revoked_at), self::isoOrNull($data->revokedAt)],
-                'owner' => [$row->owner_type === null ? null : $row->owner_type.':'.$row->owner_id, $data->owner],
-            ];
-        } catch (CorruptRecordException) {
-            throw KeyIntegrityException::envelopeMismatch($data->ring, $data->keyId, 'dates');
-        }
+        $columns = [
+            'ring' => [$row->ring, $data->ring],
+            'kid' => [$row->kid, $data->keyId],
+            'algorithm' => [$row->algorithm, $data->algorithm],
+            'status' => [$row->status, $data->status],
+            'activates_at' => [Clock::iso($row->activates_at), Clock::iso($data->activatesAt)],
+            'signs_until' => [self::isoOrNull($row->signs_until), self::isoOrNull($data->signsUntil)],
+            'verifies_until' => [self::isoOrNull($row->verifies_until), self::isoOrNull($data->verifiesUntil)],
+            'revoked_at' => [self::isoOrNull($row->revoked_at), self::isoOrNull($data->revokedAt)],
+            'owner' => [$row->owner_type === null ? null : $row->owner_type.':'.$row->owner_id, $data->owner],
+        ];
 
         foreach ($columns as $field => [$column, $bound]) {
             if ($column !== $bound) {

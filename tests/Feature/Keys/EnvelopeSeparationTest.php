@@ -13,7 +13,9 @@ use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\SignatureRejection;
 use RoundlyConsulting\Sentinel\Events\KeyIntegrityViolated;
 use RoundlyConsulting\Sentinel\Exceptions\HttpSignatureException;
+use RoundlyConsulting\Sentinel\Exceptions\KeyIntegrityException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Keys\KeyEnvelope;
 use RoundlyConsulting\Sentinel\Keys\KeyLookup;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Keys\StorageCipher;
@@ -122,4 +124,18 @@ it('binds an envelope to its purpose and to the row it was written for (dual-rev
     Key::query()->whereKey($other->id)->update(['envelope' => $key->getRawOriginal('envelope')]);
 
     expect(app(KeyStoreManager::class)->lookup('http', 'other'))->toEqual(new KeyLookup(null, KeyLookup::INTEGRITY));
+});
+
+it('refuses a plaintext that disagrees with the columns it was bound to (dual-review O-3)', function (): void {
+    // Only a holder of the envelope key can produce this — defence in depth behind the AAD.
+    $row = Key::factory()->ring('http')->create(['kid' => 'forged-inside']);
+    $cipher = app(StorageCipher::class);
+    $aad = KeyEnvelope::associatedData($row);
+    $plaintext = json_decode($cipher->decrypt(StorageCipher::KEY_ENVELOPE, (string) $row->getRawOriginal('envelope'), $aad), true);
+    $plaintext['status'] = $plaintext['status'] === 'active' ? 'verify-only' : 'active';
+    Key::query()->whereKey($row->id)->update(['envelope' => $cipher->encrypt(StorageCipher::KEY_ENVELOPE, Jcs::encode($plaintext), $aad)]);
+
+    expect(fn () => app(KeyEnvelope::class)->open(Key::query()->findOrFail($row->id)))
+        ->toThrow(KeyIntegrityException::class, 'failed its integrity check (status)')
+        ->and(app(KeyStoreManager::class)->lookup('http', 'forged-inside'))->toEqual(new KeyLookup(null, KeyLookup::INTEGRITY));
 });
