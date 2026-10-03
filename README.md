@@ -351,8 +351,9 @@ ring's section with `env()`) and inbound policies under `signatures.profiles.<na
 `InvalidSentinelConfigurationException` naming the key — it never falls back to a default.
 Booleans accept `true`/`false`, `on`/`off`, `yes`/`no`, `1`/`0` (any case) and `''` (false);
 any other value throws (`SENTINEL_ALLOW_SUSPENSION=disabled` is an error, never "allowed"),
-and only an unset key takes its default. A value out of range, an unknown enum case or a
-malformed list throws the same way. `php artisan about` shows a Sentinel section
+and only an unset key takes its default. A value out of range, an unknown enum case, a
+malformed list or a non-string name (a log channel, an ability, a store, an anchor disk) throws
+the same way; a blank optional name reads as unset. `php artisan about` shows a Sentinel section
 (rings, driver, signing key present or missing, flags, anchors, stores, sealable models,
 schedule — never key material), and `sentinel:check` reports every invalid setting at once.
 
