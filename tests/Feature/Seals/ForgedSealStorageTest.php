@@ -3,8 +3,13 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ScanOptions;
+use RoundlyConsulting\Sentinel\Definition\DefinitionRegistry;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
+use RoundlyConsulting\Sentinel\Enums\Reaction;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
+use RoundlyConsulting\Sentinel\Events\TamperDetected;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
@@ -164,4 +169,94 @@ it('refuses computed drift whose attributes MAC was removed or replayed (dual-re
     DB::table('sentinel_seals')->where('sealable_id', $other->id)->where('seal', 'financial')->update(['attributes_mac' => '!not base64url!']);
 
     expect(Sentinel::verify($other)->reason)->toBe('mac');
+});
+
+/**
+ * A1: append a manifest entry for a column the table does not have (or one the seal does not
+ * cover) to a tampered row's seal.
+ */
+function poisonManifest(int|string $id, string $seal, string $column = 'zzz'): void
+{
+    $row = DB::table('sentinel_seals')->where('sealable_id', $id)->where('seal', $seal)->first();
+    $manifest = json_decode((string) $row->manifest, true);
+    $manifest[] = ["a:{$column}", 'str'];
+    DB::table('sentinel_seals')->where('id', $row->id)->update(['manifest' => json_encode($manifest)]);
+}
+
+it('refuses to load a tampered row whose manifest names a column that does not exist (dual-review O-2)', function (): void {
+    $class = definedBy(static fn ($seals) => $seals->seal('guarded')->attributes('number', 'amount')->verifyOnRetrieve(Reaction::Throw));
+    $model = $class::query()->create(['number' => 'r-1', 'amount' => '5.00']);
+
+    DB::table('invoices')->where('id', $model->getKey())->update(['amount' => '0.00']);
+    poisonManifest($model->getKey(), 'guarded');
+
+    expect(fn () => $class::query()->find($model->getKey()))->toThrow(TamperedModelException::class, 'malformed: manifest')
+        ->and(Sentinel::verify($model)->status)->toBe(VerificationStatus::Malformed)
+        ->and(Sentinel::verify($model)->reason)->toBe('manifest');
+});
+
+it('reads a manifest column the seal no longer covers instead of skipping it as a partial select (dual-review O-2)', function (): void {
+    $class = definedBy(static fn ($seals) => $seals->seal('guarded')->attributes('number', 'amount')->verifyOnRetrieve(Reaction::Throw));
+    $model = $class::query()->create(['number' => 'r-2', 'amount' => '5.00']);
+    DB::table('invoices')->where('id', $model->getKey())->update(['amount' => '0.00']);
+    poisonManifest($model->getKey(), 'guarded', 'note');
+
+    // Every sealed column is selected: the row is verified (and refused), never skipped.
+    expect(fn () => $class::query()->select('id', 'number', 'amount')->find($model->getKey()))->toThrow(TamperedModelException::class, 'tampered: mac')
+        // A partial select of the seal's own columns stays unverifiable, as documented.
+        ->and($class::query()->select('id', 'number')->find($model->getKey())?->getKey())->toBe($model->getKey());
+});
+
+it('returns a status for a poisoned manifest on every engine and every path (dual-review O-2)', function (): void {
+    $class = definedBy(static fn ($seals) => $seals->seal('guarded')->attributes('number', 'amount'));
+    $model = $class::query()->create(['number' => 'r-3', 'amount' => '5.00']);
+    poisonManifest($model->getKey(), 'guarded');
+
+    expect(Sentinel::verify($model)->status)->toBe(VerificationStatus::Malformed)
+        ->and(fn () => $class::query()->findOrFail($model->getKey())->update(['number' => 'x']))->toThrow(TamperedModelException::class, 'malformed: manifest')
+        ->and(Sentinel::acknowledge($model, 'INC-7: manifest repaired')->acknowledged)->toBeTrue()
+        ->and(Sentinel::verify($model)->status)->toBe(VerificationStatus::Intact);
+});
+
+it('keeps scanning past a poisoned row and reports the other tampered rows (dual-review O-2)', function (): void {
+    $class = definedBy(static fn ($seals) => $seals->seal('guarded')->attributes('number', 'amount'));
+    $a = $class::query()->create(['number' => 'a', 'amount' => '5.00']);
+    $b = $class::query()->create(['number' => 'b', 'amount' => '5.00']);
+    DB::table('invoices')->where('id', $b->getKey())->update(['amount' => '0.00']);
+    poisonManifest($a->getKey(), 'guarded');
+
+    $report = Sentinel::scan(new ScanOptions([$class]));
+
+    expect(array_map(static fn ($result): string => $result->status->value.':'.$result->reason, $report->findings))->toBe(['malformed:manifest', 'tampered:mac']);
+});
+
+it('reports a row whose verification throws as a finding and keeps scanning (dual-review O-2)', function (): void {
+    Event::fake([TamperDetected::class]);
+    $class = definedBy(static fn ($seals) => $seals->seal('guarded')->attributes('number', 'amount')
+        ->computed('checked', static fn ($m): string => $m->number === 'boom' ? throw new RuntimeException('host closure failed') : 'ok'));
+    $a = $class::query()->create(['number' => 'a', 'amount' => '5.00']);
+    $b = $class::query()->create(['number' => 'b', 'amount' => '5.00']);
+    DB::table('invoices')->where('id', $a->getKey())->update(['number' => 'boom']);
+    DB::table('invoices')->where('id', $b->getKey())->update(['amount' => '0.00']);
+
+    $report = Sentinel::scan(new ScanOptions([$class]));
+
+    expect(array_map(static fn ($result): string => $result->status->value.':'.$result->reason, $report->findings))->toBe(['unverifiable:error', 'tampered:mac'])
+        ->and($report->scanned)->toBe(2);
+
+    Event::assertDispatched(TamperDetected::class, static fn (TamperDetected $event): bool => $event->reason === 'error');
+});
+
+it('still verifies an outdated row whose manifest names a column the definition dropped', function (): void {
+    $class = definedBy(static fn ($seals) => $seals->seal('guarded')->attributes('number', 'amount', 'note')->verifyOnRetrieve(Reaction::Throw));
+    $model = $class::query()->create(['number' => 'o-1', 'amount' => '5.00', 'note' => 'n']);
+    $class::$define = static fn ($seals) => $seals->seal('guarded')->attributes('number', 'amount')->verifyOnRetrieve(Reaction::Throw);
+    app()->forgetInstance(DefinitionRegistry::class);
+
+    expect(Sentinel::verify($model)->status)->toBe(VerificationStatus::Outdated)
+        ->and($class::query()->select('id', 'number', 'amount')->find($model->getKey())?->getKey())->toBe($model->getKey());
+
+    DB::table('invoices')->where('id', $model->getKey())->update(['note' => 'changed']);
+
+    expect(fn () => $class::query()->select('id', 'number', 'amount')->find($model->getKey()))->toThrow(TamperedModelException::class, 'tampered: mac');
 });

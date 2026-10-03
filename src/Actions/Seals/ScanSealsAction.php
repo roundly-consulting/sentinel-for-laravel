@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ScanOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ScanReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\StatusCount;
+use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
 use RoundlyConsulting\Sentinel\Definition\CompiledSeal;
 use RoundlyConsulting\Sentinel\Definition\DefinitionRegistry;
 use RoundlyConsulting\Sentinel\Engine\Verifier;
@@ -18,6 +19,7 @@ use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Support\BulkQuery;
 use RoundlyConsulting\Sentinel\Support\SealingScope;
 use RoundlyConsulting\Sentinel\Support\Settings;
+use Throwable;
 
 /**
  * Verify every row of the given models in chunks (soft-deleted rows and rows hidden by
@@ -68,7 +70,7 @@ final readonly class ScanSealsAction
                         $state['rows']++;
 
                         foreach ($seals as $seal) {
-                            $result = $this->verifier->verify($model, $seal, VerificationContext::Command, $options->checkLedger && Settings::checkLedger());
+                            $result = $this->verify($model, $seal, $options->checkLedger && Settings::checkLedger());
                             $state['scanned']++;
                             $counts[$result->status->value] = ($counts[$result->status->value] ?? 0) + 1;
 
@@ -90,6 +92,28 @@ final readonly class ScanSealsAction
         });
 
         return new ScanReport((int) $state['scanned'], self::counts($counts), $findings, (bool) $state['truncated'], Settings::outdatedIsIntact());
+    }
+
+    /**
+     * One row's verdict. Whatever a row holds — an edited seal row, data a computed field's
+     * closure chokes on — is that row's finding (`Unverifiable(error)`, reported like any
+     * other), never the end of the scan that must still find every other row.
+     */
+    private function verify(Model $model, CompiledSeal $seal, bool $checkLedger): VerificationResult
+    {
+        try {
+            return $this->verifier->verify($model, $seal, VerificationContext::Command, $checkLedger);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            $result = new VerificationResult(
+                VerificationStatus::Unverifiable, 'error', $model->getMorphClass(), $model->getKey(), $seal->name,
+                context: VerificationContext::Command, outdatedIsIntact: Settings::outdatedIsIntact(),
+            );
+            $this->verifier->report($result);
+
+            return $result;
+        }
     }
 
     /**

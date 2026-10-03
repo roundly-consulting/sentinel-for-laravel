@@ -143,7 +143,7 @@ final readonly class Verifier
 
         $malformed = match (true) {
             (int) $row->getRawOriginal('format') !== 1 => 'format',
-            $manifest === null => 'manifest',
+            $manifest === null || ! $this->columnsExist($model, $seal, $manifest) => 'manifest',
             $mac === null => 'mac',
             (int) $row->getRawOriginal('version') < 1 => 'version',
             $sealedAt === null => 'sealed_at',
@@ -261,7 +261,10 @@ final readonly class Verifier
                 return $original;
             }
 
-            if ($context === VerificationContext::Retrieve) {
+            // Only a partial select() of the seal's own columns is unverifiable on retrieve; a
+            // column just the stored manifest names (an older definition — or an edited row)
+            // is read, so it can never make a fully loaded row look partially selected.
+            if ($context === VerificationContext::Retrieve && array_diff($seal->columns(), array_keys($original)) !== []) {
                 return null;
             }
         }
@@ -279,6 +282,26 @@ final readonly class Verifier
     private static function fresh(Model $model, VerificationContext $context): bool
     {
         return in_array($context, self::FRESH_CONTEXTS, true) && $model->exists && ! $model->wasRecentlyCreated && $model->getChanges() === [];
+    }
+
+    /**
+     * Every attribute the stored manifest names is a column of the table: the seal's own, or
+     * (an older definition) one the schema still has. A name that is neither was edited in —
+     * it would make the read fail (PostgreSQL/MySQL) or pass for a partial select.
+     *
+     * @param  list<list<string>>  $manifest
+     */
+    private function columnsExist(Model $model, CompiledSeal $seal, array $manifest): bool
+    {
+        $unknown = [];
+
+        foreach ($manifest as [$name]) {
+            if (str_starts_with($name, 'a:') && ! in_array(substr($name, 2), $seal->columns(), true)) {
+                $unknown[] = substr($name, 2);
+            }
+        }
+
+        return $unknown === [] || array_diff($unknown, $model->getConnection()->getSchemaBuilder()->getColumnListing($model->getTable())) === [];
     }
 
     /**
