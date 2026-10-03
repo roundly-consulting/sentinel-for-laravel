@@ -33,7 +33,9 @@ use RoundlyConsulting\Sentinel\Support\Settings;
  * first run is presumed dead). The lease therefore covers the job's longest run: the given
  * `lease`, else the job's own `$timeout` (the worker kills it then), else its queue
  * connection's `retry_after` (Laravel redelivers a job still running after it), never less
- * than `idempotency.lock_seconds` and at most 86 400 seconds.
+ * than `idempotency.lock_seconds` and at most 86 400 seconds. The `sync` queue has no
+ * `retry_after`: there a job without `$timeout` (and no `lease`) holds its key only for
+ * `lock_seconds`, and a duplicate arriving later runs beside a first run still going.
  */
 final readonly class Idempotent
 {

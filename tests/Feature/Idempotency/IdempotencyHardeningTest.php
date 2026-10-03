@@ -245,6 +245,28 @@ it('never runs a duplicate job beside one that outlives lock_seconds (dual-revie
     }, static fn (): object => releasableJob(connection: 'slow')],
 ]);
 
+it('holds a job without $timeout on the sync queue for lock_seconds only, as documented (dual-review O-13)', function (): void {
+    $runs = 0;
+    $first = releasableJob(connection: 'sync');
+    $duplicate = releasableJob(connection: 'sync');
+    $middleware = new Idempotent('stripe:evt_sync', scope: 'webhooks');
+
+    expect(config('queue.connections.sync.retry_after'))->toBeNull();
+
+    $middleware->handle($first, function () use (&$runs, $middleware, $duplicate): void {
+        $runs++;
+        $this->travel(61)->seconds();
+
+        $middleware->handle($duplicate, function () use (&$runs): void {
+            $runs++;
+        });
+    });
+
+    // The documented gap: no timeout and no retry_after leave only the 60 s lock_seconds lease.
+    expect($runs)->toBe(2)
+        ->and($duplicate->released)->toBe([]);
+});
+
 it('holds a run() key for its lease (dual-review O-13)', function (): void {
     $runs = 0;
 
