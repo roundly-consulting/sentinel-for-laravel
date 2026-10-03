@@ -27,7 +27,7 @@ use RoundlyConsulting\Sentinel\Rules\IntactSeal;
  */
 it('reaches the same verdict through every verification path', function (Closure $tamper, VerificationStatus $status): void {
     Event::fake([TamperDetected::class]);
-    $class = definedBy(static fn ($seals) => $seals->seal('parity')->attributes('number', 'amount')->verifyOnRetrieve(Reaction::Event));
+    $class = definedBy(static fn ($seals) => $seals->seal('parity')->attributes('number', 'amount')->verifyOnRetrieve(Reaction::Report));
     $model = $class::query()->create(['number' => 'P-1', 'amount' => '5.00']);
     Route::bind('record', static fn (string $value): Model => $class::query()->findOrFail($value));
     Route::get('/parity/{record}', static fn (): string => 'ok')->middleware([SubstituteBindings::class, 'sentinel.verified:record']);

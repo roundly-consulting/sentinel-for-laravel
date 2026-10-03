@@ -276,7 +276,7 @@ The published `config/sentinel.php` documents every key. All of them:
 | `verification.check_ledger` | bool | `true` | `SENTINEL_VERIFY_LEDGER` | Compare seals with the ledger (detects replayed seals). |
 | `verification.outdated_is_intact` | bool | `true` | `SENTINEL_OUTDATED_IS_INTACT` | A changed definition over intact data counts as intact. |
 | `verification.log_channel` | ?string | `null` | `SENTINEL_LOG_CHANNEL` | Where findings are logged (null = default channel). |
-| `verification.retrieve_reaction` | `throw`\|`event`\|`log` | `throw` | `SENTINEL_RETRIEVE_REACTION` | Default reaction of verify-on-retrieve. |
+| `verification.retrieve_reaction` | `throw`\|`report` | `throw` | `SENTINEL_RETRIEVE_REACTION` | Default reaction of verify-on-retrieve (both report the finding; `throw` also refuses to load the model). |
 | `verification.retrieve_checks_ledger` | bool | `false` | `SENTINEL_RETRIEVE_CHECKS_LEDGER` | Ledger check on retrieve (one more query per model). |
 | `acknowledgement.ability` | ?string | `null` | `SENTINEL_ACKNOWLEDGE_ABILITY` | Gate ability checked before an acknowledgement. |
 | `ledger.enabled` | bool | `true` | `SENTINEL_LEDGER` | Write ledger entries (off loses replay/rollback detection). |
@@ -422,7 +422,7 @@ final class PartyIdentitySeal implements SealDefinition
 | `ring($ring)`, `acceptRings(...$rings)`, `algorithms(...$algorithms)` | Key ring, extra rings accepted during a ring migration, algorithm allow-list. |
 | `strict()` / `lenient()` | A missing seal is a finding (default) / is `Unsealed`. |
 | `auto()` / `manual()` | Seal on Eloquent writes (default) / only explicitly. |
-| `verifyOnRetrieve(?Reaction $reaction)` | Verify every retrieved model: `Throw`, `Event` or `Log`. |
+| `verifyOnRetrieve(?Reaction $reaction)` | Verify every retrieved model: `Throw` (refuse to load it) or `Report`; both fire `TamperDetected` and log. |
 | `fieldTags(bool)` | Store keyed per-field tags so failures name the changed attributes (HMAC keys). |
 | `scope($resolver)` | A tenant (or other) scope bound into the MAC. |
 | `onTamperedWrite(TamperedWritePolicy)` | Per-seal override of `sealing.on_tampered_write`. |

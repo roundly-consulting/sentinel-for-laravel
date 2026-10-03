@@ -44,7 +44,7 @@ it('freezes every enum value', function (string $enum, array $values): void {
     'SignatureRejection' => [SignatureRejection::class, ['missing_signature', 'malformed', 'ambiguous_signature', 'missing_parameter', 'missing_component', 'unsupported_component', 'unsupported_algorithm', 'unknown_key', 'revoked_key', 'algorithm_mismatch', 'algorithm_not_allowed', 'tag_mismatch', 'not_yet_valid', 'too_old', 'expired', 'digest_mismatch', 'unsupported_digest', 'invalid_signature', 'replayed']],
     'KeyDestination' => [KeyDestination::class, ['config', 'database']],
     'VerificationContext' => [VerificationContext::class, ['api', 'middleware', 'retrieve', 'command', 'rule', 'collection', 'write']],
-    'Reaction' => [Reaction::class, ['throw', 'event', 'log']],
+    'Reaction' => [Reaction::class, ['throw', 'report']],
     'TamperedWritePolicy' => [TamperedWritePolicy::class, ['refuse', 'reseal', 'skip']],
     'PersistOperation' => [PersistOperation::class, ['save', 'delete', 'increment']],
     'LedgerFindingKind' => [LedgerFindingKind::class, ['checkpoint_gap', 'checkpoint_invalid', 'checkpoint_mismatch', 'chain_broken', 'anchor_ahead', 'anchor_mismatch', 'anchor_invalid', 'anchor_unreachable', 'entry_invalid', 'orphan_entry', 'entity_deleted', 'seal_rolled_back', 'seal_missing', 'backlog']],

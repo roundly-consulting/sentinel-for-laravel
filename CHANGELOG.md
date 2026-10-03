@@ -65,7 +65,7 @@ Initial public release.
   (baseline adoption) and `sentinel:inspect`.
 - `Sentinel::model(Invoice::class)->scan()`, `reseal()`, `resealWhere()` (bulk
   acknowledgement), `updateAndReseal()` (a verified mass update) and `sealMissing()`.
-- Verify-on-retrieve per seal (`verifyOnRetrieve()`, throw / event / log), the
+- Verify-on-retrieve per seal (`verifyOnRetrieve()`, throw / report — both fire `TamperDetected` and log), the
   `sentinel.verified` route middleware (a generic 409 that reveals nothing), the
   `IntactSeal` validation rule and the `verifySeals()` collection macro.
 - English and Slovak translations (`sentinel::`).

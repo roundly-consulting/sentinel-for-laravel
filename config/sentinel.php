@@ -149,7 +149,8 @@ return [
     |                intact counts as intact (re-seal with sentinel:reseal)
     | log_channel  — where findings are logged (null = the default channel)
     | retrieve_reaction — what seals declared verifyOnRetrieve() do with a
-    |                model that is not intact: throw, event or log
+    |                model that is not intact: throw (refuse to load it) or
+    |                report; both fire TamperDetected and log the finding
     | retrieve_checks_ledger — also run the ledger check on retrieve (one more
     |                query per retrieved model)
     |

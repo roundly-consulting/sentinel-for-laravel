@@ -39,31 +39,31 @@ it('throws when a tampered model is retrieved', function (): void {
     Event::assertDispatched(TamperDetected::class, static fn (TamperDetected $event): bool => $event->context === VerificationContext::Retrieve);
 });
 
-it('only fires an event, or only logs, when asked to', function (): void {
+it('fires TamperDetected and logs every retrieve finding, whatever the reaction (dual-review O-42)', function (): void {
     Event::fake([TamperDetected::class]);
     $log = Log::spy();
     $log->shouldReceive('channel')->andReturn($log);
 
-    $evented = retrieving(Reaction::Event);
-    $logged = retrieving(Reaction::Log);
-    $a = $evented::query()->create(['number' => 'e', 'amount' => '1.00']);
-    $b = $logged::query()->create(['number' => 'l', 'amount' => '1.00']);
+    $reported = retrieving(Reaction::Report);
+    $thrown = retrieving(Reaction::Throw);
+    $a = $reported::query()->create(['number' => 'e', 'amount' => '1.00']);
+    $b = $thrown::query()->create(['number' => 'l', 'amount' => '1.00']);
     DB::table('invoices')->update(['amount' => '9.00']);
 
-    expect($evented::query()->find($a->getKey()))->not->toBeNull();
-    Event::assertDispatchedTimes(TamperDetected::class, 1);
-    $log->shouldNotHaveReceived('warning');
-
-    expect($logged::query()->find($b->getKey()))->not->toBeNull();
+    expect($reported::query()->find($a->getKey()))->not->toBeNull();
     Event::assertDispatchedTimes(TamperDetected::class, 1);
     $log->shouldHaveReceived('warning')->once();
+
+    expect(fn () => $thrown::query()->find($b->getKey()))->toThrow(TamperedModelException::class);
+    Event::assertDispatchedTimes(TamperDetected::class, 2);
+    $log->shouldHaveReceived('warning')->twice();
 });
 
 it('takes the configured reaction when the seal names none', function (): void {
     $class = retrieving();
     $model = $class::query()->create(['number' => 'd', 'amount' => '1.00']);
     DB::table('invoices')->update(['amount' => '9.00']);
-    config()->set('sentinel.verification.retrieve_reaction', 'event');
+    config()->set('sentinel.verification.retrieve_reaction', 'report');
 
     expect($class::query()->find($model->getKey()))->not->toBeNull();
 

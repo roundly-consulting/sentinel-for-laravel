@@ -75,7 +75,7 @@ it('compiles every option of the builder', function (): void {
             ->datetime('created_at')->date('due_on')->json('meta')->binary('note')->plaintext('secret')
             ->computed('total', static fn (Model $m): string => '1', SealType::decimal(2))
             ->ring('default')->acceptRings('archive')->algorithms(Algorithm::HmacSha256, Algorithm::HmacSha256)
-            ->manual()->auto()->manual()->verifyOnRetrieve(Reaction::Log)->fieldTags(false)
+            ->manual()->auto()->manual()->verifyOnRetrieve(Reaction::Report)->fieldTags(false)
             ->scope(static fn (Model $m): string => 'x')->onTamperedWrite(TamperedWritePolicy::Skip)->strict();
     });
 
@@ -91,7 +91,7 @@ it('compiles every option of the builder', function (): void {
         ->and($seal->algorithms)->toBe([Algorithm::HmacSha256])
         ->and($seal->auto)->toBeFalse()
         ->and($seal->verifiesOnRetrieve)->toBeTrue()
-        ->and($seal->retrieveReaction)->toBe(Reaction::Log)
+        ->and($seal->retrieveReaction)->toBe(Reaction::Report)
         ->and($seal->usesFieldTags())->toBeFalse()
         ->and($seal->policy())->toBe(TamperedWritePolicy::Skip)
         ->and($seal->field('c:total')?->isComputed())->toBeTrue()
