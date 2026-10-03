@@ -131,4 +131,12 @@ final class ProfileResolver
     {
         return preg_match('/^[a-z*][a-z0-9_\-.*]{0,63}$/D', $label) === 1;
     }
+
+    /**
+     * A `tag` parameter: 1–255 printable ASCII characters.
+     */
+    public static function isTag(string $tag): bool
+    {
+        return preg_match('/^[\x20-\x7E]{1,255}$/D', $tag) === 1;
+    }
 }

@@ -14,6 +14,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\SigningOptions;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\DigestAlgorithm;
 use RoundlyConsulting\Sentinel\Exceptions\AlgorithmNotAllowedException;
+use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\NoSigningKeyException;
 use RoundlyConsulting\Sentinel\Exceptions\UnknownKeyException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
@@ -141,3 +142,33 @@ it('never drains a non-seekable body it signs (dual-review O-22)', function (arr
     'content-digest not covered (the body is not read)' => [['@method', '@authority', '@path'], false],
     'content-digest covered (the body is buffered)' => [['@method', '@authority', '@path', 'content-digest'], true],
 ]);
+
+it('validates SigningOptions like their configuration counterparts (dual-review O-24 / F-7)', function (SigningOptions $options, string $option): void {
+    partnerRing();
+
+    expect(fn () => Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/e', ['Content-Type' => 'application/json'], '{"a":1}'), 'partner', $options))
+        ->toThrow(InvalidSentinelConfigurationException::class, "SigningOptions::\${$option}");
+})->with([
+    'label Sig1' => [new SigningOptions(label: 'Sig1'), 'label'],
+    'label 100 characters' => [new SigningOptions(label: str_repeat('a', 100)), 'label'],
+    'expiresIn -600' => [new SigningOptions(expiresIn: -600), 'expiresIn'],
+    'expiresIn 0' => [new SigningOptions(expiresIn: 0), 'expiresIn'],
+    'expiresIn ten years' => [new SigningOptions(expiresIn: 315_360_000), 'expiresIn'],
+    'expiresIn PHP_INT_MAX' => [new SigningOptions(expiresIn: PHP_INT_MAX), 'expiresIn'],
+    'tag empty' => [new SigningOptions(tag: ''), 'tag'],
+    'tag 300 characters' => [new SigningOptions(tag: str_repeat('t', 300)), 'tag'],
+    'tag not ASCII' => [new SigningOptions(tag: "caf\u{e9}"), 'tag'],
+    'components empty' => [new SigningOptions(components: []), 'components'],
+    'components empty, tag empty' => [new SigningOptions(components: [], tag: ''), 'components'],
+    'components uppercase' => [new SigningOptions(components: ['@method', 'Content-Type']), 'components'],
+    'components unsupported' => [new SigningOptions(components: ['@request-target']), 'components'],
+    'ring unknown' => [new SigningOptions(ring: 'nowhere'), 'ring'],
+]);
+
+it('refuses an empty outbound component list in the configuration too (dual-review O-24)', function (): void {
+    partnerRing();
+    config()->set('sentinel.signatures.outbound.components', []);
+
+    expect(fn () => Sentinel::signatures()->sign(new PsrRequest('GET', 'https://api.example.com/e'), 'partner'))
+        ->toThrow(InvalidSentinelConfigurationException::class, 'signatures.outbound.components');
+});

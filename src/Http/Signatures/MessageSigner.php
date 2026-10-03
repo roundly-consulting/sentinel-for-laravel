@@ -9,6 +9,7 @@ use Psr\Http\Message\RequestInterface;
 use RoundlyConsulting\Crypto\Random\Csprng;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SigningOptions;
 use RoundlyConsulting\Sentinel\Exceptions\AlgorithmNotAllowedException;
+use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\NoSigningKeyException;
 use RoundlyConsulting\Sentinel\Exceptions\UnknownKeyException;
 use RoundlyConsulting\Sentinel\Http\Messages\PsrRequestView;
@@ -42,7 +43,11 @@ final readonly class MessageSigner
 
     public function sign(RequestInterface $request, string $keyId, SigningOptions $options): RequestInterface
     {
-        $ring = $options->ring ?? Settings::outboundRing();
+        $ring = self::ring($options);
+        $requested = self::components($options);
+        $expiresIn = self::expiresIn($options);
+        $tag = self::tag($options);
+        $label = self::label($options);
         $key = $this->keys->find($ring, $keyId) ?? throw UnknownKeyException::inRing($ring, $keyId);
 
         if (! $key->canSign()) {
@@ -55,7 +60,6 @@ final readonly class MessageSigner
         }
 
         $view = new PsrRequestView($request);
-        $requested = $options->components ?? Settings::outboundComponents();
         // The body is read only for a digest — and a stream that cannot rewind is buffered
         // first, so the request never goes out with the body signing consumed.
         [$request, $body] = in_array('content-digest', $requested, true) ? self::buffered($request) : [$request, ''];
@@ -79,8 +83,6 @@ final readonly class MessageSigner
         }
 
         $created = Clock::now()->getTimestamp();
-        $expiresIn = $options->expiresIn ?? Settings::outboundExpiresIn();
-        $tag = $options->tag ?? Settings::outboundTag();
         $values = ['created' => $created];
 
         if ($expiresIn !== null) {
@@ -103,7 +105,6 @@ final readonly class MessageSigner
 
         $input = new InnerList($components, new Parameters($values));
         $signature = $this->signers->sign($key, Purpose::Http, SignatureBase::build(new PsrRequestView($request), $input));
-        $label = $options->label ?? Settings::outboundLabel();
 
         $inputs = $request->hasHeader('Signature-Input') ? Parser::dictionary(array_values($request->getHeader('Signature-Input'))) : [];
         $signatures = $request->hasHeader('Signature') ? Parser::dictionary(array_values($request->getHeader('Signature'))) : [];
@@ -113,6 +114,65 @@ final readonly class MessageSigner
         return $request
             ->withHeader('Signature-Input', Serializer::dictionary($inputs))
             ->withHeader('Signature', Serializer::dictionary($signatures));
+    }
+
+    /*
+     * Each option is checked like its `signatures.outbound.*` counterpart — a null falls back
+     * to the configuration — so a mistake fails here, never as a dead or empty signature.
+     */
+
+    private static function ring(SigningOptions $options): string
+    {
+        if ($options->ring === null) {
+            return Settings::outboundRing();
+        }
+
+        return in_array($options->ring, Settings::rings(), true) ? $options->ring : throw InvalidSentinelConfigurationException::invalidSigningOption('ring', 'must name a configured key ring');
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function components(SigningOptions $options): array
+    {
+        if ($options->components === null) {
+            return Settings::outboundComponents();
+        }
+
+        try {
+            $components = ProfileResolver::components('signatures.outbound.components', $options->components);
+        } catch (InvalidSentinelConfigurationException) {
+            $components = [];
+        }
+
+        return $components !== [] ? $components : throw InvalidSentinelConfigurationException::invalidSigningOption('components', 'must be a non-empty list of lowercase, supported component names');
+    }
+
+    private static function expiresIn(SigningOptions $options): ?int
+    {
+        if ($options->expiresIn === null) {
+            return Settings::outboundExpiresIn();
+        }
+
+        return $options->expiresIn >= 1 && $options->expiresIn <= 86400 ? $options->expiresIn : throw InvalidSentinelConfigurationException::invalidSigningOption('expiresIn', 'must be between 1 and 86400 seconds');
+    }
+
+    private static function tag(SigningOptions $options): ?string
+    {
+        if ($options->tag === null) {
+            return Settings::outboundTag();
+        }
+
+        return ProfileResolver::isTag($options->tag) ? $options->tag : throw InvalidSentinelConfigurationException::invalidSigningOption('tag', 'must be 1–255 printable ASCII characters');
+    }
+
+    private static function label(SigningOptions $options): string
+    {
+        if ($options->label === null) {
+            return Settings::outboundLabel();
+        }
+
+        return ProfileResolver::isLabel($options->label) ? $options->label : throw InvalidSentinelConfigurationException::invalidSigningOption('label', 'must be a signature label ([a-z*][a-z0-9_-.*], at most 64 characters)');
     }
 
     /**

@@ -877,7 +877,9 @@ request: it adds `Content-Digest` when the body is not empty and `content-digest
 component, drops `@query` without a query and headers the request does not carry, and sets
 `created`, `keyid` and a fresh `nonce` (plus `expires`, `tag` and `alg` when configured). Every
 `SigningOptions` field left null falls back to
-`sentinel.signatures.outbound.*`:
+`sentinel.signatures.outbound.*`; a set one is checked like its configuration counterpart
+(`InvalidSentinelConfigurationException` — e.g. an empty component list, an `expiresIn`
+outside 1–86 400 seconds, an empty tag):
 
 | Option | Default | Effect |
 |---|---|---|

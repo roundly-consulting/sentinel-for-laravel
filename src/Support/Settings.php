@@ -667,7 +667,7 @@ final class Settings
     {
         $label = config('sentinel.signatures.outbound.label') ?? 'sig1';
 
-        if (! is_string($label) || preg_match('/^[a-z*][a-z0-9_\-.*]{0,63}$/D', $label) !== 1) {
+        if (! is_string($label) || ! ProfileResolver::isLabel($label)) {
             throw InvalidSentinelConfigurationException::invalidValue('signatures.outbound.label', 'must be a signature label ([a-z*][a-z0-9_-.*]*)');
         }
 
@@ -679,7 +679,10 @@ final class Settings
      */
     public static function outboundComponents(): array
     {
-        return ProfileResolver::components('signatures.outbound.components', config('sentinel.signatures.outbound.components') ?? []);
+        $components = ProfileResolver::components('signatures.outbound.components', config('sentinel.signatures.outbound.components') ?? []);
+
+        // A signature that covers nothing authenticates no part of the request.
+        return $components !== [] ? $components : throw InvalidSentinelConfigurationException::invalidValue('signatures.outbound.components', 'must name at least one component');
     }
 
     public static function outboundDigest(): DigestAlgorithm
@@ -698,7 +701,7 @@ final class Settings
     {
         $tag = config('sentinel.signatures.outbound.tag');
 
-        if ($tag !== null && (! is_string($tag) || preg_match('/^[\x20-\x7E]{1,255}$/D', $tag) !== 1)) {
+        if ($tag !== null && (! is_string($tag) || ! ProfileResolver::isTag($tag))) {
             throw InvalidSentinelConfigurationException::invalidValue('signatures.outbound.tag', 'must be a printable ASCII string or null');
         }
 
