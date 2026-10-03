@@ -27,8 +27,9 @@ return [
     |
     | The id type of sealed models (`key_type`) and of actors, key owners and
     | nonce subjects (`actor_key_type`) in Sentinel's tables: bigint, uuid or
-    | ulid. A fleet mixing key types picks the widest. Set both before running
-    | the published migrations.
+    | ulid. A fleet mixing integer and UUID keys picks uuid on MySQL and SQLite;
+    | on PostgreSQL (a native uuid column) publish the migrations and make the
+    | ids string(36) instead. Set both before running the published migrations.
     |
     */
 
