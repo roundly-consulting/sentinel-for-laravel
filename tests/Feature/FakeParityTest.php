@@ -259,6 +259,20 @@ it('behaves exactly like the real manager', function (Closure $scenario): void {
             Sentinel::seal($second, 'financial')->event->value, $run->state($second),
         ];
     }],
+    'listeners that save the model again inside its write (dual-review O-7)' => [static function (ParityRun $run): array {
+        Invoice::created(static function (Invoice $invoice): void {
+            $invoice->forceFill(['number' => 'INV-'.$invoice->getKey()])->saveQuietly();
+        });
+        Invoice::updated(static function (Invoice $invoice): void {
+            if ($invoice->wasChanged('note')) {
+                Invoice::query()->findOrFail($invoice->getKey())->forceFill(['number' => 'N-'.$invoice->getKey()])->save();
+            }
+        });
+        $invoice = invoice();
+        $invoice->update(['note' => 'changed']);
+
+        return [$run->state($invoice), DB::table('invoices')->where('id', $invoice->id)->value('number') === 'N-'.$invoice->id];
+    }],
     'a listener cancels the save' => [static function (ParityRun $run): array {
         $invoice = invoice();
         $cancel = true;

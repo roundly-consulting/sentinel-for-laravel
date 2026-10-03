@@ -25,6 +25,9 @@ final class SealingScope
     /** @var WeakMap<Model, int> */
     private WeakMap $writing;
 
+    /** @var list<PersistFrame> */
+    private array $persisting = [];
+
     public function __construct()
     {
         $this->writing = new WeakMap;
@@ -59,6 +62,49 @@ final class SealingScope
     public function isWriting(Model $model): bool
     {
         return isset($this->writing[$model]);
+    }
+
+    /**
+     * Run a sealed persist of the model, so a write of the same row from inside it (a model
+     * listener saving it again) can join it instead of sealing on its own. The callback gets
+     * whether such a write happened, by reference — read it after the host's write.
+     *
+     * @template T
+     *
+     * @param  Closure(bool): T  $callback
+     * @return T
+     */
+    public function persisting(Model $model, Closure $callback): mixed
+    {
+        $frame = new PersistFrame($model);
+        $this->persisting[] = $frame;
+
+        try {
+            return $callback($frame->nested);
+        } finally {
+            array_pop($this->persisting);
+        }
+    }
+
+    /**
+     * Whether a persist of the same row is in flight; if so, it is told it must re-seal. Only
+     * rows that exist on both sides match — two new models of one class are not the same row.
+     */
+    public function joinPersist(Model $model): bool
+    {
+        if (! $model->exists || $model->getKey() === null) {
+            return false;
+        }
+
+        foreach ($this->persisting as $frame) {
+            if ($frame->matches($model)) {
+                $frame->nested = true;
+
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

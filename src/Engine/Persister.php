@@ -54,9 +54,15 @@ final readonly class Persister
             return $write();
         }
 
+        // A listener saving the same row again inside its write (`created` → `saveQuietly()`):
+        // the outer write holds the lock and verified the row; it re-seals once at its end.
+        if (! $delete && $this->scope->joinPersist($model)) {
+            return $write();
+        }
+
         $existing = $model->exists;
 
-        return $model->getConnection()->transaction(function () use ($model, $write, $operation, $seals, $existing): mixed {
+        return $model->getConnection()->transaction(fn (): mixed => $this->scope->persisting($model, function (bool &$nested) use ($model, $write, $operation, $seals, $existing, $delete): mixed {
             $previous = [];
             $skip = [];
 
@@ -64,7 +70,7 @@ final readonly class Persister
                 // Lock order: the model row first, then its seal rows (in the verifier).
                 $this->readBack->row($model, [], lock: true);
 
-                foreach ($operation === PersistOperation::Delete ? $seals->all() : $seals->auto() as $seal) {
+                foreach ($delete ? $seals->all() : $seals->auto() as $seal) {
                     $this->precheck($model, $seal, $operation, $previous, $skip);
                 }
             }
@@ -76,13 +82,13 @@ final readonly class Persister
             }
 
             match (true) {
-                $operation === PersistOperation::Delete => $this->afterDelete($model, $seals, $previous, $skip),
+                $delete => $this->afterDelete($model, $seals, $previous, $skip, $nested),
                 ! $existing => $this->afterCreate($model, $seals),
-                default => $this->afterUpdate($model, $seals, $previous, $skip),
+                default => $this->afterUpdate($model, $seals, $previous, $skip, $nested),
             };
 
             return $result;
-        });
+        }));
     }
 
     /**
@@ -133,14 +139,15 @@ final readonly class Persister
      * @param  array<string, VerificationStatus|true>  $previous
      * @param  array<string, true>  $skip
      */
-    private function afterUpdate(Model $model, CompiledSeals $seals, array $previous, array $skip): void
+    private function afterUpdate(Model $model, CompiledSeals $seals, array $previous, array $skip, bool $nested): void
     {
         foreach ($seals->auto() as $seal) {
             if (isset($skip[$seal->name])) {
                 continue;
             }
 
-            if ($seal->hasComputed() || isset($previous[$seal->name]) || $model->wasChanged($seal->columns())) {
+            // A nested write may have changed sealed columns this instance never saw.
+            if ($nested || $seal->hasComputed() || isset($previous[$seal->name]) || $model->wasChanged($seal->columns())) {
                 $status = $previous[$seal->name] ?? null;
 
                 $this->sealer->seal($model, $seal, SealEvent::Resealed, previousStatus: $status instanceof VerificationStatus ? $status : null);
@@ -180,7 +187,7 @@ final readonly class Persister
      * @param  array<string, VerificationStatus|true>  $previous
      * @param  array<string, true>  $skip
      */
-    private function afterDelete(Model $model, CompiledSeals $seals, array $previous, array $skip): void
+    private function afterDelete(Model $model, CompiledSeals $seals, array $previous, array $skip, bool $nested): void
     {
         $softDeleted = in_array(SoftDeletes::class, class_uses_recursive($model), true)
             && ! (method_exists($model, 'isForceDeleting') && $model->isForceDeleting());
@@ -201,7 +208,7 @@ final readonly class Persister
         ]);
 
         foreach ($seals->auto() as $seal) {
-            if (! isset($skip[$seal->name]) && (array_intersect($touched, $seal->columns()) !== [] || $seal->hasComputed())) {
+            if (! isset($skip[$seal->name]) && ($nested || array_intersect($touched, $seal->columns()) !== [] || $seal->hasComputed())) {
                 $status = $previous[$seal->name] ?? null;
                 $this->sealer->seal($model, $seal, SealEvent::Resealed, previousStatus: $status instanceof VerificationStatus && $status !== VerificationStatus::Intact ? $status : null);
             }

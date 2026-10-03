@@ -65,6 +65,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerifiedSignature;
 use RoundlyConsulting\Sentinel\Definition\CompiledSeal;
+use RoundlyConsulting\Sentinel\Definition\CompiledSeals;
 use RoundlyConsulting\Sentinel\Definition\DefinitionRegistry;
 use RoundlyConsulting\Sentinel\Engine\Persister;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
@@ -360,11 +361,22 @@ final class SentinelFake extends SentinelManager
     public function persist(Model $model, Closure $write, PersistOperation $operation): mixed
     {
         $seals = $this->container->make(DefinitionRegistry::class)->for($model);
+        $scope = $this->container->make(SealingScope::class);
 
-        if (! Settings::autoSeal() || $seals->auto() === [] || $this->container->make(SealingScope::class)->sealingSuspended()) {
+        if (! Settings::autoSeal() || $seals->auto() === [] || $scope->sealingSuspended()) {
             return $write();
         }
 
+        // As in production: a write of the same row from inside this one joins it.
+        if ($operation !== PersistOperation::Delete && $scope->joinPersist($model)) {
+            return $write();
+        }
+
+        return $scope->persisting($model, fn (bool &$nested): mixed => $this->persistFaked($model, $write, $operation, $seals, $nested));
+    }
+
+    private function persistFaked(Model $model, Closure $write, PersistOperation $operation, CompiledSeals $seals, bool &$nested): mixed
+    {
         $existing = $model->exists;
         $skip = [];
         $previous = [];
@@ -394,7 +406,7 @@ final class SentinelFake extends SentinelManager
         foreach ($seals->auto() as $seal) {
             if (! $existing) {
                 $this->recordSeal($model, $seal, SealEvent::Sealed);
-            } elseif (! isset($skip[$seal->name]) && ($seal->hasComputed() || isset($previous[$seal->name]) || $model->wasChanged($seal->columns()))) {
+            } elseif (! isset($skip[$seal->name]) && ($nested || $seal->hasComputed() || isset($previous[$seal->name]) || $model->wasChanged($seal->columns()))) {
                 $this->recordSeal($model, $seal, SealEvent::Resealed);
             }
         }
