@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Stringable;
 use RoundlyConsulting\Sentinel\Canonical\FieldValue;
+use RoundlyConsulting\Sentinel\Canonical\JcsNumber;
 use RoundlyConsulting\Sentinel\Canonical\Normalizer;
 use RoundlyConsulting\Sentinel\Definition\SealType;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
@@ -237,4 +238,13 @@ it('names the field and reason, never the value, when it refuses', function (): 
             ->and($exception->reason())->toBe('not_representable')
             ->and($exception->field())->toBe('a:secret_amount');
     }
+});
+
+it('writes a float decimal positionally, never with an exponent, as the spec says (dual-review O-41)', function (): void {
+    // canonical-format-v1.md: shortest round-trip digits, positional (JcsNumber::plain()) — an
+    // independent verifier using the ECMAScript form (1e-7) would mismatch.
+    expect(JcsNumber::plain(1.0E-7))->toBe('0.0000001')
+        ->and(canonical(SealType::decimal(7), 1.0E-7))->toBe(['a:col', 'dec:7', '0.0000001'])
+        ->and(canonical(SealType::decimal(2), 12345678.5))->toBe(['a:col', 'dec:2', '12345678.50'])
+        ->and(method_exists(JcsNumber::class, 'shortest'))->toBeFalse();
 });
