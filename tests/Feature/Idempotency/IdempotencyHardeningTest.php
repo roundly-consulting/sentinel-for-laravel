@@ -82,3 +82,50 @@ it('still replays its own plaintext and encrypted responses when encryption is o
         ->and($vault->open($encrypted, $request, 'cache'))->toBeNull()
         ->and($vault->open('not json', $request, 'database'))->toBeNull();
 });
+
+it('stores and replays a response whose replayed header is not UTF-8 (dual-review O-12)', function (): void {
+    config()->set('app.debug', false);
+    $runs = 0;
+    $etag = '"'.hash('sha256', 'file', true).'"';
+    Route::post('/files', static function () use (&$runs, $etag) {
+        $runs++;
+
+        return response()->json(['stored' => $runs], 201)->header('ETag', $etag);
+    })->middleware('sentinel.idempotent');
+    $user = User::query()->create(['name' => 'u']);
+
+    $first = $this->actingAs($user)->postJson('/files', [], ['Idempotency-Key' => '"file-key-0000000000001"']);
+    $this->travel(61)->seconds();
+    $retry = $this->actingAs($user)->postJson('/files', [], ['Idempotency-Key' => '"file-key-0000000000001"']);
+
+    expect($first->getStatusCode())->toBe(201)
+        ->and(IdempotencyKey::query()->value('status'))->toBe('completed')
+        ->and($retry->getStatusCode())->toBe(201)
+        ->and($retry->headers->get('Idempotent-Replayed'))->toBe('true')
+        ->and($retry->headers->get('ETag'))->toBe($etag)
+        ->and($runs)->toBe(1);
+});
+
+it('completes the key as unreplayable when the response cannot be stored after the handler ran (dual-review O-12)', function (): void {
+    config()->set('app.debug', false);
+    $runs = 0;
+    Route::post('/charges', static function () use (&$runs) {
+        $runs++;
+        // The response cannot be encrypted at rest: the handler has run all the same.
+        config()->set('app.key', '');
+
+        return response()->json(['charged' => true], 201);
+    })->middleware('sentinel.idempotent');
+    $user = User::query()->create(['name' => 'u']);
+    $key = config('app.key');
+
+    $first = $this->actingAs($user)->postJson('/charges', [], ['Idempotency-Key' => '"charge-key-0000000000001"']);
+    config()->set('app.key', $key);
+    $retry = $this->actingAs($user)->postJson('/charges', [], ['Idempotency-Key' => '"charge-key-0000000000001"']);
+
+    expect($first->getStatusCode())->toBe(201)
+        ->and(IdempotencyKey::query()->value('status'))->toBe('completed')
+        ->and(IdempotencyKey::query()->value('replayable'))->toBeFalsy()
+        ->and($retry->getStatusCode())->toBe(409)
+        ->and($runs)->toBe(1);
+});

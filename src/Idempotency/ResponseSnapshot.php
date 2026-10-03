@@ -66,9 +66,9 @@ final readonly class ResponseSnapshot
     /**
      * A completed call whose result could not be stored: its key answers 409 unavailable.
      */
-    public static function unreplayable(): self
+    public static function unreplayable(int $status = 200): self
     {
-        return new self(200, [], '', false);
+        return new self($status, [], '', false);
     }
 
     public function value(): mixed
@@ -91,11 +91,15 @@ final readonly class ResponseSnapshot
     public function toJson(): string
     {
         $utf8 = mb_check_encoding($this->body, 'UTF-8');
+        // A header value may be raw bytes (a binary ETag, a redirect to a user's path): store
+        // every value base64 then, so storing never fails after the handler ran.
+        $textHeaders = array_all($this->headers, static fn (array $values): bool => array_all($values, static fn (string $value): bool => mb_check_encoding($value, 'UTF-8')));
 
         return json_encode([
             'v' => 1,
             'status' => $this->status,
-            'headers' => $this->headers,
+            'headers' => $textHeaders ? $this->headers : array_map(static fn (array $values): array => array_map(Base64::encode(...), $values), $this->headers),
+            'header_encoding' => $textHeaders ? 'utf8' : 'base64',
             'encoding' => $utf8 ? 'utf8' : 'base64',
             'body' => $utf8 ? $this->body : Base64::encode($this->body),
         ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
@@ -117,16 +121,18 @@ final readonly class ResponseSnapshot
         }
 
         $headers = [];
-
-        foreach ($data['headers'] as $name => $values) {
-            if (! is_array($values)) {
-                throw CorruptRecordException::idempotency('the stored response is malformed');
-            }
-
-            $headers[(string) $name] = array_values(array_map(strval(...), array_filter($values, is_scalar(...))));
-        }
+        $base64Headers = ($data['header_encoding'] ?? 'utf8') === 'base64';
 
         try {
+            foreach ($data['headers'] as $name => $values) {
+                if (! is_array($values)) {
+                    throw CorruptRecordException::idempotency('the stored response is malformed');
+                }
+
+                $values = array_values(array_map(strval(...), array_filter($values, is_scalar(...))));
+                $headers[(string) $name] = $base64Headers ? array_map(Base64::decode(...), $values) : $values;
+            }
+
             $body = ($data['encoding'] ?? 'utf8') === 'base64' ? Base64::decode($data['body']) : $data['body'];
         } catch (InvalidEncodingException) {
             throw CorruptRecordException::idempotency('the stored response is malformed');

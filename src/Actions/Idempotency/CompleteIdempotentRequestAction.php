@@ -9,6 +9,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentRequest;
 use RoundlyConsulting\Sentinel\Idempotency\ResponseSnapshot;
 use RoundlyConsulting\Sentinel\Support\Settings;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 /**
  * Store the response of an owned idempotent request for replays (allow-listed headers only,
@@ -23,6 +24,21 @@ final readonly class CompleteIdempotentRequestAction
 
     public function execute(IdempotentRequest $request, Response $response): bool
     {
-        return $this->store->complete($request, ResponseSnapshot::fromResponse($response, Settings::replayedHeaders(), Settings::maxResponseBytes()));
+        $snapshot = ResponseSnapshot::fromResponse($response, Settings::replayedHeaders(), Settings::maxResponseBytes());
+
+        try {
+            return $this->store->complete($request, $snapshot);
+        } catch (Throwable $exception) {
+            if (! $snapshot->replayable) {
+                throw $exception;
+            }
+
+            // The handler ran — its side effects happened — but its response cannot be
+            // stored: complete the key as unreplayable, so a retry is refused (409) instead
+            // of running the handler again once the lease is over.
+            report($exception);
+
+            return $this->store->complete($request, ResponseSnapshot::unreplayable($snapshot->status));
+        }
     }
 }
