@@ -218,7 +218,7 @@ each other.
 | 15 | Database-driver key rows: restore an older envelope (un-revoke a key) | no (an authentic old ciphertext) — mitigation: list the kid in `SENTINEL_REVOKED_KEYS`, which always wins | no | — |
 | 16 | Changes made **and** rolled back entirely inside the window | no | no | — (shorten the checkpoint interval) |
 | 17 | Replay a signed HTTP request | yes (`created`/`expires` window + nonce de-duplication) | — | `replayed`, `too_old`, `expired` |
-| 18 | Alter the body/headers of a signed request | yes (`content-digest` + signature) | — | `digest_mismatch`, `invalid_signature` |
+| 18 | Alter the body/headers of a signed request, or add a method override | yes (`content-digest` + signature; the executed method must be the signed one) | — | `digest_mismatch`, `invalid_signature`, `malformed` |
 | 19 | Duplicate a POST (retry storm, double click) | yes (replay / 409) | — | idempotency |
 | 20 | Reuse an idempotency key with another payload | yes (422) | — | idempotency |
 | 21 | Reuse a single-use URL | yes (atomic consume) | — | 403 |

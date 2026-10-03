@@ -29,6 +29,18 @@ final readonly class SymfonyRequestView implements MessageView
         return is_string($method) && $method !== '' ? $method : $this->request->getMethod();
     }
 
+    /**
+     * Symfony routes on getMethod(), which honours `X-HTTP-Method-Override` on every POST (and
+     * `_method` when the parameter override is enabled, as Laravel does): `@method` covers the
+     * wire method, so any difference means the signature does not cover what runs.
+     */
+    public function methodOverridden(): bool
+    {
+        $wire = $this->request->server->get('REQUEST_METHOD');
+
+        return is_string($wire) && $wire !== '' && strtoupper($wire) !== $this->request->getMethod();
+    }
+
     public function scheme(): string
     {
         return strtolower($this->request->getScheme());

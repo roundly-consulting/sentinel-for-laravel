@@ -17,6 +17,12 @@ interface MessageView
     /** The method as received. */
     public function method(): ?string;
 
+    /**
+     * Whether the application executes another method than the one received (Symfony's
+     * `X-HTTP-Method-Override` / `_method` override) — never for an outgoing message.
+     */
+    public function methodOverridden(): bool;
+
     /** Lowercase scheme. */
     public function scheme(): ?string;
 

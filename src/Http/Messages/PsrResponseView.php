@@ -25,6 +25,11 @@ final readonly class PsrResponseView implements MessageView
         return null;
     }
 
+    public function methodOverridden(): bool
+    {
+        return false;
+    }
+
     public function scheme(): ?string
     {
         return null;

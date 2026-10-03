@@ -27,6 +27,11 @@ final readonly class PsrRequestView implements MessageView
         return $this->request->getMethod();
     }
 
+    public function methodOverridden(): bool
+    {
+        return false;
+    }
+
     public function scheme(): string
     {
         return strtolower($this->request->getUri()->getScheme());

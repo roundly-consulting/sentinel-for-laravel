@@ -157,6 +157,12 @@ final readonly class SignatureVerifier
      */
     private function coverage(MessageView $message, SignatureProfile $profile, array $components, string $keyId): void
     {
+        // The signed `@method` must be the method that runs: a method override (an uncovered
+        // header or form field) would execute a signed POST as a DELETE.
+        if ($message->methodOverridden()) {
+            throw HttpSignatureException::rejected(SignatureRejection::Malformed, $keyId);
+        }
+
         $required = $message->isRequest()
             ? $profile->components
             : [...array_values(array_diff($profile->components, ComponentResolver::REQUEST_DERIVED)), '@status'];
