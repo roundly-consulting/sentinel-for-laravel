@@ -7,12 +7,13 @@ namespace RoundlyConsulting\Sentinel\Testing;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use RoundlyConsulting\Sentinel\Contracts\NonceStore;
+use RoundlyConsulting\Sentinel\Support\CountsExpired;
 
 /**
  * The fake's nonce store: the real rules (purpose, subject, expiry, use once, remember until)
  * over a PHP array.
  */
-final class InMemoryNonceStore implements NonceStore
+final class InMemoryNonceStore implements CountsExpired, NonceStore
 {
     /** @var array<string, array{subject: string|null, expires: CarbonImmutable, consumed: bool}> */
     private array $issued = [];
@@ -49,6 +50,12 @@ final class InMemoryNonceStore implements NonceStore
         $this->seen["{$purpose}\0{$digest}"] = $until;
 
         return true;
+    }
+
+    public function countExpired(CarbonImmutable $now): int
+    {
+        return count(array_filter($this->issued, static fn (array $nonce): bool => $nonce['expires']->lte($now)))
+            + count(array_filter($this->seen, static fn (CarbonImmutable $until): bool => $until->lte($now)));
     }
 
     public function prune(CarbonImmutable $now): int

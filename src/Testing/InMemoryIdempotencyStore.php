@@ -13,12 +13,13 @@ use RoundlyConsulting\Sentinel\Idempotency\IdempotencyRecord;
 use RoundlyConsulting\Sentinel\Idempotency\ResponseSnapshot;
 use RoundlyConsulting\Sentinel\Idempotency\StateMachine;
 use RoundlyConsulting\Sentinel\Support\Clock;
+use RoundlyConsulting\Sentinel\Support\CountsExpired;
 
 /**
  * The fake's idempotency store: the real decision table (replay, 409, 422, take-over after the
  * lease) over a PHP array. One per fake instance, so nothing leaks between tests.
  */
-final class InMemoryIdempotencyStore implements IdempotencyStore
+final class InMemoryIdempotencyStore implements CountsExpired, IdempotencyStore
 {
     /** @var array<string, IdempotencyRecord> */
     private array $records = [];
@@ -68,6 +69,11 @@ final class InMemoryIdempotencyStore implements IdempotencyStore
         unset($this->records[$keyDigest], $this->responses[$keyDigest]);
 
         return $existed;
+    }
+
+    public function countExpired(CarbonImmutable $now): int
+    {
+        return count(array_filter($this->records, static fn (IdempotencyRecord $record): bool => $record->expired($now)));
     }
 
     public function prune(CarbonImmutable $now): int

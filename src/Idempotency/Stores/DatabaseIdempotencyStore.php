@@ -20,6 +20,7 @@ use RoundlyConsulting\Sentinel\Idempotency\ResponseVault;
 use RoundlyConsulting\Sentinel\Idempotency\StateMachine;
 use RoundlyConsulting\Sentinel\Models\IdempotencyKey;
 use RoundlyConsulting\Sentinel\Support\Clock;
+use RoundlyConsulting\Sentinel\Support\CountsExpired;
 use RoundlyConsulting\Sentinel\Support\Settings;
 
 /**
@@ -30,7 +31,7 @@ use RoundlyConsulting\Sentinel\Support\Settings;
  *
  * @internal
  */
-final readonly class DatabaseIdempotencyStore implements IdempotencyStore
+final readonly class DatabaseIdempotencyStore implements CountsExpired, IdempotencyStore
 {
     /** The store a stored response is bound to. */
     private const string NAME = 'database';

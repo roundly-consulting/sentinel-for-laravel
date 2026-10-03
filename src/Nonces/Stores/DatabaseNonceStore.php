@@ -12,6 +12,7 @@ use RoundlyConsulting\Sentinel\Enums\NonceKind;
 use RoundlyConsulting\Sentinel\Exceptions\CorruptRecordException;
 use RoundlyConsulting\Sentinel\Models\Nonce;
 use RoundlyConsulting\Sentinel\Support\Clock;
+use RoundlyConsulting\Sentinel\Support\CountsExpired;
 
 /**
  * Nonce digests in `sentinel_nonces` (plan §9.9). Consuming is ONE conditional UPDATE —
@@ -22,7 +23,7 @@ use RoundlyConsulting\Sentinel\Support\Clock;
  *
  * @internal
  */
-final class DatabaseNonceStore implements NonceStore
+final class DatabaseNonceStore implements CountsExpired, NonceStore
 {
     public function issue(string $purpose, string $digest, CarbonImmutable $expiresAt, ?Model $subject): void
     {

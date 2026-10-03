@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
+use RoundlyConsulting\Sentinel\DataTransferObjects\PruneOptions;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\LedgerFindingKind;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
@@ -272,6 +273,17 @@ it('behaves exactly like the real manager', function (Closure $scenario): void {
         $invoice->update(['note' => 'changed']);
 
         return [$run->state($invoice), DB::table('invoices')->where('id', $invoice->id)->value('number') === 'N-'.$invoice->id];
+    }],
+    'a dry-run prune counts expired keys and nonces (dual-review O-29)' => [static function (): array {
+        Sentinel::nonces()->issue('password-reset', ttl: 60);
+        Sentinel::idempotency()->run('k-1', 'jobs', static fn (): int => 1, ttl: 60);
+        Sentinel::idempotency()->run('k-2', 'jobs', static fn (): int => 2, ttl: 3600);
+        test()->travel(120)->seconds();
+        $dry = Sentinel::prune(new PruneOptions(dryRun: true));
+        $real = Sentinel::prune(new PruneOptions);
+        test()->travelBack();
+
+        return [$dry->idempotencyKeys, $dry->nonces, $real->idempotencyKeys, $real->nonces];
     }],
     'a listener cancels the save' => [static function (ParityRun $run): array {
         $invoice = invoice();

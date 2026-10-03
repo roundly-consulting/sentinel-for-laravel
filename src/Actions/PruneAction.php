@@ -8,13 +8,13 @@ use RoundlyConsulting\Sentinel\Contracts\IdempotencyStore;
 use RoundlyConsulting\Sentinel\Contracts\NonceStore;
 use RoundlyConsulting\Sentinel\DataTransferObjects\PruneOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\PruneResult;
-use RoundlyConsulting\Sentinel\Idempotency\Stores\DatabaseIdempotencyStore;
-use RoundlyConsulting\Sentinel\Nonces\Stores\DatabaseNonceStore;
 use RoundlyConsulting\Sentinel\Support\Clock;
+use RoundlyConsulting\Sentinel\Support\CountsExpired;
 
 /**
  * Delete expired idempotency keys and nonces (`sentinel:prune`). Cache stores expire on their
- * own and report 0; a dry run counts what the database stores would delete. The ledger is
+ * own and report 0; a dry run counts what a store that can preview it (the database stores,
+ * the fake's in-memory ones) would delete. The ledger is
  * never pruned.
  */
 final readonly class PruneAction
@@ -30,13 +30,13 @@ final readonly class PruneAction
 
         $keys = ! $options->idempotency ? 0 : match (true) {
             ! $options->dryRun => $this->idempotency->prune($now),
-            $this->idempotency instanceof DatabaseIdempotencyStore => $this->idempotency->countExpired($now),
+            $this->idempotency instanceof CountsExpired => $this->idempotency->countExpired($now),
             default => 0,
         };
 
         $nonces = ! $options->nonces ? 0 : match (true) {
             ! $options->dryRun => $this->nonces->prune($now),
-            $this->nonces instanceof DatabaseNonceStore => $this->nonces->countExpired($now),
+            $this->nonces instanceof CountsExpired => $this->nonces->countExpired($now),
             default => 0,
         };
 
