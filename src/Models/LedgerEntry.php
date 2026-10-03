@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Sentinel\Models;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -77,10 +78,20 @@ final class LedgerEntry extends Model
         return $this->belongsTo(Checkpoint::class);
     }
 
-    protected static function booted(): void
+    /**
+     * Append-only, enforced where every Eloquent update and delete runs — model events muted
+     * (updateQuietly(), deleteQuietly(), withoutEvents()) or not. Inserts stay allowed.
+     *
+     * @param  Builder<static>  $query
+     */
+    protected function performUpdate(Builder $query): never
     {
-        self::updating(static fn (self $entry): never => throw LedgerIsAppendOnlyException::update($entry->getTable()));
-        self::deleting(static fn (self $entry): never => throw LedgerIsAppendOnlyException::delete($entry->getTable()));
+        throw LedgerIsAppendOnlyException::update($this->getTable());
+    }
+
+    protected function performDeleteOnModel(): never
+    {
+        throw LedgerIsAppendOnlyException::delete($this->getTable());
     }
 
     /**

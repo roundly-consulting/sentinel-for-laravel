@@ -5,7 +5,9 @@ declare(strict_types=1);
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerVerifyOptions;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
+use RoundlyConsulting\Sentinel\Exceptions\LedgerIsAppendOnlyException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Models\Checkpoint;
 use RoundlyConsulting\Sentinel\Models\Key;
 use RoundlyConsulting\Sentinel\Models\LedgerEntry;
 use RoundlyConsulting\Sentinel\Tests\TestCase;
@@ -52,4 +54,18 @@ it('only trusts an entry vouched for by a ring its seal accepts', function (): v
 
     expect($result->status)->toBe(VerificationStatus::Tampered)
         ->and($result->reason)->toBe('ledger_entry');
+});
+
+it('refuses Eloquent updates and deletes of ledger rows with model events muted (dual-review O-37)', function (): void {
+    invoice();
+    Sentinel::checkpoint();
+    $entry = LedgerEntry::query()->firstOrFail();
+    $checkpoint = Checkpoint::query()->firstOrFail();
+
+    expect(fn () => $entry->updateQuietly(['reason' => 'rewritten']))->toThrow(LedgerIsAppendOnlyException::class, 'cannot be updated')
+        ->and(fn () => LedgerEntry::withoutEvents(static fn () => $entry->forceFill(['reason' => 'x'])->save()))->toThrow(LedgerIsAppendOnlyException::class)
+        ->and(fn () => $entry->deleteQuietly())->toThrow(LedgerIsAppendOnlyException::class, 'cannot be deleted')
+        ->and(fn () => $checkpoint->updateQuietly(['root' => 'x']))->toThrow(LedgerIsAppendOnlyException::class, 'cannot be updated')
+        ->and(fn () => $checkpoint->deleteQuietly())->toThrow(LedgerIsAppendOnlyException::class, 'cannot be deleted')
+        ->and(LedgerEntry::query()->whereKey($entry->id)->value('reason'))->not->toBe('rewritten');
 });
