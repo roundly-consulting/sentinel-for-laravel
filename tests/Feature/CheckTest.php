@@ -3,12 +3,16 @@
 declare(strict_types=1);
 
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use RoundlyConsulting\Sentinel\Concerns\HasSeals;
+use RoundlyConsulting\Sentinel\Contracts\Sealable;
 use RoundlyConsulting\Sentinel\DataTransferObjects\HealthCheck;
 use RoundlyConsulting\Sentinel\DataTransferObjects\HealthReport;
+use RoundlyConsulting\Sentinel\Definition\SealBuilder;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\HealthStatus;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
@@ -355,3 +359,40 @@ it('fails a cache anchor kept in process memory or in the database it protects (
     'a store outside the database, named' => ['array', 'file', HealthStatus::Ok, 'cache'],
     'the default store, unnamed' => ['file', null, HealthStatus::Warning, 'SENTINEL_ANCHOR_CACHE_STORE'],
 ]);
+
+it('warns about a sealable model on a connection the ledger scans never visit (dual-review O-35)', function (): void {
+    config()->set('database.connections.second', config('database.connections.'.config('database.default')));
+    // The same database under a second name (an in-memory SQLite database is per connection).
+    DB::connection('second')->setPdo(DB::connection()->getPdo());
+    $class = definedBy(static fn ($seals) => $seals->seal('main')->attributes('number'));
+    config()->set('sentinel.models', [$class]);
+
+    expectCheck('models', HealthStatus::Ok, '1 configured');
+
+    config()->set('sentinel.models', [$class, OnSecondConnection::class]);
+
+    expectCheck('models', HealthStatus::Warning, 'connection [second], which sentinel.ledger.connections does not list');
+
+    config()->set('sentinel.ledger.connections', [null, 'second']);
+
+    expectCheck('models', HealthStatus::Ok, '2 configured');
+});
+
+/**
+ * A sealable on its own connection.
+ */
+final class OnSecondConnection extends Model implements Sealable
+{
+    use HasSeals;
+
+    protected $connection = 'second';
+
+    protected $table = 'invoices';
+
+    protected $guarded = [];
+
+    public static function defineSeals(SealBuilder $seals): void
+    {
+        $seals->seal('main')->attributes('number');
+    }
+}

@@ -303,10 +303,25 @@ final readonly class CheckInstallationAction
         }
 
         $summary = sprintf('%d configured, %d discovered', $discovery->configured, count($discovery->models) - $discovery->configured);
+        $warnings = [];
 
-        return $discovery->unresolved === []
-            ? [HealthStatus::Ok, $summary]
-            : [HealthStatus::Warning, $summary.'; seals of '.count($discovery->unresolved).' stored type(s) no longer resolve to a sealable model (check the morph map)'];
+        // Seals and ledger entries live on the model's connection; one the ledger scans never
+        // visit is never checkpointed nor verified.
+        $ledger = array_map(Tables::connectionName(...), Settings::ledgerConnections());
+
+        foreach ($discovery->models as $class) {
+            $connection = (new $class)->getConnection()->getName();
+
+            if (! in_array($connection, $ledger, true)) {
+                $warnings[] = "[{$class}] lives on the connection [{$connection}], which sentinel.ledger.connections does not list: its ledger is never checkpointed or verified";
+            }
+        }
+
+        if ($discovery->unresolved !== []) {
+            $warnings[] = 'seals of '.count($discovery->unresolved).' stored type(s) no longer resolve to a sealable model (check the morph map)';
+        }
+
+        return $warnings === [] ? [HealthStatus::Ok, $summary] : [HealthStatus::Warning, $summary.'; '.implode('; ', $warnings)];
     }
 
     /**

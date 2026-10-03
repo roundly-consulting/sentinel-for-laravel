@@ -1072,7 +1072,7 @@ $report->warnings();
 | `signing_keys` | the default ring, the ledger ring or a ring a sealable model uses cannot sign (while `sealing.auto` is on) | the same on a verify-only node |
 | `app_key` | database keys or `idempotency.encrypt` need `APP_KEY` and it is empty | — |
 | `tables` | a `sentinel_*` table is missing on its connection | — |
-| `models` | a sealable model does not compile, or its table lacks a sealed column | there are no sealable models, or stored types no longer resolve |
+| `models` | a sealable model does not compile, or its table lacks a sealed column | there are no sealable models, stored types no longer resolve, or a model lives on a connection `ledger.connections` does not list (its ledger is never checkpointed or verified) |
 | `anchors` | a configured anchor is unreachable, or the `cache` anchor lives in process memory or in the database it protects | none is configured, or the `cache` anchor uses the default store |
 | `checkpoints` | — | ledger entries older than `ledger.backlog_warning_seconds` are not checkpointed |
 | `schedule` | — | scheduling is off and no `sentinel:checkpoint` is scheduled |
