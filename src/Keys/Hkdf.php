@@ -66,4 +66,12 @@ final class Hkdf
     {
         return "sentinel/1/field\0{$ring}\0{$keyId}";
     }
+
+    /**
+     * Encryption at rest ({@see StorageCipher}), one key per purpose, derived from APP_KEY.
+     */
+    public static function storageInfo(string $purpose): string
+    {
+        return "sentinel/1/storage\0{$purpose}";
+    }
 }

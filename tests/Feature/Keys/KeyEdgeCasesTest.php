@@ -12,10 +12,12 @@ use RoundlyConsulting\Sentinel\Exceptions\KeyDriverException;
 use RoundlyConsulting\Sentinel\Exceptions\UnknownKeyException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Keys\EnvelopeData;
+use RoundlyConsulting\Sentinel\Keys\KeyEnvelope;
 use RoundlyConsulting\Sentinel\Keys\KeyLookup;
 use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Keys\SealingKey;
+use RoundlyConsulting\Sentinel\Keys\StorageCipher;
 use RoundlyConsulting\Sentinel\Models\Key;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\ThrowingOwner;
@@ -54,9 +56,11 @@ it('misses cleanly across every chained driver', function (): void {
 
 it('rejects an envelope whose dates are not in canonical form', function (): void {
     $key = Key::factory()->ring('http')->create(['kid' => 'k']);
-    $plain = app('encrypter')->decryptString($key->getRawOriginal('envelope'));
+    $cipher = app(StorageCipher::class);
+    $identity = KeyEnvelope::associatedData($key);
+    $plain = $cipher->decrypt(StorageCipher::KEY_ENVELOPE, $key->getRawOriginal('envelope'), $identity);
     $tampered = (string) preg_replace('/"activates_at":"[^"]+"/', '"activates_at":"yesterday"', $plain);
-    Key::query()->whereKey($key->id)->update(['envelope' => app('encrypter')->encryptString($tampered)]);
+    Key::query()->whereKey($key->id)->update(['envelope' => $cipher->encrypt(StorageCipher::KEY_ENVELOPE, $tampered, $identity)]);
 
     expect(app(KeyStoreManager::class)->lookup('http', 'k')->failure)->toBe(KeyLookup::INTEGRITY);
 });

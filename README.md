@@ -214,7 +214,7 @@ each other.
 | 11 | Rewrite a ledger entry or checkpoint | yes (entry MAC / checkpoint MAC + chain) | yes | `EntryInvalid`, `CheckpointInvalid`, `ChainBroken` |
 | 12 | Delete a sealable row without a tombstone | yes (`sentinel:verify --ledger`: live ledger head, row gone) | yes | `EntityDeleted` |
 | 13 | Rewrite the stored `algorithm` / `key_id` / `ring` on a seal row | yes (the algorithm comes from the key; ring allow-list; HKDF info binds ring + kid + algorithm) | yes | `AlgorithmMismatch` / `UnknownKey` / `Tampered` |
-| 14 | Database-driver key rows: swap ring/kid/algorithm, replace a public key | yes (encrypted, MAC'd envelope binds every field) | yes | `KeyIntegrityException` → `UnknownKey` |
+| 14 | Database-driver key rows: swap ring/kid/algorithm, replace a public key, plant an envelope minted through an `encrypted` cast | yes (an AEAD envelope under its own APP_KEY-derived key binds every field and its row) | yes | `KeyIntegrityException` → `UnknownKey` |
 | 15 | Database-driver key rows: restore an older envelope (un-revoke a key) | no (an authentic old ciphertext) — mitigation: list the kid in `SENTINEL_REVOKED_KEYS`, which always wins | no | — |
 | 16 | Changes made **and** rolled back entirely inside the window | no | no | — (shorten the checkpoint interval) |
 | 17 | Replay a signed HTTP request | yes (`created`/`expires` window + nonce de-duplication) | — | `replayed`, `too_old`, `expired` |
@@ -897,7 +897,7 @@ always comes from the key — never from a stored row or a received parameter.
 | Driver | Keys come from | Rotation |
 |---|---|---|
 | `config` (default ring) | `SENTINEL_KEY_ID` / `SENTINEL_KEY` (+ `SENTINEL_PREVIOUS_KEYS` for verify-only keys) | `sentinel:key:rotate` prints the new environment lines |
-| `database` (`http` ring) | `sentinel_keys` rows: encrypted with `APP_KEY`, every field bound, so an edited row is rejected | `sentinel:key:rotate` stores the new key; the old one becomes verify-only |
+| `database` (`http` ring) | `sentinel_keys` rows: AES-256-GCM under a key derived from `APP_KEY` for envelopes only (never the application encrypter), every field bound, so an edited, copied or planted row is rejected | `sentinel:key:rotate` stores the new key; the old one becomes verify-only |
 | `chain` | the `drivers` in order (the first signing key wins) | per driver |
 
 Material is always `base64:<standard base64>`: HMAC roots of 32–1024 random bytes, Ed25519

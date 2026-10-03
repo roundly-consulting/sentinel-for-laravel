@@ -6,7 +6,6 @@ namespace RoundlyConsulting\Sentinel\Keys;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Encryption\DecryptException;
-use Illuminate\Contracts\Encryption\StringEncrypter;
 use JsonException;
 use RoundlyConsulting\Sentinel\Canonical\Jcs;
 use RoundlyConsulting\Sentinel\Exceptions\CorruptRecordException;
@@ -16,10 +15,13 @@ use RoundlyConsulting\Sentinel\Support\Clock;
 
 /**
  * The integrity-bound envelope of a database key (plan §4.4.9). The JCS plaintext binds
- * every field and is encrypted with the app encrypter (`encryptString`: AES with an HMAC,
- * honouring `APP_PREVIOUS_KEYS` on decrypt). Opening checks that every bound field equals the row's plain columns,
- * so swapping a ring/kid/algorithm, replacing a public key or flipping a status without
- * re-encrypting is an integrity failure.
+ * every field and is encrypted by {@see StorageCipher} — AES-256-GCM under a key derived from
+ * APP_KEY for envelopes only (honouring `APP_PREVIOUS_KEYS` on decrypt), with the row's plain
+ * columns as associated data. So no ciphertext the application encrypter made (an `encrypted`
+ * cast a user can write) ever opens as an envelope, an envelope never decrypts through the
+ * application encrypter, and one copied to another row does not open. Opening also checks that
+ * every bound field equals the row's plain columns, so swapping a ring/kid/algorithm, replacing
+ * a public key or flipping a status without re-encrypting is an integrity failure.
  *
  * @internal
  */
@@ -29,7 +31,7 @@ final readonly class KeyEnvelope
 
     private const array MEMBERS = ['activates_at', 'alg', 'kid', 'material', 'owner', 'public', 'revoked_at', 'ring', 'signs_until', 'status', 'v', 'verifies_until'];
 
-    public function __construct(private StringEncrypter $encrypter) {}
+    public function __construct(private StorageCipher $cipher) {}
 
     public static function encode(EnvelopeData $data): string
     {
@@ -65,7 +67,53 @@ final readonly class KeyEnvelope
         // "<morph type>:<key>" — the key never contains the separator's last occurrence.
         $row->owner_type = $data->owner === null ? null : substr($data->owner, 0, (int) strrpos($data->owner, ':'));
         $row->owner_id = $data->owner === null ? null : substr($data->owner, (int) strrpos($data->owner, ':') + 1);
-        $row->envelope = $this->encrypter->encryptString(self::encode($data));
+        $row->envelope = $this->cipher->encrypt(StorageCipher::KEY_ENVELOPE, self::encode($data), self::identity(
+            $data->ring, $data->keyId, $data->algorithm, $data->status, $data->activatesAt, $data->signsUntil, $data->verifiesUntil,
+            $data->revokedAt, $data->owner,
+        ));
+    }
+
+    /**
+     * The associated data an envelope is bound to: its row's plain columns.
+     *
+     * @throws KeyIntegrityException when a date column is unreadable
+     */
+    public static function associatedData(Key $row): string
+    {
+        try {
+            return self::identity(
+                (string) $row->ring, (string) $row->kid, (string) $row->algorithm, (string) $row->status, $row->activates_at,
+                $row->signs_until, $row->verifies_until, $row->revoked_at,
+                $row->owner_type === null ? null : $row->owner_type.':'.$row->owner_id,
+            );
+        } catch (CorruptRecordException) {
+            throw KeyIntegrityException::envelopeMismatch((string) $row->getRawOriginal('ring'), (string) $row->getRawOriginal('kid'), 'dates');
+        }
+    }
+
+    private static function identity(
+        string $ring,
+        string $keyId,
+        string $algorithm,
+        string $status,
+        CarbonImmutable $activatesAt,
+        ?CarbonImmutable $signsUntil,
+        ?CarbonImmutable $verifiesUntil,
+        ?CarbonImmutable $revokedAt,
+        ?string $owner,
+    ): string {
+        return Jcs::encode([
+            'activates_at' => Clock::iso($activatesAt),
+            'alg' => $algorithm,
+            'kid' => $keyId,
+            'owner' => $owner,
+            'revoked_at' => self::isoOrNull($revokedAt),
+            'ring' => $ring,
+            'signs_until' => self::isoOrNull($signsUntil),
+            'status' => $status,
+            'v' => self::VERSION,
+            'verifies_until' => self::isoOrNull($verifiesUntil),
+        ]);
     }
 
     /**
@@ -77,7 +125,7 @@ final readonly class KeyEnvelope
         $keyId = (string) $row->getRawOriginal('kid');
 
         try {
-            $plaintext = $this->encrypter->decryptString($row->envelope);
+            $plaintext = $this->cipher->decrypt(StorageCipher::KEY_ENVELOPE, (string) $row->envelope, self::associatedData($row));
             $decoded = json_decode($plaintext, true, 4, JSON_THROW_ON_ERROR);
         } catch (DecryptException|JsonException) {
             throw KeyIntegrityException::envelopeMismatch($ring, $keyId, 'envelope');

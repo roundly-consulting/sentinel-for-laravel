@@ -12,6 +12,7 @@ use RoundlyConsulting\Sentinel\Exceptions\NoSigningKeyException;
 use RoundlyConsulting\Sentinel\Keys\KeyEnvelope;
 use RoundlyConsulting\Sentinel\Keys\KeyLookup;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
+use RoundlyConsulting\Sentinel\Keys\StorageCipher;
 use RoundlyConsulting\Sentinel\Models\Key;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\User;
@@ -98,12 +99,21 @@ it('detects every out-of-band edit of a key row (§10 item 11)', function (Closu
         Key::query()->whereKey($key->id)->update(['algorithm' => 'ed25519', 'envelope' => $forged->envelope]);
     }],
     'valid JSON with a wrong shape' => [function (Key $key): void {
-        Key::query()->whereKey($key->id)->update(['envelope' => app('encrypter')->encryptString('{"v":"sentinel.key/1"}')]);
+        $envelope = app(StorageCipher::class)->encrypt(StorageCipher::KEY_ENVELOPE, '{"v":"sentinel.key/1"}', KeyEnvelope::associatedData(Key::query()->findOrFail($key->id)));
+        Key::query()->whereKey($key->id)->update(['envelope' => $envelope]);
     }],
     'unsupported algorithm inside the envelope' => [function (Key $key): void {
+        $cipher = app(StorageCipher::class);
         $row = Key::query()->findOrFail($key->id);
-        $plain = str_replace('"alg":"hmac-sha256"', '"alg":"none"', app('encrypter')->decryptString($row->envelope));
-        Key::query()->whereKey($key->id)->update(['algorithm' => 'none', 'envelope' => app('encrypter')->encryptString($plain)]);
+        $plain = str_replace('"alg":"hmac-sha256"', '"alg":"none"', $cipher->decrypt(StorageCipher::KEY_ENVELOPE, (string) $row->envelope, KeyEnvelope::associatedData($row)));
+        Key::query()->whereKey($key->id)->update(['algorithm' => 'none']);
+        $envelope = $cipher->encrypt(StorageCipher::KEY_ENVELOPE, $plain, KeyEnvelope::associatedData(Key::query()->findOrFail($key->id)));
+        Key::query()->whereKey($key->id)->update(['envelope' => $envelope]);
+    }],
+    'envelope minted by the application encrypter (dual-review O-3)' => [function (Key $key): void {
+        $row = Key::query()->findOrFail($key->id);
+        $plain = app(StorageCipher::class)->decrypt(StorageCipher::KEY_ENVELOPE, (string) $row->envelope, KeyEnvelope::associatedData($row));
+        Key::query()->whereKey($key->id)->update(['envelope' => app('encrypter')->encryptString($plain)]);
     }],
 ]);
 
@@ -115,7 +125,6 @@ it('still opens envelopes after an APP_KEY rotation (previous keys)', function (
     config()->set('app.key', $current);
     config()->set('app.previous_keys', [$previous]);
     app()->forgetInstance('encrypter');
-    app()->forgetInstance(KeyEnvelope::class);
 
     expect(httpKeys()->find('http', 'k')?->status)->toBe(KeyStatus::Active);
 });
