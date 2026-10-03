@@ -453,7 +453,9 @@ the frozen `sentinel.seal/1` format.
   `sealing.on_tampered_write` (or the seal's `onTamperedWrite()`) says `reseal` (write and
   audit the previous status) or `skip` (write, leave the seal stale).
 - **Deletes** are never refused. A hard delete removes the seal rows and writes a `deleted`
-  tombstone to the ledger; a soft delete keeps the seal.
+  tombstone to the ledger for every seal, `manual()` ones included; a soft delete keeps the
+  seal; deleting an unsaved model does nothing (it returns `null`). With `sealing.auto` off or
+  inside `withoutSealing()` no tombstone is written, so the ledger scan reports the delete.
 - **Suspension** for seeders and imports — audited by a `SealingSuspended` event, refused
   when `sealing.allow_suspension` is off:
 

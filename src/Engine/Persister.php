@@ -46,8 +46,11 @@ final readonly class Persister
     public function persist(Model $model, Closure $write, PersistOperation $operation): mixed
     {
         $seals = $this->registry->for($model);
+        $delete = $operation === PersistOperation::Delete;
 
-        if (! Settings::autoSeal() || $seals->auto() === [] || $this->scope->sealingSuspended()) {
+        // A delete covers every seal — manual() ones too, which have rows and histories to
+        // close; an unsaved model deletes nothing (Eloquent returns null), so it seals nothing.
+        if (! Settings::autoSeal() || ($delete ? ! $model->exists : $seals->auto() === []) || $this->scope->sealingSuspended()) {
             return $write();
         }
 
