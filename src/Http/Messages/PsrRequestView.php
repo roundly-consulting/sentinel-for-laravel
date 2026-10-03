@@ -81,4 +81,9 @@ final readonly class PsrRequestView implements MessageView
 
         return $content;
     }
+
+    public function bodyUnavailable(): bool
+    {
+        return false;
+    }
 }

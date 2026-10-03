@@ -58,3 +58,35 @@ it('never executes a signed request under an overridden method (dual-review O-8)
     'X-HTTP-Method-Override' => [['HTTP_X_HTTP_METHOD_OVERRIDE' => 'DELETE'], []],
     '_method' => [[], ['_method' => 'DELETE']],
 ]);
+
+it('requires a digest for a multipart body PHP never handed over raw (dual-review O-9)', function (): void {
+    Route::post('/payouts', static fn (Request $request): array => $request->all())->middleware('sentinel.signed');
+
+    // Signed without a body — then delivered as multipart/form-data with attacker fields.
+    $signed = Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/payouts'), 'partner');
+    $server = received($signed, ['CONTENT_TYPE' => 'multipart/form-data; boundary=x', 'CONTENT_LENGTH' => '120'])->server->all();
+    $request = new Request([], ['iban' => 'ATTACKER', 'amount' => '1000000'], [], [], [], $server, '');
+
+    expect(dispatchSigned($request)->status())->toBe(401)
+        ->and(dispatchSigned(new Request([], ['iban' => 'ATTACKER'], [], [], [], $server, ''))->headers->get('Accept-Signature'))->toContain('"content-digest"')
+        ->and(rejectionOf(new Request([], ['iban' => 'ATTACKER'], [], [], [], $server, '')))->toBe(SignatureRejection::MissingComponent);
+
+    // A GET with a query is not a body: Laravel's input bag holds the query there.
+    $get = Sentinel::signatures()->sign(new PsrRequest('GET', 'https://api.example.com/payouts?page=2'), 'partner');
+
+    expect(rejectionOf(received($get)))->toBeNull();
+});
+
+it('verifies a digest-covered multipart body only when PHP hands over the raw bytes (dual-review O-9)', function (): void {
+    Route::post('/upload', static fn (Request $request): array => ['ok' => true])->middleware('sentinel.signed');
+    $body = "--x\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--x--\r\n";
+    $sign = static fn (): PsrRequest => Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/upload', ['Content-Type' => 'multipart/form-data; boundary=x'], $body), 'partner');
+
+    // enable_post_data_reading = On: the raw bytes are gone, the digest cannot be checked.
+    $parsed = new Request([], ['a' => '1'], [], [], [], received($sign())->server->all(), '');
+
+    expect(rejectionOf($parsed))->toBe(SignatureRejection::DigestMismatch);
+
+    // enable_post_data_reading = Off: php://input keeps the body, and it verifies.
+    dispatchSigned(received($sign()))->assertOk();
+});

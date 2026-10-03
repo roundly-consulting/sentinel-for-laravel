@@ -82,4 +82,22 @@ final readonly class SymfonyRequestView implements MessageView
     {
         return $this->request->getContent();
     }
+
+    /**
+     * A declared body (a length, chunked encoding, a multipart type) or uploaded files, but no
+     * raw bytes — never the parsed bags alone: Laravel's input bag holds the query on a GET.
+     */
+    public function bodyUnavailable(): bool
+    {
+        if ($this->request->getContent() !== '') {
+            return false;
+        }
+
+        $length = $this->request->server->get('CONTENT_LENGTH');
+
+        return (is_numeric($length) && (int) $length > 0)
+            || $this->request->headers->has('transfer-encoding')
+            || str_starts_with(strtolower((string) $this->request->headers->get('content-type', '')), 'multipart/')
+            || $this->request->files->count() > 0;
+    }
 }

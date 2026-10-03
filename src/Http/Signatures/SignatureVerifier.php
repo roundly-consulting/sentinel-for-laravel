@@ -75,7 +75,10 @@ final readonly class SignatureVerifier
         $key = $this->key($profile, $keyId, $alg);
 
         if (in_array('content-digest', $components, true) || $message->header('content-digest') !== null) {
-            $rejection = ContentDigest::verify($message->header('content-digest') ?? [], $message->body());
+            // Without the raw bytes no digest can be checked: never take one on trust.
+            $rejection = $message->bodyUnavailable()
+                ? SignatureRejection::DigestMismatch
+                : ContentDigest::verify($message->header('content-digest') ?? [], $message->body());
 
             if ($rejection !== null) {
                 throw HttpSignatureException::rejected($rejection, $keyId);
@@ -171,7 +174,8 @@ final readonly class SignatureVerifier
             $required[] = '@query';
         }
 
-        if ($profile->requireContentDigest && $message->body() !== '') {
+        // A multipart body PHP parsed away is a body all the same: it must be covered.
+        if ($profile->requireContentDigest && ($message->body() !== '' || $message->bodyUnavailable())) {
             $required[] = 'content-digest';
         }
 

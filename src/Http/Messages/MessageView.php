@@ -45,4 +45,11 @@ interface MessageView
     public function header(string $name): ?array;
 
     public function body(): string;
+
+    /**
+     * Whether the message has a body that {@see body()} cannot give: PHP parses a
+     * `multipart/form-data` request into `$_POST` / `$_FILES` and leaves no raw bytes (while
+     * `enable_post_data_reading` is on).
+     */
+    public function bodyUnavailable(): bool;
 }

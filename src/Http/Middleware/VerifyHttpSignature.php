@@ -9,6 +9,7 @@ use Illuminate\Contracts\Container\Container;
 use Illuminate\Http\Request;
 use RoundlyConsulting\Sentinel\Exceptions\HttpSignatureException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
+use RoundlyConsulting\Sentinel\Http\Messages\SymfonyRequestView;
 use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
 use RoundlyConsulting\Sentinel\Http\StructuredFields\InnerList;
 use RoundlyConsulting\Sentinel\Http\StructuredFields\Item;
@@ -83,7 +84,9 @@ final readonly class VerifyHttpSignature
             $components[] = '@query';
         }
 
-        if ($profile->requireContentDigest && $request->getContent() !== '') {
+        $view = new SymfonyRequestView($request);
+
+        if ($profile->requireContentDigest && ($view->body() !== '' || $view->bodyUnavailable())) {
             $components[] = 'content-digest';
         }
 
