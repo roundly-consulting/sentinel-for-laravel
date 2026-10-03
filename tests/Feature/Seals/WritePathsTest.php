@@ -83,6 +83,17 @@ it('seals incrementEach and decrementEach (Laravel 13+)', function (): void {
         ->and((int) DB::table('invoices')->value('customer_id'))->toBe(6);
 })->skip(fn (): bool => ! method_exists(Model::class, 'incrementEach'), 'incrementEach() needs Laravel 13');
 
+it('documents why incrementEach is Laravel 13+ only: on 12 it updates the whole table, unsealed (dual-review O-43)', function (): void {
+    $mine = invoice(['customer_id' => 5]);
+    $other = invoice(['customer_id' => 7]);
+
+    // Laravel 12's Model has no incrementEach(): __call forwards it to a fresh query builder.
+    $mine->incrementEach(['customer_id' => 2]);
+
+    expect(DB::table('invoices')->orderBy('id')->pluck('customer_id')->map(static fn (mixed $id): int => (int) $id)->all())->toBe([7, 9])
+        ->and(Sentinel::verify($other)->status)->toBe(VerificationStatus::Tampered);
+})->skip(fn (): bool => method_exists(Model::class, 'incrementEach'), 'pins the Laravel 12 behaviour the README warns about');
+
 it('seals created models through every create path', function (Closure $create): void {
     $invoice = $create();
 
