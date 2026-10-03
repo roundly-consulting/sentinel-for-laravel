@@ -772,6 +772,11 @@ back onto the queue — the first run holds the key for its job's `$timeout`, el
 `retry_after` (or pass `lease:`); a job that throws, releases or fails itself gives the key
 back, so its retries run.
 
+The duplicate-run guard relies on that `$timeout` or `retry_after`. The `sync` queue has no
+`retry_after`, so there a job without `$timeout` holds its key only for
+`idempotency.lock_seconds` (60 seconds by default), and a duplicate arriving later runs beside a
+first run that is still going. Give such a job a `$timeout`, or pass `lease:`.
+
 Rejections are RFC 9457 `application/problem+json` responses with a `code` member. With
 `idempotency.transactional` on (database store only), the handler and the idempotency record commit in one
 transaction (exactly once for that connection's writes — at the cost of holding the
@@ -854,6 +859,21 @@ A rejection answers 401 problem details with a generic `code` (the precise reaso
 `app.debug`) and an `Accept-Signature` hint; `HttpSignatureRejected` carries the reason.
 Add profiles under `sentinel.signatures.profiles` and name them: `sentinel.signed:partners`.
 
+**A partner's shared secret is a verify-only key.** An HMAC secret set as the `http` ring's
+*current* key (`SENTINEL_HTTP_KEY`) is a key this application signs with, so inbound requests
+signed with it are refused (`unknown_key`). List it under the ring's `previous` keys instead
+(`SENTINEL_HTTP_KEYS="acme-hmac|hmac-sha256|base64:…"`), or import it verify-only
+(`Sentinel::keys()->ring('http')->import('acme-hmac', Algorithm::HmacSha256, $secret, owner: $partner)`).
+Set `accept_signing_keys` only when you also sign outbound with that same secret.
+
+**Signed `multipart/form-data` requests fail closed.** PHP parses a multipart body into
+`$_POST` / `$_FILES` before Laravel runs and keeps no raw bytes, so the `Content-Digest`
+cannot be checked: the request is refused with `digest_mismatch`, even when the partner
+signed it correctly. Have the partner send the file as the raw body
+(`Content-Type: application/octet-stream`, metadata in covered headers or the query) or as
+JSON; PHP keeps those bodies, so the digest verifies. If multipart is unavoidable, serve that
+endpoint from a PHP pool with `enable_post_data_reading = Off` and parse `php://input` yourself.
+
 Outbound — sign requests with a key of the outbound ring (it must be active and hold private
 material; an imported partner key never signs):
 
@@ -879,7 +899,11 @@ Sentinel::signatures()->contentDigest('{"hello": "world"}');      // 'sha-256=:X
 `Http::withSignature(string $keyId, ?SigningOptions $options = null)` signs the **final**
 request: it adds `Content-Digest` when the body is not empty and `content-digest` is a
 component, drops `@query` without a query and headers the request does not carry, and sets
-`created`, `keyid` and a fresh `nonce` (plus `expires`, `tag` and `alg` when configured). Every
+`created`, `keyid` and a fresh `nonce` (plus `expires`, `tag` and `alg` when configured). The
+body is read only for a covered `content-digest`; a stream that cannot rewind is buffered
+into a seekable copy first, built with Guzzle's PSR-7 `HttpFactory`. That class ships with
+`illuminate/http`, the HTTP client Laravel already installs, so Sentinel adds no runtime
+dependency for it. Every
 `SigningOptions` field left null falls back to
 `sentinel.signatures.outbound.*`; a set one is checked like its configuration counterpart
 (`InvalidSentinelConfigurationException` — e.g. an empty component list, an `expiresIn`
