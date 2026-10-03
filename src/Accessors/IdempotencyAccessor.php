@@ -21,13 +21,14 @@ final readonly class IdempotencyAccessor
 
     /**
      * Run the callback once per (key, scope); a repeat returns the stored result. The key and
-     * the scope are 1–255 bytes, a TTL 60–2 592 000 seconds.
+     * the scope are 1–255 bytes, a TTL 60–2 592 000 seconds, a lease (how long a running call
+     * holds the key; null = `idempotency.lock_seconds`) 1–86 400 seconds.
      *
      * @throws InvalidIdempotencyKeyException
      */
-    public function run(#[SensitiveParameter] string $key, string $scope, Closure $callback, ?string $fingerprint = null, ?int $ttl = null): IdempotentResult
+    public function run(#[SensitiveParameter] string $key, string $scope, Closure $callback, ?string $fingerprint = null, ?int $ttl = null, ?int $lease = null): IdempotentResult
     {
-        return $this->manager->runIdempotent(new IdempotentCall($key, $scope, $callback, $fingerprint, $ttl));
+        return $this->manager->runIdempotent(new IdempotentCall($key, $scope, $callback, $fingerprint, $ttl, $lease));
     }
 
     /**

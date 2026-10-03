@@ -763,8 +763,9 @@ public function middleware(): array
 ```
 
 A duplicate completes without running; one arriving while the first still runs is released
-back onto the queue; a job that throws, releases or fails itself gives the key back, so its
-retries run.
+back onto the queue — the first run holds the key for its job's `$timeout`, else the queue's
+`retry_after` (or pass `lease:`); a job that throws, releases or fails itself gives the key
+back, so its retries run.
 
 Rejections are RFC 9457 `application/problem+json` responses with a `code` member. With
 `idempotency.transactional` on, the handler and the idempotency record commit in one
@@ -1307,7 +1308,7 @@ build them with named arguments.
 | `Sentinel::keys()` | `Accessors\KeysAccessor` | `ring(?string $ring = null)`, `all()`, `rings()` |
 | `Sentinel::keys()->ring($ring)` | `Accessors\KeyRingHandle` | `name()`, `current()`, `find(string $keyId)`, `all()`, `generate(Algorithm $algorithm, ?string $keyId = null, KeyDestination $destination = KeyDestination::Database, ?CarbonInterface $activatesAt = null, ?Model $owner = null, ?string $label = null)`, `import(string $keyId, Algorithm $algorithm, string $material, bool $signing = false, ?CarbonInterface $activatesAt = null, ?Model $owner = null, ?string $label = null)`, `rotate(?Algorithm $algorithm = null, ?CarbonInterface $activatesAt = null)`, `revoke(string $keyId, string $reason, ?Model $actor = null)`, `retire(string $keyId)` |
 | `Sentinel::ledger()` | `Accessors\LedgerAccessor` | `checkpoint(?string $connection = null)`, `verify(?string $connection = null, bool $entities = true, int $chunk = 1000)`, `history(Model $model, ?string $seal = null, int $limit = 50)`, `head(?string $connection = null)`, `anchors()` |
-| `Sentinel::idempotency()` | `Accessors\IdempotencyAccessor` | `run(string $key, string $scope, Closure $callback, ?string $fingerprint = null, ?int $ttl = null)`, `forget(string $key, string $scope)` |
+| `Sentinel::idempotency()` | `Accessors\IdempotencyAccessor` | `run(string $key, string $scope, Closure $callback, ?string $fingerprint = null, ?int $ttl = null, ?int $lease = null)`, `forget(string $key, string $scope)` |
 | `Sentinel::nonces()` | `Accessors\NoncesAccessor` | `issue(string $purpose, ?int $ttl = null, ?Model $subject = null)`, `consume(string $purpose, string $nonce, ?Model $subject = null)`, `consumeOrFail(string $purpose, string $nonce, ?Model $subject = null)`, `signedRoute(string $name, array $parameters = [], ?int $ttl = null)` |
 | `Sentinel::signatures()` | `Accessors\SignaturesAccessor` | `sign(RequestInterface $request, string $keyId, ?SigningOptions $options = null)`, `verify(Request $request, ?string $profile = null)`, `verifyResponse(ResponseInterface\|ClientResponse $response, ?string $profile = null)`, `current(Request $request)`, `owner(Request\|VerifiedSignature $from)`, `contentDigest(string $body, DigestAlgorithm $algorithm = DigestAlgorithm::Sha256)` |
 

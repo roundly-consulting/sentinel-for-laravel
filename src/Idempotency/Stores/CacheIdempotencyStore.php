@@ -62,7 +62,7 @@ final readonly class CacheIdempotencyStore implements IdempotencyStore
 
             $now = Clock::now();
             $transition = StateMachine::begin(
-                $record, $request, $now, $this->random->token(43), Settings::idempotencyLockSeconds(),
+                $record, $request, $now, $this->random->token(43), $request->leaseSeconds(),
                 fn (string $payload): ?ResponseSnapshot => $this->vault->open($payload, $request, self::NAME),
             );
 

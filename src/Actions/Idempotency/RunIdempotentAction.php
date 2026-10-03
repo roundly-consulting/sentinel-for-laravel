@@ -30,8 +30,10 @@ use Throwable;
  * something that cannot be stored (not JSON-encodable) never runs again: its key is
  * completed as unreplayable and `IdempotentResultException` is thrown, so a repeat is refused
  * with `IdempotentResponseUnavailableException` (409). The key and the scope are 1–255
- * bytes and a TTL is 60–2 592 000 seconds — what the `Idempotent` job middleware takes
- * (`InvalidIdempotencyKeyException` otherwise, before the store is touched).
+ * bytes, a TTL is 60–2 592 000 seconds and a lease 1–86 400 seconds — what the `Idempotent`
+ * job middleware takes (`InvalidIdempotencyKeyException` otherwise, before the store is
+ * touched). A duplicate is refused while the running call's lease holds the key: give a call
+ * that may run longer than `idempotency.lock_seconds` a lease above its longest run.
  */
 final readonly class RunIdempotentAction
 {
@@ -43,13 +45,14 @@ final readonly class RunIdempotentAction
      */
     public function execute(IdempotentCall $call): IdempotentResult
     {
-        RunLimits::check($call->key, $call->scope, $call->ttl);
+        RunLimits::check($call->key, $call->scope, $call->ttl, $call->lease);
 
         $request = new IdempotentRequest(
             RequestFingerprint::key($call->scope, 'run', $call->key),
             $call->scope,
             RequestFingerprint::call($call->fingerprint),
             $call->ttl ?? Settings::idempotencyTtl(),
+            lease: $call->lease,
         );
 
         $decision = $this->store->begin($request);

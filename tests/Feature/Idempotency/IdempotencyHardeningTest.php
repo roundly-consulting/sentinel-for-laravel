@@ -9,11 +9,13 @@ use RoundlyConsulting\Sentinel\Contracts\IdempotencyStore;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentRequest;
 use RoundlyConsulting\Sentinel\Enums\IdempotencyOutcome;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
+use RoundlyConsulting\Sentinel\Exceptions\InvalidIdempotencyKeyException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Idempotency\ResponseSnapshot;
 use RoundlyConsulting\Sentinel\Idempotency\ResponseVault;
 use RoundlyConsulting\Sentinel\Idempotency\Stores\CacheIdempotencyStore;
 use RoundlyConsulting\Sentinel\Idempotency\Stores\DatabaseIdempotencyStore;
+use RoundlyConsulting\Sentinel\Jobs\Middleware\Idempotent;
 use RoundlyConsulting\Sentinel\Models\IdempotencyKey;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Testing\InMemoryIdempotencyStore;
@@ -185,3 +187,67 @@ it('never prunes, nor lets the cache drop, a key whose lease is live (dual-revie
     'cache' => [static fn (): IdempotencyStore => new CacheIdempotencyStore(cache()->store('array'), app(ResponseVault::class), app('log'))],
     'in-memory (the fake)' => [static fn (): IdempotencyStore => new InMemoryIdempotencyStore],
 ]);
+
+/**
+ * A job double: its middleware releases a duplicate back onto the queue.
+ */
+function releasableJob(?int $timeout = null, ?string $connection = null): object
+{
+    return new class($timeout, $connection)
+    {
+        /** @var list<int> */
+        public array $released = [];
+
+        public function __construct(public ?int $timeout, public ?string $connection) {}
+
+        public function release(int $delay = 0): void
+        {
+            $this->released[] = $delay;
+        }
+    };
+}
+
+it('never runs a duplicate job beside one that outlives lock_seconds (dual-review O-13)', function (Closure $middleware, Closure $job): void {
+    $runs = 0;
+    $first = $job();
+    $duplicate = $job();
+    $middleware = $middleware();
+
+    $middleware->handle($first, function () use (&$runs, $middleware, $duplicate): void {
+        $runs++;
+        // The first run is slow; 61 s in the queue redelivers the job.
+        $this->travel(61)->seconds();
+
+        $middleware->handle($duplicate, function () use (&$runs): void {
+            $runs++;
+        });
+    });
+
+    expect($runs)->toBe(1)
+        ->and($duplicate->released)->not->toBe([]);
+})->with([
+    'an explicit lease' => [static fn (): Idempotent => new Idempotent('stripe:evt_long', scope: 'webhooks', lease: 600), static fn (): object => releasableJob()],
+    'the job\'s own timeout' => [static fn (): Idempotent => new Idempotent('stripe:evt_long', scope: 'webhooks'), static fn (): object => releasableJob(timeout: 300)],
+    'the queue\'s retry_after' => [static function (): Idempotent {
+        config()->set('queue.connections.slow', ['driver' => 'database', 'retry_after' => 900]);
+
+        return new Idempotent('stripe:evt_long', scope: 'webhooks');
+    }, static fn (): object => releasableJob(connection: 'slow')],
+]);
+
+it('holds a run() key for its lease (dual-review O-13)', function (): void {
+    $runs = 0;
+
+    Sentinel::idempotency()->run('export-77-abcdef', 'exports', function () use (&$runs): null {
+        $runs++;
+        $this->travel(601)->seconds();
+
+        expect(fn () => Sentinel::idempotency()->run('export-77-abcdef', 'exports', static fn () => null, lease: 1200))->toThrow(IdempotencyRequestInProgressException::class);
+
+        return null;
+    }, lease: 1200);
+
+    expect($runs)->toBe(1)
+        ->and(fn () => new Idempotent('k', lease: 0))->toThrow(InvalidIdempotencyKeyException::class)
+        ->and(fn () => Sentinel::idempotency()->run('k', 's', static fn () => 1, lease: 86401))->toThrow(InvalidIdempotencyKeyException::class);
+});

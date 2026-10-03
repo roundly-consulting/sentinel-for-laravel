@@ -45,7 +45,7 @@ final readonly class DatabaseIdempotencyStore implements IdempotencyStore
     {
         $now = Clock::now();
         $token = $this->random->token(43);
-        $lock = Settings::idempotencyLockSeconds();
+        $lock = $request->leaseSeconds();
         $owned = IdempotencyRecord::owned($request->scope, $request->fingerprint, $token, $now, $lock, $request->ttl);
 
         for ($attempt = 0; $attempt < 3; $attempt++) {

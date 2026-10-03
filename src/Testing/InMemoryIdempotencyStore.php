@@ -13,7 +13,6 @@ use RoundlyConsulting\Sentinel\Idempotency\IdempotencyRecord;
 use RoundlyConsulting\Sentinel\Idempotency\ResponseSnapshot;
 use RoundlyConsulting\Sentinel\Idempotency\StateMachine;
 use RoundlyConsulting\Sentinel\Support\Clock;
-use RoundlyConsulting\Sentinel\Support\Settings;
 
 /**
  * The fake's idempotency store: the real decision table (replay, 409, 422, take-over after the
@@ -31,7 +30,7 @@ final class InMemoryIdempotencyStore implements IdempotencyStore
     {
         $now = Clock::now();
         $transition = StateMachine::begin(
-            $this->records[$request->keyDigest] ?? null, $request, $now, (new Csprng)->token(43), Settings::idempotencyLockSeconds(),
+            $this->records[$request->keyDigest] ?? null, $request, $now, (new Csprng)->token(43), $request->leaseSeconds(),
             fn (string $id): ?ResponseSnapshot => $this->responses[$id] ?? null,
         );
 
