@@ -6,9 +6,11 @@ use GuzzleHttp\Psr7\Request as PsrRequest;
 use GuzzleHttp\Psr7\Response as PsrResponse;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Http\Kernel;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
+use Illuminate\Routing\Route as LaravelRoute;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -21,6 +23,7 @@ use RoundlyConsulting\Sentinel\Actions\Seals\AcknowledgeTamperingAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\ReadLedgerHistoryAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\SealModelAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\VerifyModelAction;
+use RoundlyConsulting\Sentinel\Concerns\HasSeals;
 use RoundlyConsulting\Sentinel\Contracts\Anchor;
 use RoundlyConsulting\Sentinel\Contracts\IdempotencyStore;
 use RoundlyConsulting\Sentinel\Contracts\KeyStore;
@@ -48,6 +51,8 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\UpdateAndResealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerifiedSignature;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerifyRequest;
+use RoundlyConsulting\Sentinel\Definition\SealBuilder;
+use RoundlyConsulting\Sentinel\Definition\SealDefinitionBuilder;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\DigestAlgorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyDestination;
@@ -76,6 +81,7 @@ use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Keys\Stores\ConfigKeyStore;
 use RoundlyConsulting\Sentinel\Models\IdempotencyKey;
 use RoundlyConsulting\Sentinel\Rules\IntactSeal;
+use RoundlyConsulting\Sentinel\SealHandle;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Support\Settings;
@@ -93,11 +99,11 @@ use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Overrides\SafeOverride;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\User;
 
 /**
- * Phase I exit (plan §11): every README example runs. Each test mirrors one README section
- * against the fixtures (the README's `Invoice` is the fixture invoice, whose `financial` and
- * `identity` seals cover the README's columns). The drift checks at the end read README.md
- * itself: every facade call, class, command option, config key, env variable, middleware
- * alias, event and fake assertion it names must exist.
+ * Phase I exit (plan §11): every documented example runs. Each test mirrors one docs section
+ * (the README quick start and the website docs) against the fixtures (the docs' `Invoice` is
+ * the fixture invoice, whose `financial` and `identity` seals cover the docs' columns). The
+ * drift checks at the end read README.md itself: every facade call, method, class, command,
+ * config key and middleware alias it names must exist.
  */
 function readme(): string
 {
@@ -765,23 +771,40 @@ it('runs the in-memory store example', function (): void {
 });
 
 // ── drift checks: everything the README names exists ────────────────────────────
+//
+// The README is slim — install, one example, a link to the website docs — so it is checked
+// for truth, not completeness (the docs carry the full API). Each check first proves it
+// found something.
 
 it('names only facade methods that exist', function (): void {
     preg_match_all('/Sentinel::([a-zA-Z]+)\(/', readme(), $matches);
     $names = array_values(array_unique($matches[1]));
 
-    expect($names)->not->toBeEmpty()
-        ->and($names)->toContain(
-            'importKey', 'check', 'sealables', 'verifiedSignature', 'signatureOwner', 'model', 'fake',
-            'acknowledge', 'unseal', 'ledgerHistory', 'currentSeal', 'withoutVerification', 'scan', 'reseal', 'resealWhere',
-            'updateAndReseal', 'sealMissing', 'generateKey', 'rotateKey', 'revokeKey', 'retireKey', 'listKeys', 'findKey',
-            'currentKey', 'checkpoint', 'verifyLedger', 'ledgerHead', 'anchors', 'runIdempotent', 'forgetIdempotencyKey',
-            'issueNonce', 'consumeNonce', 'signedRoute', 'prune', 'signRequest', 'verifyRequestSignature', 'verifyResponseSignature',
-        );
+    expect($names)->not->toBeEmpty();
 
     foreach ($names as $name) {
         expect(method_exists(SentinelManager::class, $name) || method_exists(SentinelFake::class, $name) || method_exists(SentinelFacade::class, $name))->toBeTrue("Sentinel::{$name}() is not a method");
     }
+});
+
+it('calls only methods the package has', function (): void {
+    preg_match_all('/```php\n(.*?)```/s', readme(), $blocks);
+    preg_match_all('/->([a-zA-Z]+)\(/', implode("\n", $blocks[1]), $matches);
+    $called = array_values(array_unique($matches[1]));
+    $surface = [SentinelManager::class, SealHandle::class, SealBuilder::class, SealDefinitionBuilder::class, HasSeals::class, LaravelRoute::class, Model::class];
+
+    $missing = array_values(array_filter($called, static function (string $method) use ($surface): bool {
+        foreach ($surface as $class) {
+            if (method_exists($class, $method)) {
+                return false;
+            }
+        }
+
+        return true;
+    }));
+
+    expect(count($called))->toBeGreaterThanOrEqual(8)
+        ->and($missing)->toBe([]);
 });
 
 it('imports only classes that exist', function (): void {
@@ -794,159 +817,28 @@ it('imports only classes that exist', function (): void {
     }
 });
 
-it('documents only commands and options that exist', function (): void {
-    preg_match_all('/^\| `(sentinel:[a-z:-]+)((?: \{[^}]+\})+)` \|/m', readme(), $rows, PREG_SET_ORDER);
-    $commands = Artisan::all();
-    $sentinel = array_values(array_filter(array_keys($commands), static fn (string $name): bool => str_starts_with($name, 'sentinel:')));
+it('names only commands that exist', function (): void {
+    preg_match_all('/\b(sentinel:[a-z][a-z:-]*[a-z])/', readme(), $matches);
 
-    expect($rows)->toHaveCount(14)
-        ->and(array_column($rows, 1))->toEqualCanonicalizing($sentinel);
+    expect($matches[1])->not->toBeEmpty();
 
-    foreach ($rows as [, $name, $arguments]) {
-        expect($commands)->toHaveKey($name);
-        $definition = $commands[$name]->getDefinition();
-        preg_match_all('/\{(--)?([a-z-]+)/', $arguments, $parts, PREG_SET_ORDER);
-
-        foreach ($parts as [, $dashes, $part]) {
-            expect($dashes === '--' ? $definition->hasOption($part) : $definition->hasArgument($part))->toBeTrue("{$name} has no {$dashes}{$part}");
-        }
+    foreach (array_unique($matches[1]) as $command) {
+        expect(Artisan::all())->toHaveKey($command);
     }
 });
 
-it('documents every configuration key, and only those', function (): void {
-    $section = explode('## Declaring seals', explode('## Configuration', readme())[1])[0];
-    preg_match_all('/^\| `([a-z_.<>]+)`(?: \/ `([a-z_]+)`)?(?: \/ `([a-z_]+)`)*[^|]*\|/m', $section, $rows, PREG_SET_ORDER);
-    $documented = [];
+it('names only configuration keys and middleware aliases that exist', function (): void {
+    preg_match_all('/`sentinel\.([a-z_.]+)`/', readme(), $keys);
+    preg_match_all("/'(sentinel\\.(?:verified|idempotent|signed|single-use))'/", readme(), $aliases);
 
-    foreach ($rows as $row) {
-        $key = str_replace('<name>', 'default', $row[1]);
+    expect($keys[1])->not->toBeEmpty()
+        ->and($aliases[1])->not->toBeEmpty();
 
-        if (! str_contains($key, '.') && ! in_array($key, ['context', 'key_type', 'actor_key_type', 'models'], true)) {
-            continue;
-        }
-
-        $documented[] = $key;
+    foreach (array_unique($keys[1]) as $key) {
+        expect(config()->has("sentinel.{$key}"))->toBeTrue("sentinel.{$key} is not a configuration key");
     }
-
-    expect($documented)->not->toBeEmpty();
-
-    foreach ($documented as $key) {
-        expect(array_key_exists(explode('.', $key)[0], config('sentinel')) && config()->has("sentinel.{$key}"))->toBeTrue("sentinel.{$key} is not a configuration key");
-    }
-
-    foreach (['context', 'key_type', 'actor_key_type', 'models', 'database.connection', 'keys.revoked', 'sealing.transaction_attempts', 'ledger.connections', 'idempotency.replayed_headers', 'nonces.length', 'problems.type_base', 'signatures.advertise', 'signatures.outbound.include_alg', 'schedule.enabled', 'schedule.checkpoint', 'schedule.verify', 'schedule.prune'] as $key) {
-        expect($documented)->toContain($key);
-    }
-});
-
-it('names only environment variables the configuration reads', function (): void {
-    preg_match_all('/\bSENTINEL_[A-Z_]+/', readme(), $matches);
-    $config = (string) file_get_contents(__DIR__.'/../../config/sentinel.php');
-
-    expect($matches[0])->not->toBeEmpty();
-
-    foreach (array_unique($matches[0]) as $variable) {
-        expect($config)->toContain("'{$variable}'");
-    }
-});
-
-it('names only registered middleware aliases, events and fake assertions', function (): void {
-    preg_match_all('/`(sentinel\.(?:verified|idempotent|signed|single-use))/', readme(), $aliases);
-    preg_match_all('/^\| `([A-Z][A-Za-z]+)`(?:, `([A-Z][A-Za-z]+)`)*(?:, `([A-Z][A-Za-z]+)`)?(?:, `([A-Z][A-Za-z]+)`)? \| (?:sync|after commit)/m', readme(), $events, PREG_SET_ORDER);
-    preg_match_all('/`(assert[A-Za-z]+)`/', readme(), $assertions);
-    $registered = app('router')->getMiddleware();
-
-    expect(array_unique($aliases[1]))->toHaveCount(4)
-        ->and($events)->not->toBeEmpty()
-        ->and(array_unique($assertions[1]))->toHaveCount(36);
 
     foreach (array_unique($aliases[1]) as $alias) {
-        expect($registered)->toHaveKey($alias);
-    }
-
-    foreach ($events as $row) {
-        foreach (array_filter(array_slice($row, 1)) as $event) {
-            expect(class_exists('RoundlyConsulting\\Sentinel\\Events\\'.$event))->toBeTrue("{$event} is not an event");
-        }
-    }
-
-    foreach (array_unique($assertions[1]) as $assertion) {
-        expect(method_exists(SentinelFake::class, $assertion))->toBeTrue("{$assertion} is not a fake assertion");
-    }
-});
-
-it('gives the exit codes of every command', function (): void {
-    $section = explode('</details>', explode('<summary>Exit codes of every command', readme())[1])[0];
-    preg_match_all('/^\| `(sentinel:[a-z:-]+)` \|(?: [^|]+ \|){3}$/m', $section, $rows);
-    $sentinel = array_values(array_filter(array_keys(Artisan::all()), static fn (string $name): bool => str_starts_with($name, 'sentinel:')));
-
-    expect($rows[1])->toHaveCount(14)
-        ->and($rows[1])->toEqualCanonicalizing($sentinel);
-});
-
-/**
- * The API reference is complete in both directions: every public (non-@internal) manager
- * method is listed, and every listed method exists; every host-facing action appears in the
- * method → action map, and every action named there exists.
- */
-it('lists every facade method and maps every host-facing action', function (): void {
-    $section = explode('</details>', explode('<summary>Facade methods and the action behind each', readme())[1])[0];
-    preg_match_all('/^\| `([a-zA-Z]+)\(/m', $section, $methods);
-    preg_match_all('/`((?:[A-Z][a-z]+\\\\)?[A-Za-z]+Action)`/', $section, $actions);
-
-    $public = [];
-
-    foreach ((new ReflectionClass(SentinelManager::class))->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
-        if ($method->getName() !== '__construct' && ! str_contains((string) $method->getDocComment(), '@internal')) {
-            $public[] = $method->getName();
-        }
-    }
-
-    $hostFacing = [];
-    $root = realpath(__DIR__.'/../../src/Actions').DIRECTORY_SEPARATOR;
-
-    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS)) as $file) {
-        $relative = str_replace([$root, '.php', '/'], ['', '', '\\'], (string) $file);
-
-        if (! str_contains((string) (new ReflectionClass('RoundlyConsulting\\Sentinel\\Actions\\'.$relative))->getDocComment(), '@internal')) {
-            $hostFacing[] = $relative;
-        }
-    }
-
-    expect($methods[1])->toHaveCount(count(array_unique($methods[1])))
-        ->and($methods[1])->toEqualCanonicalizing($public)
-        ->and($hostFacing)->toHaveCount(28)
-        ->and(array_values(array_unique($actions[1])))->toEqualCanonicalizing($hostFacing);
-});
-
-it('lists every method of every handle and sub-accessor', function (): void {
-    $section = explode('</details>', explode('<summary>Handles and sub-accessors', readme())[1])[0];
-    preg_match_all('/^\| `Sentinel::[^`]+` \| `([A-Za-z\\\\]+)` \| (.+) \|$/m', $section, $rows, PREG_SET_ORDER);
-
-    expect($rows)->toHaveCount(8);
-
-    foreach ($rows as [, $class, $listed]) {
-        preg_match_all('/`([a-zA-Z]+)\(/', $listed, $methods);
-        $class = 'RoundlyConsulting\\Sentinel\\'.$class;
-        $public = array_values(array_filter(
-            array_map(static fn (ReflectionMethod $method): string => $method->getName(), (new ReflectionClass($class))->getMethods(ReflectionMethod::IS_PUBLIC)),
-            static fn (string $name): bool => $name !== '__construct',
-        ));
-
-        expect($methods[1])->toEqualCanonicalizing($public, "{$class} is not listed completely");
-    }
-});
-
-it('lists the methods of every extension contract', function (): void {
-    preg_match_all('/^\| `Contracts\\\\([A-Za-z]+)` \| (.+?) \| [^|]+ \|$/m', readme(), $rows, PREG_SET_ORDER);
-    $contracts = array_map(static fn (string $file): string => basename($file, '.php'), glob(__DIR__.'/../../src/Contracts/*.php') ?: []);
-
-    expect(array_column($rows, 1))->toEqualCanonicalizing($contracts);
-
-    foreach ($rows as [, $contract, $listed]) {
-        preg_match_all('/`(?:static )?([a-zA-Z]+)\(/', $listed, $methods);
-        $interface = new ReflectionClass('RoundlyConsulting\\Sentinel\\Contracts\\'.$contract);
-
-        expect($methods[1])->toEqualCanonicalizing(array_map(static fn (ReflectionMethod $method): string => $method->getName(), $interface->getMethods()), "Contracts\\{$contract} is not listed completely");
+        expect(app('router')->getMiddleware())->toHaveKey($alias);
     }
 });
