@@ -69,6 +69,7 @@ it('keeps production validation in the fake', function (): void {
 });
 
 it('passes assertNoKeyChanges on an untouched fake and fails it after a change', function (): void {
+    Key::factory()->ring('http')->create(['kid' => 'k']);
     $fake = Sentinel::fake();
     $fake->assertNoKeyChanges();
 

@@ -69,6 +69,7 @@ use RoundlyConsulting\Sentinel\Definition\CompiledSeals;
 use RoundlyConsulting\Sentinel\Definition\DefinitionRegistry;
 use RoundlyConsulting\Sentinel\Engine\Persister;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
+use RoundlyConsulting\Sentinel\Enums\KeyDestination;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
 use RoundlyConsulting\Sentinel\Enums\PersistOperation;
 use RoundlyConsulting\Sentinel\Enums\Reaction;
@@ -86,9 +87,14 @@ use RoundlyConsulting\Sentinel\Exceptions\SealingFailedException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
+use RoundlyConsulting\Sentinel\Exceptions\UnknownKeyException;
 use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
+use RoundlyConsulting\Sentinel\Keys\EnvSnippet;
 use RoundlyConsulting\Sentinel\Keys\ImportedMaterial;
 use RoundlyConsulting\Sentinel\Keys\KeyIds;
+use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
+use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
+use RoundlyConsulting\Sentinel\Keys\RingConfig;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\BulkQuery;
 use RoundlyConsulting\Sentinel\Support\Clock;
@@ -132,6 +138,9 @@ final class SentinelFake extends SentinelManager
     private ?VerifiedSignature $signature = null;
 
     private ?SignatureRejection $rejection = null;
+
+    /** @var array<string, KeyInfo> keys the fake generated or imported, by "ring\0kid" */
+    private array $keys = [];
 
     /** @var list<LedgerFinding> */
     private array $ledgerFindings = [];
@@ -733,6 +742,11 @@ final class SentinelFake extends SentinelManager
 
     // ── keys ──────────────────────────────────────────────────────────────────
 
+    /**
+     * Production's checks and material (nothing stored): an overlong label, a taken kid or a
+     * database key in a config-only ring are refused as in production, and a config key comes
+     * with its environment lines.
+     */
     public function generateKey(GenerateKeyRequest $request): GeneratedKey
     {
         $config = Settings::ring($request->ring);
@@ -747,12 +761,29 @@ final class SentinelFake extends SentinelManager
             throw KeyDriverException::invalidKeyId($request->ring);
         }
 
-        $result = new GeneratedKey(new KeyInfo(
-            $request->ring, $keyId, $request->algorithm, KeyStatus::Active, $request->destination->value, true,
-            $request->activatesAt, label: $request->label,
-        ));
+        if ($request->label !== null && mb_strlen($request->label) > 191) {
+            throw KeyDriverException::invalidLabel();
+        }
 
-        return $this->record('generateKey', $request, $result);
+        if ($this->fakedKey($request->ring, $keyId) !== null) {
+            throw KeyDriverException::keyIdTaken($request->ring, $keyId);
+        }
+
+        if ($request->destination === KeyDestination::Database && ! self::writable($config)) {
+            throw KeyDriverException::readOnly($request->ring);
+        }
+
+        $material = KeyMaterial::generate($request->algorithm);
+        $config = $request->destination === KeyDestination::Config;
+        $info = new KeyInfo(
+            $request->ring, $keyId, $request->algorithm, KeyStatus::Active, $request->destination->value, true,
+            $config ? null : ($request->activatesAt ?? Clock::now()), label: $config ? null : $request->label,
+        );
+        $this->keys["{$request->ring}\0{$keyId}"] = $info;
+
+        return $this->record('generateKey', $request, new GeneratedKey(
+            $info, $config ? EnvSnippet::forKey($request->ring, $keyId, $material) : null, $material->encodedPublic(),
+        ));
     }
 
     /**
@@ -775,17 +806,19 @@ final class SentinelFake extends SentinelManager
             throw KeyDriverException::invalidLabel();
         }
 
-        if (! in_array('database', $config->driver === 'chain' ? $config->drivers : [$config->driver], true)) {
+        if (! self::writable($config)) {
             throw KeyDriverException::readOnly($request->ring);
         }
 
         $material = ImportedMaterial::parse($request->algorithm, $request->material, $request->signing);
         $signing = $request->signing && $material->canSign();
-
-        return $this->record('importKey', $request, new KeyInfo(
+        $info = new KeyInfo(
             $request->ring, $request->keyId, $request->algorithm, $signing ? KeyStatus::Active : KeyStatus::VerifyOnly, 'database', $signing,
             $request->activatesAt ?? Clock::now(), label: $request->label, ownerType: $request->owner?->getMorphClass(), ownerId: $request->owner?->getKey(),
-        ));
+        );
+        $this->keys["{$request->ring}\0{$request->keyId}"] = $info;
+
+        return $this->record('importKey', $request, $info);
     }
 
     public function rotateKey(RotateKeyRequest $request): RotationResult
@@ -800,31 +833,68 @@ final class SentinelFake extends SentinelManager
         $result = new RotationResult(new KeyInfo(
             $request->ring, KeyIds::generate($request->ring), $algorithm, KeyStatus::Active, $config->driver, true, $request->activatesAt,
         ));
+        $this->keys["{$request->ring}\0{$result->current->keyId}"] = $result->current;
 
         return $this->record('rotateKey', $request, $result);
     }
 
     public function revokeKey(RevokeKeyRequest $request): KeyInfo
     {
-        $config = Settings::ring($request->ring);
+        Settings::ring($request->ring);
         $reason = trim($request->reason);
 
         if ($reason === '' || mb_strlen($reason) > 1000) {
             throw KeyDriverException::reasonRequired();
         }
 
-        return $this->record('revokeKey', $request, new KeyInfo(
-            $request->ring, $request->keyId, $config->algorithm, KeyStatus::Revoked, $config->driver, false,
+        $key = $this->storedKey($request->ring, $request->keyId);
+
+        return $this->record('revokeKey', $request, $this->keys["{$request->ring}\0{$request->keyId}"] = new KeyInfo(
+            $request->ring, $request->keyId, $key->algorithm, KeyStatus::Revoked, 'database', false,
+            $key->activatesAt, label: $key->label, ownerType: $key->ownerType, ownerId: $key->ownerId,
         ));
     }
 
     public function retireKey(string $ring, string $keyId): KeyInfo
     {
-        $config = Settings::ring($ring);
+        Settings::ring($ring);
+        $key = $this->storedKey($ring, $keyId);
 
-        return $this->record('retireKey', [$ring, $keyId], new KeyInfo(
-            $ring, $keyId, $config->algorithm, KeyStatus::Retired, $config->driver, false,
+        // A revoked key stays revoked: revocation beats every other status, as in production.
+        return $this->record('retireKey', [$ring, $keyId], $this->keys["{$ring}\0{$keyId}"] = new KeyInfo(
+            $ring, $keyId, $key->algorithm, $key->status === KeyStatus::Revoked ? KeyStatus::Revoked : KeyStatus::Retired, 'database', false,
+            $key->activatesAt, label: $key->label, ownerType: $key->ownerType, ownerId: $key->ownerId,
         ));
+    }
+
+    /**
+     * A key the fake generated or imported, else one the application's real key store holds
+     * (read only — the fake never writes it).
+     */
+    private function fakedKey(string $ring, string $keyId): ?KeyInfo
+    {
+        if (isset($this->keys["{$ring}\0{$keyId}"])) {
+            return $this->keys["{$ring}\0{$keyId}"];
+        }
+
+        $key = $this->container->make(KeyStoreManager::class)->find($ring, $keyId);
+
+        return $key === null ? null : KeyInfo::fromKey($key);
+    }
+
+    /**
+     * As production: an unknown kid is unknown, a key outside the database is read only.
+     */
+    private function storedKey(string $ring, string $keyId): KeyInfo
+    {
+        $key = $this->fakedKey($ring, $keyId) ?? throw UnknownKeyException::inRing($ring, $keyId);
+
+        return $key->driver === 'database' ? $key : throw KeyDriverException::notStoredInDatabase($ring, $keyId);
+    }
+
+    private static function writable(RingConfig $config): bool
+    {
+        return in_array('database', $config->driver === 'chain' ? $config->drivers : [$config->driver], true);
     }
 
     // ── assertions ────────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ use RoundlyConsulting\Sentinel\Exceptions\HttpSignatureException;
 use RoundlyConsulting\Sentinel\Exceptions\LedgerIntegrityException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Models\Key;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Invoice;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\PlainRecord;
 
@@ -99,11 +100,12 @@ it('asserts that nothing was re-sealed by any bulk verb', function (Closure $bul
 ]);
 
 it('asserts retired keys, through the ring handle', function (): void {
+    Key::factory()->ring('http')->create(['kid' => 'k-1']);
     $fake = Sentinel::fake();
 
     fails(fn () => $fake->assertKeyRetired('k-1'), 'Expected key [k-1] to be retired');
 
-    Sentinel::keys()->ring()->retire('k-1');
+    Sentinel::keys()->ring('http')->retire('k-1');
 
     $fake->assertKeyRetired('k-1');
     fails(fn () => $fake->assertKeyRetired('k-2'), 'Expected key [k-2] to be retired');

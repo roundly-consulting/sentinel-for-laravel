@@ -7,7 +7,9 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
 use RoundlyConsulting\Sentinel\DataTransferObjects\PruneOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\RevokeKeyRequest;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
+use RoundlyConsulting\Sentinel\Enums\KeyDestination;
 use RoundlyConsulting\Sentinel\Enums\LedgerFindingKind;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyKeyReusedException;
@@ -356,6 +358,44 @@ it('behaves exactly like the real manager', function (Closure $scenario): void {
         return [$info->status->value, $info->canSign];
     }],
     'import private material without signing' => [static fn (): mixed => Sentinel::keys()->ring('http')->import('own', Algorithm::Ed25519, (string) KeyMaterial::generate(Algorithm::Ed25519)->encodedPrivate())],
+    'generate into a config-only ring (dual-review O-34)' => [static fn (): mixed => Sentinel::keys()->ring('default')->generate(Algorithm::HmacSha256)],
+    'generate with an overlong label (dual-review O-34)' => [static fn (): mixed => Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, label: str_repeat('x', 300))],
+    'generate a kid that is taken (dual-review O-34)' => [static function (ParityRun $run): mixed {
+        $kid = $run->fake ? 'twice-fake' : 'twice-real';
+        Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, keyId: $kid);
+
+        return Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, keyId: $kid);
+    }],
+    'generate for the environment: lines and the public half (dual-review O-34)' => [static function (ParityRun $run): array {
+        $generated = Sentinel::keys()->ring()->generate(Algorithm::Ed25519, keyId: 'env-key', destination: KeyDestination::Config);
+        $stored = Sentinel::keys()->ring('http')->generate(Algorithm::Ed25519, keyId: $run->fake ? 'db-key-fake' : 'db-key-real');
+
+        return [
+            str_contains((string) $generated->envSnippet, 'SENTINEL_KEY_ID="env-key"'), str_starts_with((string) $generated->publicKey, 'base64:'),
+            $generated->info->driver, $stored->envSnippet, str_starts_with((string) $stored->publicKey, 'base64:'), $stored->info->driver,
+        ];
+    }],
+    'revoke or retire an unknown or a config key (dual-review O-34)' => [static function (ParityRun $run): array {
+        $outcomes = [];
+
+        foreach ([
+            static fn (): mixed => Sentinel::revokeKey(new RevokeKeyRequest('http', 'nope', 'gone')),
+            static fn (): mixed => Sentinel::revokeKey(new RevokeKeyRequest('default', 'test-default', 'gone')),
+            static fn (): mixed => Sentinel::keys()->ring('http')->retire('nope'),
+            static fn (): mixed => Sentinel::keys()->ring('default')->retire('test-default'),
+        ] as $call) {
+            try {
+                $call();
+                $outcomes[] = 'ok';
+            } catch (Throwable $exception) {
+                $outcomes[] = $exception::class;
+            }
+        }
+
+        $kid = Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, keyId: $run->fake ? 'revocable-fake' : 'revocable-real')->info->keyId;
+
+        return [...$outcomes, Sentinel::keys()->ring('http')->revoke($kid, 'leaked')->status->value, Sentinel::keys()->ring('http')->retire($kid)->status->value];
+    }],
     'import into a config-only ring' => [static function (): mixed {
         partnerRing();
 
