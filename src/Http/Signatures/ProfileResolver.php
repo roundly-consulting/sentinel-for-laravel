@@ -55,6 +55,7 @@ final class ProfileResolver
             self::seconds("{$prefix}.max_age", config("sentinel.signatures.profiles.{$name}.max_age"), 1, 86400, 300),
             self::seconds("{$prefix}.clock_skew", config("sentinel.signatures.profiles.{$name}.clock_skew"), 0, 3600, 30),
             self::algorithms("{$prefix}.algorithms", config("sentinel.signatures.profiles.{$name}.algorithms")),
+            Config::boolean("sentinel.signatures.profiles.{$name}.accept_signing_keys", false),
         );
     }
 

@@ -268,10 +268,7 @@ it('lets the configured revocation list beat a restored key envelope (#15 mitiga
  */
 it('detects replayed, altered and duplicated requests', function (): void {
     config()->set('app.debug', false);
-    config()->set('sentinel.keys.rings.http.driver', 'config');
-    config()->set('sentinel.keys.rings.http.key_id', 'partner');
-    config()->set('sentinel.keys.rings.http.key', 'base64:'.base64_encode(str_repeat("\x07\x01", 16)));
-    app(KeyStoreManager::class)->flush();
+    partnerRing(material: 'base64:'.base64_encode(str_repeat("\x07\x01", 16)));
 
     Route::post('/signed', static fn (): string => 'ok')->middleware('sentinel.signed');
     Route::post('/orders', static fn (): string => (string) cache()->increment('orders'))->middleware('sentinel.idempotent');

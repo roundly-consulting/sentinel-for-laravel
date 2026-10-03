@@ -30,6 +30,7 @@ final readonly class SignatureProfile
         public int $maxAge,
         public int $clockSkew,
         public array $algorithms,
+        public bool $acceptSigningKeys = false,
     ) {}
 
     public function allows(Algorithm $algorithm): bool

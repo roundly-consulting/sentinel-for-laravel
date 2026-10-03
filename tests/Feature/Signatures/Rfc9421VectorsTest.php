@@ -101,6 +101,8 @@ function rfcRing(?string $kid, ?Algorithm $algorithm, ?string $material, array $
     config()->set('sentinel.signatures.profiles.rfc', [
         'ring' => 'http', 'components' => [], 'require_query' => false, 'require_content_digest' => false,
         'require_nonce' => false, 'max_age' => 300, 'clock_skew' => 30, 'algorithms' => ['hmac-sha256', 'ed25519', 'ecdsa-p256-sha256', 'ecdsa-p384-sha384'],
+        // The RFC's keys sign and verify here — one store plays both sides.
+        'accept_signing_keys' => true,
     ]);
     app(KeyStoreManager::class)->flush();
 }

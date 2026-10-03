@@ -109,14 +109,22 @@ function corrupt(Closure $write): bool
 const PARTNER_SECRET = 'base64:cGFydG5lci1zaGFyZWQtc2VjcmV0LTMyLWJ5dGVzLWxvbmctZm9yLWhtYWM=';
 
 /**
- * An http ring on the config driver with one partner key.
+ * Both sides of a partner integration. Ours: the http ring (config driver) holds the partner's
+ * key verify-only, as an imported partner key always is — a key this application could sign
+ * with is refused inbound. The partner's: a `partner` ring holding the same key for signing,
+ * made the outbound ring, so `Sentinel::signatures()->sign()` here signs as the partner.
  */
 function partnerRing(string $kid = 'partner', Algorithm $algorithm = Algorithm::HmacSha256, string $material = PARTNER_SECRET): void
 {
     config()->set('sentinel.keys.rings.http.driver', 'config');
-    config()->set('sentinel.keys.rings.http.key_id', $kid);
-    config()->set('sentinel.keys.rings.http.algorithm', $algorithm->value);
-    config()->set('sentinel.keys.rings.http.key', $material);
+    config()->set('sentinel.keys.rings.http.key_id', null);
+    config()->set('sentinel.keys.rings.http.key', null);
+    config()->set('sentinel.keys.rings.http.previous', "{$kid}|{$algorithm->value}|{$material}");
+    config()->set('sentinel.keys.rings.partner', [
+        'driver' => 'config', 'key_id' => $kid, 'algorithm' => $algorithm->value, 'key' => $material,
+        'algorithms' => array_map(static fn (Algorithm $case): string => $case->value, Algorithm::cases()),
+    ]);
+    config()->set('sentinel.signatures.outbound.ring', 'partner');
     app(KeyStoreManager::class)->flush();
 }
 

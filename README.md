@@ -323,6 +323,7 @@ The published `config/sentinel.php` documents every key. All of them:
 | `signatures.profiles.<name>.max_age` | int 1–86400 | `300` | — | Seconds a signature is accepted after `created`. |
 | `signatures.profiles.<name>.clock_skew` | int 0–3600 | `30` | — | Allowed clock difference in seconds. |
 | `signatures.profiles.<name>.algorithms` | non-empty list (required) | the four RFC 9421 algorithms | — | Allowed algorithms; an empty list is a configuration error (fail closed). |
+| `signatures.profiles.<name>.accept_signing_keys` | bool | `false` | — | Accept a key this application can sign with (generated here, or imported with `signing: true`). Off: a request the app signed itself never passes as a partner's. |
 | `signatures.outbound.ring` | a configured ring | `http` | — | Ring of `Http::withSignature()` keys. |
 | `signatures.outbound.label` | label (`[a-z*][a-z0-9_-.*]{0,63}`) | `sig1` | — | Label of outgoing signatures. |
 | `signatures.outbound.components` | list | `@method`, `@authority`, `@path`, `@query`, `content-digest`, `content-type` | — | Components signed (absent ones are dropped). |
@@ -825,7 +826,9 @@ $key->publicKey;      // base64:… — share it with the partner
 
 Inbound — the default profile requires `created`, `keyid` and a `nonce`, accepts signatures
 up to 300 seconds old (± 30 seconds of clock skew), and requires `content-digest` whenever
-there is a body:
+there is a body. It accepts partner keys (imported verify-only), never a key this application
+signs with — so a request it signed itself cannot pass as a partner's (set
+`accept_signing_keys` on a profile whose partner truly shares one secret both ways):
 
 ```php
 Route::post('/partner/events', PartnerEvents::class)->middleware('sentinel.signed');

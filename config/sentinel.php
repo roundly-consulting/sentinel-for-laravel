@@ -354,6 +354,11 @@ return [
                 'max_age' => 300,
                 'clock_skew' => 30,
                 'algorithms' => ['hmac-sha256', 'ed25519', 'ecdsa-p256-sha256', 'ecdsa-p384-sha384'],
+                // A key this application can sign with (generated here, or imported with
+                // signing: true) is refused inbound: a request it signed itself — a webhook
+                // aimed back at its own API — must never pass as a partner's. True only for a
+                // partner that genuinely shares one secret both ways.
+                'accept_signing_keys' => false,
             ],
         ],
 

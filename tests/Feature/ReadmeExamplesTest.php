@@ -358,6 +358,8 @@ it('runs the nonce and single-use URL examples', function (): void {
 it('runs the message signature examples', function (): void {
     $partner = User::query()->create(['name' => 'ACME']);
     $key = Sentinel::keys()->ring('http')->generate(Algorithm::Ed25519, keyId: 'acme-2026-10', owner: $partner);
+    // Our own verifier stands in for the partner's: it must accept a key this application signs with.
+    config()->set('sentinel.signatures.profiles.default.accept_signing_keys', true);
     $verified = null;
     Route::post('/partner/events', static function (Request $request) use (&$verified): string {
         $verified = $request->attributes->get('sentinel.signature');
@@ -692,7 +694,9 @@ it('runs the flat nonce, single-use URL and prune examples', function (): void {
 it('runs the signing options and signature reader examples', function (): void {
     $partner = User::query()->create(['name' => 'ACME']);
     Sentinel::keys()->ring('http')->generate(Algorithm::Ed25519, keyId: 'acme-2027-01', owner: $partner);
-    config()->set('sentinel.signatures.profiles.partners', [...config('sentinel.signatures.profiles.default'), 'require_nonce' => false]);
+    // Our own verifier stands in for the partner's (which holds the public half): it must
+    // accept a key this application signs with.
+    config()->set('sentinel.signatures.profiles.partners', [...config('sentinel.signatures.profiles.default'), 'require_nonce' => false, 'accept_signing_keys' => true]);
     $sent = null;
     Http::fake(static function (ClientRequest $request) use (&$sent) {
         $sent = $request->toPsrRequest();

@@ -226,6 +226,10 @@ final readonly class SignatureVerifier
             $alg !== null && $alg !== $key->algorithm()->value => SignatureRejection::AlgorithmMismatch,
             // Both allow-lists: the profile's, and the ring's (a retired algorithm stays retired).
             ! $profile->allows($key->algorithm()), ! Settings::ring($profile->ring)->allows($key->algorithm()) => SignatureRejection::AlgorithmNotAllowed,
+            // A key this application signs with is its own, not a partner's: accepting it
+            // inbound would let a request it signed (a webhook aimed back at its own API)
+            // authenticate as a partner call — unless the profile shares its keys both ways.
+            $key->canSign() && ! $profile->acceptSigningKeys => SignatureRejection::UnknownKey,
             default => null,
         };
 

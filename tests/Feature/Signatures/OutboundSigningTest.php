@@ -39,6 +39,8 @@ function sentRequest(Closure $send): RequestInterface
  */
 it('signs outgoing requests that its own verifier accepts', function (Algorithm $algorithm): void {
     Sentinel::keys()->ring('http')->generate($algorithm, 'outbound-'.$algorithm->value);
+    // Our own verifier stands in for the partner's: it must accept a key this application signs with.
+    config()->set('sentinel.signatures.profiles.default.accept_signing_keys', true);
 
     $sent = sentRequest(static fn () => Http::withSignature('outbound-'.$algorithm->value)->withBody('{"id":1}')->post('https://partner.example/events?x=1'));
 

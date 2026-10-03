@@ -119,6 +119,9 @@ it('remembers a nonce for the whole last second of the window (dual-review O-10)
 
 it('enforces the ring\'s algorithm allow-list when signing and verifying (dual-review O-19)', function (): void {
     config()->set('sentinel.keys.rings.http.driver', 'database');
+    config()->set('sentinel.signatures.outbound.ring', 'http');
+    // A key shared both ways (it signs here, too): the profile must say so to accept it.
+    config()->set('sentinel.signatures.profiles.default.accept_signing_keys', true);
     app(KeyStoreManager::class)->flush();
     Sentinel::keys()->ring('http')->import('legacy-hmac', Algorithm::HmacSha256, PARTNER_SECRET, signing: true);
     $signed = Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/events', ['Content-Type' => 'application/json'], '{"a":1}'), 'legacy-hmac');
@@ -129,4 +132,24 @@ it('enforces the ring\'s algorithm allow-list when signing and verifying (dual-r
 
     expect(fn () => Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/events'), 'legacy-hmac'))->toThrow(AlgorithmNotAllowedException::class)
         ->and(rejectionOf(received($signed)))->toBe(SignatureRejection::AlgorithmNotAllowed);
+});
+
+it('never accepts the application\'s own signing key inbound by default (dual-review O-20)', function (): void {
+    config()->set('sentinel.keys.rings.http.driver', 'database');
+    config()->set('sentinel.signatures.outbound.ring', 'http');
+    app(KeyStoreManager::class)->flush();
+    Sentinel::keys()->ring('http')->generate(Algorithm::Ed25519, keyId: 'our-webhooks');
+    Route::post('/api/partner/refunds', static fn (Request $request): array => ['signed_by' => Sentinel::signatures()->current($request)?->keyId])
+        ->middleware('sentinel.signed');
+
+    // A customer points their webhook URL at our own partner endpoint; we sign and send it.
+    $own = Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/api/partner/refunds', ['Content-Type' => 'application/json'], '{"order":42}'), 'our-webhooks');
+
+    expect(dispatchSigned(received($own))->status())->toBe(401)
+        ->and(rejectionOf(received(Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/x'), 'our-webhooks'))))->toBe(SignatureRejection::UnknownKey);
+
+    // A profile that really shares its keys both ways says so.
+    config()->set('sentinel.signatures.profiles.default.accept_signing_keys', true);
+
+    expect(rejectionOf(received(Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/x'), 'our-webhooks'))))->toBeNull();
 });

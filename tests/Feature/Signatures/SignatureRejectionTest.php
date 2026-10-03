@@ -246,5 +246,5 @@ it('verifies partners listed as verify-only config keys in a chained ring', func
 
     expect(rejection($request))->toBeNull()
         ->and(Sentinel::keys()->ring('http')->find('partner')?->status)->toBe(KeyStatus::VerifyOnly)
-        ->and(fn () => Sentinel::signatures()->sign(new PsrRequest('GET', 'https://partner.example/'), 'partner'))->toThrow(NoSigningKeyException::class);
+        ->and(fn () => Sentinel::signatures()->sign(new PsrRequest('GET', 'https://partner.example/'), 'partner', new SigningOptions(ring: 'http')))->toThrow(NoSigningKeyException::class);
 });
