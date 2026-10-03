@@ -12,7 +12,7 @@ use Illuminate\Foundation\Application;
  *    patterns, which prove each leaf for every ring).
  *
  * `KeyType::fromConfig(...)` in the migrations and the toolkit's `Config::using()->enum()` /
- * `->intBetween()` readers are not `config(` tokens, so those exact keys are named as extra
+ * `->integer()` readers are not `config(` tokens, so those exact keys are named as extra
  * read prefixes (never a blanket `sentinel.`, which would also match `sentinel.seal/1`).
  */
 it('ships exactly the config keys it reads', function (): void {

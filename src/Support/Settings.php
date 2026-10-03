@@ -271,7 +271,7 @@ final class Settings
 
     public static function reasonMaxLength(): int
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.sealing.reason_max_length', 1, 10000, 1000);
+        return Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.sealing.reason_max_length', 1000, min: 1, max: 10000);
     }
 
     /**
@@ -279,7 +279,7 @@ final class Settings
      */
     public static function transactionAttempts(): int
     {
-        return max(1, Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.sealing.transaction_attempts', 1, 10, 3));
+        return max(1, Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.sealing.transaction_attempts', 3, min: 1, max: 10));
     }
 
     public static function checkLedger(): bool
@@ -400,12 +400,12 @@ final class Settings
 
     public static function ledgerBatchSize(): int
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.ledger.batch_size', 1, 100000, 1000);
+        return Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.ledger.batch_size', 1000, min: 1, max: 100000);
     }
 
     public static function backlogWarningSeconds(): int
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.ledger.backlog_warning_seconds', 60, 86400, 600);
+        return Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.ledger.backlog_warning_seconds', 600, min: 60, max: 86400);
     }
 
     /**
@@ -460,7 +460,7 @@ final class Settings
 
     public static function verifiedStatus(): int
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.middleware.verified_status', 400, 599, 409);
+        return Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.middleware.verified_status', 409, min: 400, max: 599);
     }
 
     /**
@@ -526,22 +526,22 @@ final class Settings
 
     public static function idempotencyTtl(): int
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.idempotency.ttl', RunLimits::MIN_TTL, RunLimits::MAX_TTL, 86400);
+        return Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.idempotency.ttl', 86400, min: RunLimits::MIN_TTL, max: RunLimits::MAX_TTL);
     }
 
     public static function idempotencyLockSeconds(): int
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.idempotency.lock_seconds', 1, 3600, 60);
+        return Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.idempotency.lock_seconds', 60, min: 1, max: 3600);
     }
 
     public static function idempotencyMinLength(): int
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.idempotency.min_length', 1, 255, 16);
+        return Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.idempotency.min_length', 16, min: 1, max: 255);
     }
 
     public static function idempotencyMaxLength(): int
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.idempotency.max_length', 1, 255, 255);
+        return Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.idempotency.max_length', 255, min: 1, max: 255);
     }
 
     public static function idempotencyAcceptsUnquoted(): bool
@@ -582,7 +582,7 @@ final class Settings
 
     public static function maxResponseBytes(): int
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.idempotency.max_response_bytes', 1024, 67108864, 1048576);
+        return Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.idempotency.max_response_bytes', 1048576, min: 1024, max: 67108864);
     }
 
     /**
@@ -623,12 +623,12 @@ final class Settings
 
     public static function nonceTtl(): int
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.nonces.ttl', 1, 2592000, 900);
+        return Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.nonces.ttl', 900, min: 1, max: 2592000);
     }
 
     public static function nonceLength(): int
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.nonces.length', 32, 128, 43);
+        return Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.nonces.length', 43, min: 32, max: 128);
     }
 
     public static function problemTypeBase(): ?string
@@ -715,7 +715,7 @@ final class Settings
     {
         return config('sentinel.signatures.outbound.expires_in') === null
             ? null
-            : Config::using(InvalidSentinelConfigurationException::class)->intBetween('sentinel.signatures.outbound.expires_in', 1, 86400, 300);
+            : Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.signatures.outbound.expires_in', 300, min: 1, max: 86400);
     }
 
     public static function outboundTag(): ?string
