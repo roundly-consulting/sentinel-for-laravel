@@ -333,7 +333,7 @@ The published `config/sentinel.php` documents every key. All of them:
 | `signatures.outbound.include_alg` | bool | `false` | — | Send the `alg` parameter. |
 | `signatures.advertise` | bool | `true` | `SENTINEL_ADVERTISE_SIGNATURE` | `Accept-Signature` on 401 responses. |
 | `schedule.enabled` | bool | `true` | `SENTINEL_SCHEDULE` | Register the upkeep tasks on the scheduler (off: schedule the commands yourself). |
-| `schedule.checkpoint` | frequency \| `off` | `everyMinute` | `SENTINEL_SCHEDULE_CHECKPOINT` | `sentinel:checkpoint` (only while the ledger is on) — the rollback window. |
+| `schedule.checkpoint` | frequency \| `off` | `everyMinute` | `SENTINEL_SCHEDULE_CHECKPOINT` | `sentinel:checkpoint` (only while the ledger is on) — the rollback window. Blank is not set → `everyMinute`. |
 | `schedule.verify` | frequency \| `off` | `daily` | `SENTINEL_SCHEDULE_VERIFY` | `sentinel:verify --allow-empty --ledger`; `hourly` suits small tables. |
 | `schedule.prune` | frequency \| `off` | `daily` | `SENTINEL_SCHEDULE_PRUNE` | `sentinel:prune`. |
 
@@ -349,11 +349,13 @@ ring's section with `env()`) and inbound policies under `signatures.profiles.<na
 
 **How values are read.** Every setting is validated at first use, and an invalid one throws
 `InvalidSentinelConfigurationException` naming the key — it never falls back to a default.
-Booleans accept `true`/`false`, `on`/`off`, `yes`/`no`, `1`/`0` (any case) and `''` (false);
-any other value throws (`SENTINEL_ALLOW_SUSPENSION=disabled` is an error, never "allowed"),
-and only an unset key takes its default. A value out of range, an unknown enum case, a
-malformed list or a non-string name (a log channel, an ability, a store, an anchor disk) throws
-the same way; a blank optional name reads as unset. `php artisan about` shows a Sentinel section
+A key that is not set — absent, `null` or blank (`''` or whitespace, what `SENTINEL_LEDGER=` in
+`.env` gives) — takes its default from the table above. Booleans accept `true`/`false`,
+`on`/`off`, `yes`/`no`, `1`/`0` (any case); any other value throws
+(`SENTINEL_ALLOW_SUSPENSION=disabled` is an error, never "allowed"). A value out of range, an
+unknown enum case, a malformed list or a non-string name (a log channel, an ability, a store, an
+anchor disk) throws the same way; a blank optional name is not set, so it reads as unset. A
+blank `schedule.*` frequency keeps its default — only `off` (or `null`) switches a task off. `php artisan about` shows a Sentinel section
 (rings, driver, signing key present or missing, flags, anchors, stores, sealable models,
 schedule — never key material), and `sentinel:check` reports every invalid setting at once.
 
