@@ -1356,7 +1356,8 @@ $this->artisan('sentinel:verify --ledger --allow-empty')->assertExitCode(1);
 ```
 
 Controls: `fakeStatus()` (sticky until the fake re-seals or acknowledges that seal, as
-production would), `fakeStatusOnce()`, `fakeVerifiedSignature()`, `rejectSignatures()`,
+production would; an optional `reason:` — a `Missing` defaults to `seal_deleted`, which
+`seal()` refuses, so script `never_sealed` for a row that was never sealed), `fakeStatusOnce()`, `fakeVerifiedSignature()`, `rejectSignatures()`,
 `fakeLedgerFindings()` (what every ledger verification reports, until called again with
 none) and `recorded(?string $method = null)`, which returns `list<Testing\RecordedCall>` —
 each with `method`, `arguments` (the request object, or the list of scalar arguments) and

@@ -150,9 +150,13 @@ final class SentinelFake extends SentinelManager
      * changed — or until the fake re-seals or acknowledges that seal, which leaves it intact,
      * as in production.
      *
+     * The reason defaults to what production reports most often: `seal_deleted` for `missing`
+     * (which `seal()` refuses — script `never_sealed` for a row that was never sealed),
+     * `computed` for `tampered` with only `c:*` changes and `mac` for any other `tampered`.
+     *
      * @param  list<string>|null  $changed
      */
-    public function fakeStatus(Model $model, VerificationStatus $status, ?string $seal = null, ?array $changed = null): static
+    public function fakeStatus(Model $model, VerificationStatus $status, ?string $seal = null, ?array $changed = null, ?string $reason = null): static
     {
         if ($seal === null) {
             // A status for every seal replaces what was scripted or settled per seal.
@@ -165,19 +169,20 @@ final class SentinelFake extends SentinelManager
             }
         }
 
-        $this->sticky[$this->identity($model, $seal)] = new FakedStatus($status, $changed);
+        $this->sticky[$this->identity($model, $seal)] = new FakedStatus($status, $changed, $reason);
 
         return $this;
     }
 
     /**
-     * The next verification of the model (one seal, or any when null) returns this status.
+     * The next verification of the model (one seal, or any when null) returns this status
+     * (reasons default as for {@see fakeStatus()}).
      *
      * @param  list<string>|null  $changed
      */
-    public function fakeStatusOnce(Model $model, VerificationStatus $status, ?string $seal = null, ?array $changed = null): static
+    public function fakeStatusOnce(Model $model, VerificationStatus $status, ?string $seal = null, ?array $changed = null, ?string $reason = null): static
     {
-        $this->once[$this->identity($model, $seal)][] = new FakedStatus($status, $changed);
+        $this->once[$this->identity($model, $seal)][] = new FakedStatus($status, $changed, $reason);
 
         return $this;
     }
@@ -226,7 +231,8 @@ final class SentinelFake extends SentinelManager
         }
 
         $verdict = $this->faked($model, $compiled, VerificationContext::Api);
-        $absent = $verdict->status === VerificationStatus::Unsealed || $verdict->status === VerificationStatus::Missing;
+        $absent = $verdict->status === VerificationStatus::Unsealed
+            || ($verdict->status === VerificationStatus::Missing && $verdict->reason === 'never_sealed');
 
         if (! $absent && ! Persister::benign($verdict)) {
             throw TamperedModelException::forResult($verdict);
@@ -309,6 +315,12 @@ final class SentinelFake extends SentinelManager
         if ($denial !== null) {
             throw AcknowledgementDeniedException::unauthorized($denial);
         }
+
+        // As in production: a strict seal is then missing (and comes back through
+        // acknowledge()), a lenient one unsealed.
+        $this->sticky[$this->identity($model, $compiled->name)] = $compiled->strict
+            ? new FakedStatus(VerificationStatus::Missing, null, 'unsealed')
+            : new FakedStatus(VerificationStatus::Unsealed, null);
 
         return $this->record('unseal', [$model, $compiled->name, $reason, $request->actor], true);
     }
@@ -574,7 +586,8 @@ final class SentinelFake extends SentinelManager
         foreach ($rows as $index => $model) {
             foreach ($seals as $seal) {
                 $verdict = $this->faked($model, $seal, VerificationContext::Command);
-                $verdict->status === VerificationStatus::Missing ? $skipped[] = $verdict : $resealed++;
+                // A row with history (anything but never sealed) is reported, never baselined.
+                $verdict->status === VerificationStatus::Missing && $verdict->reason !== 'never_sealed' ? $skipped[] = $verdict : $resealed++;
             }
 
             $this->progress($options->progress, $index, count($rows), $options->chunk);
@@ -1228,8 +1241,14 @@ final class SentinelFake extends SentinelManager
 
         $faked ??= $this->sticky[$this->identity($model, $seal->name)] ?? $this->sticky[$this->identity($model, null)] ?? new FakedStatus(VerificationStatus::Intact, null);
 
+        $reason = $faked->reason ?? match ($faked->status) {
+            VerificationStatus::Tampered => self::tamperedReason($faked->changed),
+            VerificationStatus::Missing => 'seal_deleted',
+            default => null,
+        };
+
         return new VerificationResult(
-            $faked->status, $faked->status === VerificationStatus::Tampered ? self::tamperedReason($faked->changed) : null, $model->getMorphClass(), $model->getKey(),
+            $faked->status, $reason, $model->getMorphClass(), $model->getKey(),
             $seal->name, changedAttributes: $faked->changed, context: $context, outdatedIsIntact: Settings::outdatedIsIntact(),
         );
     }

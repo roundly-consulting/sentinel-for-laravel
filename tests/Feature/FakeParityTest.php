@@ -53,6 +53,22 @@ final class ParityRun
     }
 
     /**
+     * Delete the invoice's seal row behind the application's back.
+     */
+    public function deleteSeal(Invoice $invoice): void
+    {
+        $manager = app(SentinelManager::class);
+
+        if ($this->fake && $manager instanceof SentinelFake) {
+            $manager->fakeStatus($invoice, VerificationStatus::Missing, 'financial');
+
+            return;
+        }
+
+        DB::table('sentinel_seals')->where('sealable_id', $invoice->id)->where('seal', 'financial')->delete();
+    }
+
+    /**
      * Change a computed field's source rows (the fake scripts the drift a real verification
      * proves with the attribute MAC).
      */
@@ -152,6 +168,29 @@ it('behaves exactly like the real manager', function (Closure $scenario): void {
         }
 
         return ['acknowledged'];
+    }],
+    'seal() after a seal row was deleted or deliberately removed (dual-review O-18)' => [static function (ParityRun $run): array {
+        $run->deleteSeal($deleted = invoice());
+        $outcomes = [Sentinel::verify($deleted, 'financial')->reason];
+
+        try {
+            Sentinel::seal($deleted, 'financial');
+        } catch (Throwable $exception) {
+            $outcomes[] = $exception::class;
+        }
+
+        Sentinel::unseal($unsealed = invoice(), 'INC-6', seal: 'financial');
+        Sentinel::unseal($unsealed, 'INC-6', seal: 'identity');
+        $outcomes[] = Sentinel::verify($unsealed, 'financial')->reason;
+        $outcomes[] = Sentinel::verify($unsealed, 'identity')->status->value;
+
+        try {
+            Sentinel::seal($unsealed, 'financial');
+        } catch (Throwable $exception) {
+            $outcomes[] = $exception::class;
+        }
+
+        return [...$outcomes, Sentinel::seal($unsealed, 'identity')->event->value, Sentinel::acknowledge($unsealed, 'INC-6 re-adopted', seal: 'financial')->acknowledged, $run->state($unsealed)];
     }],
     'unseal refused by the policy, and the actor it records (dual-review O-6)' => [static function (ParityRun $run): array {
         config()->set('sentinel.acknowledgement.ability', 'acknowledge-tampering');

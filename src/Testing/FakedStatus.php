@@ -17,5 +17,6 @@ final readonly class FakedStatus
     public function __construct(
         public VerificationStatus $status,
         public ?array $changed,
+        public ?string $reason = null,
     ) {}
 }

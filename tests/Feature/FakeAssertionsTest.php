@@ -9,10 +9,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
 use RoundlyConsulting\Sentinel\Enums\LedgerFindingKind;
+use RoundlyConsulting\Sentinel\Enums\SealEvent;
 use RoundlyConsulting\Sentinel\Enums\SignatureRejection;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Exceptions\HttpSignatureException;
 use RoundlyConsulting\Sentinel\Exceptions\LedgerIntegrityException;
+use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Invoice;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\PlainRecord;
@@ -227,4 +229,22 @@ it('asserts that nothing was signed, and verified signatures per profile', funct
     fails(fn () => $fake->assertNothingSigned(), 'but 1 request(s) were');
 
     expect(DB::table('sentinel_nonces')->count())->toBe(0);
+});
+
+it('scripts a missing seal with its reason, and seal() honours it as production does (dual-review O-18)', function (): void {
+    $invoice = invoice();
+    $fake = Sentinel::fake();
+
+    $fake->fakeStatus($invoice, VerificationStatus::Missing, 'financial');
+
+    expect(Sentinel::verify($invoice)->reason)->toBe('seal_deleted')
+        ->and(fn () => Sentinel::seal($invoice))->toThrow(TamperedModelException::class, 'missing: seal_deleted');
+
+    $fake->fakeStatus($invoice, VerificationStatus::Missing, 'financial', reason: 'never_sealed');
+
+    expect(Sentinel::seal($invoice)->event)->toBe(SealEvent::Sealed);
+
+    $fake->fakeStatusOnce($invoice, VerificationStatus::Stale, 'financial', reason: 'newer_version');
+
+    expect(Sentinel::verify($invoice)->reason)->toBe('newer_version');
 });
