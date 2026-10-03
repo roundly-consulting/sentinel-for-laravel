@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use GuzzleHttp\Psr7\Request as PsrRequest;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Request as ClientRequest;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\ExpectationFailedException;
 use Psr\Http\Message\RequestInterface;
@@ -99,3 +101,22 @@ it('records outgoing signatures under the fake', function (): void {
 
     expect(fn () => $fake->assertRequestSigned('other'))->toThrow(ExpectationFailedException::class, '[other]');
 });
+
+it('signs the request as it is finally sent, after every later middleware and callback (dual-review O-21)', function (Closure $later): void {
+    partnerRing();
+    Carbon::setTestNow(Carbon::createFromTimestampUTC(1_800_000_000));
+
+    $sent = sentRequest(static fn () => $later(Http::withSignature('partner'))->post('https://api.example.com/events', ['a' => 1]));
+
+    expect($sent->getHeaderLine('Content-Type'))->toBe('application/vnd.api+json')
+        ->and(Sentinel::signatures()->verify(received($sent))->keyId)->toBe('partner');
+
+    Carbon::setTestNow();
+})->with([
+    'a later request middleware' => [static fn (PendingRequest $request): PendingRequest => $request->withRequestMiddleware(
+        static fn (RequestInterface $psr): RequestInterface => $psr->withHeader('Content-Type', 'application/vnd.api+json'),
+    )],
+    'a later beforeSending callback' => [static fn (PendingRequest $request): PendingRequest => $request->beforeSending(
+        static fn (ClientRequest $client): RequestInterface => $client->toPsrRequest()->withHeader('Content-Type', 'application/vnd.api+json'),
+    )],
+]);
