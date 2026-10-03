@@ -216,3 +216,41 @@ it('suspends verification for a callback', function (): void {
     expect(Sentinel::withoutVerification(fn (): bool => app(SealingScope::class)->verificationSuspended()))->toBeTrue()
         ->and(app(SealingScope::class)->verificationSuspended())->toBeFalse();
 });
+
+it('puts unseal() through the acknowledgement policy, so unseal + seal never bypasses it (dual-review O-6)', function (): void {
+    config()->set('sentinel.acknowledgement.ability', 'acknowledge-tampering');
+    Gate::define('acknowledge-tampering', static fn (User $user): bool => $user->name === 'Admin');
+    $clerk = User::query()->create(['name' => 'Clerk']);
+    $admin = User::query()->create(['name' => 'Admin']);
+    $this->actingAs($clerk);
+    app()->instance(Runtime::class, new Runtime(app(), console: false));
+
+    $invoice = invoice();
+    DB::table('invoices')->where('id', $invoice->id)->update(['amount' => '0.01']);
+
+    expect(fn () => Sentinel::acknowledge($invoice, 'please'))->toThrow(AcknowledgementDeniedException::class, 'unauthorized')
+        ->and(fn () => Sentinel::unseal($invoice, 'cleanup', seal: 'financial'))->toThrow(AcknowledgementDeniedException::class, 'unauthorized')
+        ->and(Sentinel::verify($invoice)->status)->toBe(VerificationStatus::Tampered);
+
+    // An authorised unseal of a strict seal still leaves it to an acknowledgement, never seal().
+    expect(Sentinel::unseal($invoice, 'INC-4: cleanup', $admin, 'financial'))->toBeTrue()
+        ->and(fn () => Sentinel::seal(Invoice::query()->findOrFail($invoice->id), 'financial'))->toThrow(TamperedModelException::class, 'missing: unsealed')
+        ->and(Sentinel::acknowledge($invoice, 'INC-4: re-adopted', $admin, 'financial')->acknowledged)->toBeTrue()
+        ->and(Sentinel::verify($invoice)->status)->toBe(VerificationStatus::Intact);
+});
+
+it('records the acting user on an unseal, and requires one outside the console (dual-review O-6)', function (): void {
+    app()->instance(Runtime::class, new Runtime(app(), console: false));
+    $invoice = invoice();
+
+    expect(fn () => Sentinel::unseal($invoice, 'cleanup', seal: 'financial'))->toThrow(AcknowledgementDeniedException::class, 'actor is required');
+
+    $clerk = User::query()->create(['name' => 'Clerk']);
+    $this->actingAs($clerk);
+    Sentinel::unseal($invoice, 'cleanup', seal: 'financial');
+
+    $entry = LedgerEntry::query()->where('sealable_id', $invoice->id)->where('seal', 'financial')->orderByDesc('version')->firstOrFail();
+
+    expect((string) $entry->actor_id)->toBe((string) $clerk->id)
+        ->and($entry->actor_type)->toBe($clerk->getMorphClass());
+});

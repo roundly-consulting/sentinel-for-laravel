@@ -552,7 +552,8 @@ outside the console. Set `acknowledgement.ability` to check a Gate ability (it r
 model and the seal name), or bind your own `Contracts\AcknowledgementPolicy`.
 
 Other per-model operations on the handle: `seal()`, `unseal($reason)` (removes the seal with
-an `unsealed` tombstone), `current()` (the stored seal row, unverified), `history($limit)`
+an `unsealed` tombstone — under the same reason, actor and policy rules as an acknowledgement;
+a strict seal comes back through `acknowledge()`, never `seal()`), `current()` (the stored seal row, unverified), `history($limit)`
 (ledger records), `definition()` and `name()` — and their flat forms:
 
 ```php

@@ -7,8 +7,9 @@ namespace RoundlyConsulting\Sentinel\Contracts;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgeRequest;
 
 /**
- * Decides whether an actor may acknowledge an out-of-band change. Rebind it to plug in an
- * approval flow. Return null to allow, or a short denial code.
+ * Decides whether an actor may acknowledge an out-of-band change — or remove a seal with
+ * `unseal()`, which is as strong. Rebind it to plug in an approval flow. Return null to allow,
+ * or a short denial code.
  */
 interface AcknowledgementPolicy
 {

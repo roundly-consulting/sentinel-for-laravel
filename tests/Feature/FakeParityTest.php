@@ -16,10 +16,12 @@ use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\Models\LedgerEntry;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\Clock;
+use RoundlyConsulting\Sentinel\Support\Runtime;
 use RoundlyConsulting\Sentinel\Testing\SentinelFake;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Jobs\ChargeJob;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Invoice;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\InvoiceLine;
+use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\User;
 
 /**
  * Fake parity (plan §12.4, fleet theme 7): every scenario runs once against the real manager
@@ -150,6 +152,28 @@ it('behaves exactly like the real manager', function (Closure $scenario): void {
         }
 
         return ['acknowledged'];
+    }],
+    'unseal refused by the policy, and the actor it records (dual-review O-6)' => [static function (ParityRun $run): array {
+        config()->set('sentinel.acknowledgement.ability', 'acknowledge-tampering');
+        Gate::define('acknowledge-tampering', static fn (User $user): bool => $user->name === 'Admin');
+        $invoice = invoice();
+        $outcomes = [];
+
+        try {
+            Sentinel::unseal($invoice, 'cleanup', User::query()->create(['name' => 'Clerk']));
+        } catch (Throwable $exception) {
+            $outcomes[] = $exception::class;
+        }
+
+        app()->instance(Runtime::class, new Runtime(app(), console: false));
+
+        try {
+            Sentinel::unseal($invoice, 'cleanup');
+        } catch (Throwable $exception) {
+            $outcomes[] = $exception::class;
+        }
+
+        return [...$outcomes, Sentinel::unseal($invoice, 'INC-5', User::query()->create(['name' => 'Admin']), 'identity')];
     }],
     'refuse a write on a tampered model' => [static function (ParityRun $run): array {
         $run->tamper($invoice = invoice());

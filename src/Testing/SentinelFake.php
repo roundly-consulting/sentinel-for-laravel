@@ -302,8 +302,15 @@ final class SentinelFake extends SentinelManager
     public function unseal(Model $model, string $reason, ?Model $actor = null, ?string $seal = null): bool
     {
         $compiled = $this->compiled($model, $seal);
+        $reason = Reasons::normalize($reason);
+        $request = new AcknowledgeRequest($model, $compiled->name, $reason, $this->container->make(Runtime::class)->actor($actor));
+        $denial = $this->container->make(AcknowledgementPolicy::class)->authorize($request);
 
-        return $this->record('unseal', [$model, $compiled->name, Reasons::normalize($reason), $actor], true);
+        if ($denial !== null) {
+            throw AcknowledgementDeniedException::unauthorized($denial);
+        }
+
+        return $this->record('unseal', [$model, $compiled->name, $reason, $request->actor], true);
     }
 
     /**

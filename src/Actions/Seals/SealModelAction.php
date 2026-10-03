@@ -21,8 +21,9 @@ use RoundlyConsulting\Sentinel\Support\Settings;
 /**
  * Seal a model explicitly (`Sentinel::for($model)->seal()`), e.g. after a computed field's
  * source rows changed. Never launders: a model changed outside the application must be
- * acknowledged instead — only intact, outdated, never-sealed/unsealed models and computed-only
- * drift are (re-)sealed, and drift is recorded in the ledger.
+ * acknowledged instead — only intact, outdated, never-sealed and (lenient) unsealed models and
+ * proven computed-only drift are (re-)sealed, and drift is recorded in the ledger. A strict seal
+ * that was deliberately unsealed comes back through an acknowledgement, never through seal().
  */
 final readonly class SealModelAction
 {
@@ -48,7 +49,7 @@ final readonly class SealModelAction
 
             $verdict = $this->verifier->verify($model, $seal, VerificationContext::Api, Settings::checkLedger(), lock: true);
             $absent = $verdict->status === VerificationStatus::Unsealed
-                || ($verdict->status === VerificationStatus::Missing && in_array($verdict->reason, ['never_sealed', 'unsealed'], true));
+                || ($verdict->status === VerificationStatus::Missing && $verdict->reason === 'never_sealed');
 
             if (! $absent && ! Persister::benign($verdict)) {
                 throw TamperedModelException::forResult($verdict);
