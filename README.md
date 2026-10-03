@@ -269,7 +269,7 @@ The published `config/sentinel.php` documents every key. All of them:
 | `keys.rings.http.key_id` / `algorithm` / `key` / `public_key` / `previous` / `drivers` | as above | as above | `SENTINEL_HTTP_KEY_ID`, `SENTINEL_HTTP_ALGORITHM`, `SENTINEL_HTTP_KEY`, `SENTINEL_HTTP_PUBLIC_KEY`, `SENTINEL_HTTP_KEYS` | When the `http` ring uses the config driver. |
 | `sealing.auto` | bool | `true` | `SENTINEL_AUTO_SEAL` | Seal on Eloquent writes (turn off on verify-only nodes). |
 | `sealing.on_tampered_write` | `refuse`\|`reseal`\|`skip` | `refuse` | `SENTINEL_ON_TAMPERED_WRITE` | What an Eloquent write does to a model that is not intact. |
-| `sealing.allow_suspension` | bool | `true` | `SENTINEL_ALLOW_SUSPENSION` | Permit `Sentinel::withoutSealing()`. |
+| `sealing.allow_suspension` | bool | `false` | `SENTINEL_ALLOW_SUSPENSION` | Permit `Sentinel::withoutSealing()`. Off unless you opt in: not set (absent, `null`, blank) refuses it. |
 | `sealing.field_tags` | bool | `true` | `SENTINEL_FIELD_TAGS` | Keyed per-field tags that name changed attributes (HMAC keys). |
 | `sealing.reason_max_length` | int 1–10000 | `1000` | — | Acknowledgement, unseal and baseline reasons. |
 | `sealing.transaction_attempts` | int 1–10 | `3` | — | Retries of Sentinel's own transactions (never the host's `save()`). |
@@ -464,10 +464,13 @@ between database engines) — see the technical docs for the frozen `sentinel.se
   tombstone to the ledger for every seal, `manual()` ones included; a soft delete keeps the
   seal; deleting an unsaved model does nothing (it returns `null`). With `sealing.auto` off or
   inside `withoutSealing()` no tombstone is written, so the ledger scan reports the delete.
-- **Suspension** for seeders and imports — audited by a `SealingSuspended` event, refused
-  when `sealing.allow_suspension` is off:
+- **Suspension** for seeders and imports — an explicit opt-in, audited by a `SealingSuspended`
+  event. `sealing.allow_suspension` ships **off**: until you set `SENTINEL_ALLOW_SUSPENSION=true`
+  (a blank `SENTINEL_ALLOW_SUSPENSION=` counts as not set, so it stays off),
+  `withoutSealing()` throws `SealingSuspensionNotAllowedException` and the callback never runs:
 
 ```php
+// .env (only where seeders or imports run): SENTINEL_ALLOW_SUSPENSION=true
 Sentinel::withoutSealing(fn () => Invoice::query()->create($row), reason: 'Legacy import');
 ```
 
