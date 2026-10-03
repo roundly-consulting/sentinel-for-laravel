@@ -137,3 +137,10 @@ Initial public release.
 - Error messages that say what to do next: the declared seals of a model, the environment
   variables of a ring without a signing key (and `WithSentinelKeys` in tests), the format of
   verify-only keys for a read-only ring.
+
+### Upgrading from a pre-release build
+
+- Migration `0004_create_sentinel_seals_table` was edited in place to add the nullable
+  `attributes_mac` column; there is no new migration. A host that ran an earlier copy must
+  re-publish the migrations and re-run 0004, or add the column (`string('attributes_mac', 192)->nullable()`)
+  to `sentinel_seals` itself, before the next sealed write.
