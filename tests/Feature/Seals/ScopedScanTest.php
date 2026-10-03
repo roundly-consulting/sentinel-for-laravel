@@ -88,6 +88,7 @@ it('reports progress after every chunk of scans, re-seals and baselines', functi
     Sentinel::model(Invoice::class)->reseal(chunk: 3, progress: $record);
     $reseal = $seen;
     $seen = [];
+    config()->set('sentinel.sealing.allow_suspension', true);
     Sentinel::withoutSealing(static fn () => record(), 'import');
     Sentinel::model(PlainRecord::class)->sealMissing('adopted', progress: $record);
 

@@ -282,9 +282,13 @@ final class Settings
         return self::flag('sealing.auto', config('sentinel.sealing.auto'), true);
     }
 
+    /**
+     * Whether `Sentinel::withoutSealing()` may pause seal protection. Off unless the host opts
+     * in: a key that is not set (absent, null, blank) refuses suspension.
+     */
     public static function allowSuspension(): bool
     {
-        return self::flag('sealing.allow_suspension', config('sentinel.sealing.allow_suspension'), true);
+        return self::flag('sealing.allow_suspension', config('sentinel.sealing.allow_suspension'), false);
     }
 
     public static function fieldTags(): bool

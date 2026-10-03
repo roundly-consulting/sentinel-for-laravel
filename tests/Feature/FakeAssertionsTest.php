@@ -65,6 +65,7 @@ it('asserts that nothing was unsealed, and that sealing was not suspended', func
     $fake->assertSealingNotSuspended();
 
     Sentinel::for($invoice, 'identity')->because('archived')->unseal();
+    config()->set('sentinel.sealing.allow_suspension', true);
     Sentinel::withoutSealing(static fn (): null => null, 'import');
 
     fails(fn () => $fake->assertNothingUnsealed(), '1 seal removal(s) were recorded');

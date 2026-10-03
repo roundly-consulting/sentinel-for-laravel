@@ -82,6 +82,7 @@ it('serialises eight concurrent sealed writes of one model', function (): void {
 })->skip(fn (): bool => realEngineUnavailable(), 'needs a real engine (pgsql or mysql) and pcntl + posix');
 
 it('lets exactly one racer create the first seal of a never-sealed model', function (): void {
+    config()->set('sentinel.sealing.allow_suspension', true);
     $invoice = Sentinel::withoutSealing(static fn (): Invoice => invoice(), 'race setup');
 
     $outcomes = raceSealing($invoice->id, static fn (Invoice $racer) => Sentinel::seal($racer));

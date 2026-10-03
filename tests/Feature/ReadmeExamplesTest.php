@@ -105,6 +105,7 @@ function readme(): string
 }
 
 it('runs the quick start', function (): void {
+    config()->set('sentinel.sealing.allow_suspension', true);
     $existing = Sentinel::withoutSealing(static fn () => Invoice::query()->create(['customer_id' => 1, 'amount' => '5.00']), reason: 'existing rows');
 
     expect(Artisan::call('sentinel:seal-missing', ['model' => Invoice::class, '--reason' => 'Initial baseline']))->toBe(0)
@@ -162,6 +163,7 @@ it('compiles the seal declarations', function (): void {
 });
 
 it('runs the sealing and writes examples', function (): void {
+    config()->set('sentinel.sealing.allow_suspension', true);
     $imported = Sentinel::withoutSealing(fn () => Invoice::query()->create(['number' => 'IMP-1']), reason: 'Legacy import');
     $record = SafeOverride::query()->create(['name' => '  padded  ']);
 
@@ -208,6 +210,7 @@ it('runs the acknowledgement examples', function (): void {
 it('runs the bulk examples', function (): void {
     $admin = User::query()->create(['name' => 'Admin']);
     $draft = invoice(['status' => 'draft']);
+    config()->set('sentinel.sealing.allow_suspension', true);
     $imported = Sentinel::withoutSealing(fn () => invoice(['status' => 'draft']), reason: 'import');
     $seals = Sentinel::model(Invoice::class);
 
@@ -269,6 +272,7 @@ it('runs the middleware, rule, macro and scope examples', function (): void {
     Route::put('/invoices/{invoice}/lines/{line}', static fn (Invoice $invoice, InvoiceLine $line): string => 'ok')
         ->middleware([SubstituteBindings::class, 'sentinel.verified:invoice@financial']);
     $validator = Validator::make(['invoice_id' => $invoice->id], ['invoice_id' => ['required', new IntactSeal(Invoice::class, seal: 'financial')]]);
+    config()->set('sentinel.sealing.allow_suspension', true);
     Sentinel::withoutSealing(fn () => invoice(), reason: 'import');
 
     expect($this->put("/invoices/{$invoice->id}/lines/{$line->id}")->status())->toBe(200)
@@ -610,6 +614,7 @@ it('runs the flat per-model examples', function (): void {
 it('runs the flat bulk examples', function (): void {
     $admin = User::query()->create(['name' => 'Admin']);
     $draft = invoice(['status' => 'draft']);
+    config()->set('sentinel.sealing.allow_suspension', true);
     Sentinel::withoutSealing(fn () => invoice(['tenant_id' => 7]), reason: 'import');
 
     $scan = Sentinel::scan(new ScanOptions([Invoice::class], seal: 'financial', limit: 10_000, checkSchema: true));

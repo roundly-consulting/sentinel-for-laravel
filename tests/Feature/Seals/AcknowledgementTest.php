@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -10,6 +11,7 @@ use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Events\SealingSuspended;
 use RoundlyConsulting\Sentinel\Events\TamperAcknowledged;
 use RoundlyConsulting\Sentinel\Exceptions\AcknowledgementDeniedException;
+use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingFailedException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
@@ -18,6 +20,7 @@ use RoundlyConsulting\Sentinel\Models\LedgerEntry;
 use RoundlyConsulting\Sentinel\Models\Seal;
 use RoundlyConsulting\Sentinel\Support\Runtime;
 use RoundlyConsulting\Sentinel\Support\SealingScope;
+use RoundlyConsulting\Sentinel\Support\Settings;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Invoice;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\User;
 
@@ -174,6 +177,7 @@ it('exposes the current seal row and the ledger history', function (): void {
  */
 it('suspends sealing for a callback, restores it even on failure, and audits it', function (): void {
     Event::fake([SealingSuspended::class]);
+    config()->set('sentinel.sealing.allow_suspension', true);
 
     $inside = Sentinel::withoutSealing(function (): Invoice {
         return Sentinel::withoutSealing(fn (): Invoice => invoice(), 'nested');
@@ -211,6 +215,76 @@ it('refuses suspension when it is disabled', function (): void {
     expect(fn () => Sentinel::withoutSealing(fn () => null, 'x'))->toThrow(SealingSuspensionNotAllowedException::class)
         ->and(fn () => Sentinel::withoutSealing(fn () => null, ''))->toThrow(SealingSuspensionNotAllowedException::class);
 });
+
+/**
+ * Owner 2026-10-03: suspension is an explicit opt-in. A key that is not set — absent, null or
+ * blank (`SENTINEL_ALLOW_SUSPENSION=`) — takes the shipped default, which is off, so seal
+ * protection never pauses by accident.
+ */
+it('refuses suspension unless the host opts in', function (Closure $leaveUnset): void {
+    Event::fake([SealingSuspended::class]);
+    $leaveUnset();
+    $ran = false;
+
+    expect(function () use (&$ran): void {
+        Sentinel::withoutSealing(function () use (&$ran): void {
+            $ran = true;
+        }, 'import');
+    })->toThrow(SealingSuspensionNotAllowedException::class)
+        ->and($ran)->toBeFalse()
+        ->and(app(SealingScope::class)->sealingSuspended())->toBeFalse();
+
+    Event::assertNotDispatched(SealingSuspended::class);
+})->with([
+    'the shipped config' => [static function (): void {}],
+    'absent' => [static fn () => config()->set('sentinel.sealing', Arr::except((array) config('sentinel.sealing'), 'allow_suspension'))],
+    'null' => [static fn () => config()->set('sentinel.sealing.allow_suspension', null)],
+    'blank' => [static fn () => config()->set('sentinel.sealing.allow_suspension', '')],
+    'whitespace' => [static fn () => config()->set('sentinel.sealing.allow_suspension', "  \t")],
+]);
+
+it('ships suspension off, also behind a blank SENTINEL_ALLOW_SUSPENSION=', function (?string $env): void {
+    $previous = getenv('SENTINEL_ALLOW_SUSPENSION');
+    putenv($env === null ? 'SENTINEL_ALLOW_SUSPENSION' : "SENTINEL_ALLOW_SUSPENSION={$env}");
+
+    try {
+        $shipped = (require __DIR__.'/../../../config/sentinel.php')['sealing']['allow_suspension'];
+    } finally {
+        putenv($previous === false ? 'SENTINEL_ALLOW_SUSPENSION' : "SENTINEL_ALLOW_SUSPENSION={$previous}");
+    }
+
+    config()->set('sentinel.sealing.allow_suspension', $shipped);
+
+    expect($shipped)->toBe($env ?? false)
+        ->and(Settings::allowSuspension())->toBeFalse()
+        ->and(fn () => Sentinel::withoutSealing(fn () => null, 'import'))->toThrow(SealingSuspensionNotAllowedException::class);
+})->with(['unset' => [null], 'blank' => ['']]);
+
+it('allows suspension once the host opts in', function (string|bool $value): void {
+    Event::fake([SealingSuspended::class]);
+    config()->set('sentinel.sealing.allow_suspension', $value);
+
+    expect(Settings::allowSuspension())->toBeTrue()
+        ->and(Sentinel::withoutSealing(static fn (): string => 'ran', 'import'))->toBe('ran');
+
+    Event::assertDispatched(SealingSuspended::class, 1);
+})->with([
+    'true' => ['true'], 'TRUE' => ['TRUE'], '1' => ['1'], 'on' => ['on'], 'yes' => ['yes'], 'bool true' => [true],
+]);
+
+it('throws on a junk allow_suspension instead of reading it as either answer', function (mixed $junk): void {
+    config()->set('sentinel.sealing.allow_suspension', $junk);
+    $ran = false;
+
+    expect(function () use (&$ran): void {
+        Sentinel::withoutSealing(function () use (&$ran): void {
+            $ran = true;
+        }, 'import');
+    })->toThrow(InvalidSentinelConfigurationException::class, 'sentinel.sealing.allow_suspension')
+        ->and($ran)->toBeFalse();
+})->with([
+    'disabled' => ['disabled'], 'maybe' => ['maybe'], 'two' => [2], 'array' => [['yes']],
+]);
 
 it('suspends verification for a callback', function (): void {
     expect(Sentinel::withoutVerification(fn (): bool => app(SealingScope::class)->verificationSuspended()))->toBeTrue()

@@ -104,7 +104,7 @@ it('stores and seals UTC regardless of the process and app time zones', function
  */
 dataset('sentinel switches', [
     ['sentinel.sealing.auto', fn () => Settings::autoSeal(), true],
-    ['sentinel.sealing.allow_suspension', fn () => Settings::allowSuspension(), true],
+    ['sentinel.sealing.allow_suspension', fn () => Settings::allowSuspension(), false],
     ['sentinel.sealing.field_tags', fn () => Settings::fieldTags(), true],
     ['sentinel.verification.check_ledger', fn () => Settings::checkLedger(), true],
     ['sentinel.verification.outdated_is_intact', fn () => Settings::outdatedIsIntact(), true],

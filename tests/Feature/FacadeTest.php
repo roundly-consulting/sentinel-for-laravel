@@ -145,6 +145,7 @@ it('passes and fails every sealing assertion', function (): void {
     $fake->assertNothingVerified();
     $fake->assertNothingAcknowledged();
 
+    config()->set('sentinel.sealing.allow_suspension', true);
     Sentinel::withoutSealing(fn () => null, 'import');
     Sentinel::unseal($invoice, 'archive', seal: 'identity');
     $fake->assertSealingSuspended();

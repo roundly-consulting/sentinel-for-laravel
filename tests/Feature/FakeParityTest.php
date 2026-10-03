@@ -301,7 +301,12 @@ it('behaves exactly like the real manager', function (Closure $scenario): void {
 
         return Sentinel::withoutSealing(static fn (): int => 1, 'import');
     }],
-    'suspension allowed' => [static fn (): mixed => Sentinel::withoutSealing(static fn (): string => 'ran', 'import')],
+    'suspension allowed' => [static function (): mixed {
+        config()->set('sentinel.sealing.allow_suspension', true);
+
+        return Sentinel::withoutSealing(static fn (): string => 'ran', 'import');
+    }],
+    'suspension not set' => [static fn (): mixed => Sentinel::withoutSealing(static fn (): int => 1, 'import')],
     'idempotency: run, replay, 422 and 409' => [static function (): array {
         $runs = 0;
         $charge = static function () use (&$runs): array {

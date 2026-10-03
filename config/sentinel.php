@@ -123,7 +123,9 @@ return [
     | on_tampered_write  — an Eloquent write on a model that is not intact:
     |                      refuse (nothing written), reseal (write and audit the
     |                      previous status) or skip (write, leave the seal)
-    | allow_suspension   — permit Sentinel::withoutSealing() (seeders, imports)
+    | allow_suspension   — permit Sentinel::withoutSealing() (seeders, imports).
+    |                      Off unless you opt in: absent, null or blank
+    |                      (SENTINEL_ALLOW_SUSPENSION=) refuses suspension
     | field_tags         — keyed per-field tags that tell which attributes
     |                      changed (HMAC keys only; never stores values)
     | reason_max_length  — acknowledgement / unseal / baseline reasons
@@ -135,7 +137,7 @@ return [
     'sealing' => [
         'auto' => env('SENTINEL_AUTO_SEAL', true),
         'on_tampered_write' => env('SENTINEL_ON_TAMPERED_WRITE', 'refuse'),
-        'allow_suspension' => env('SENTINEL_ALLOW_SUSPENSION', true),
+        'allow_suspension' => env('SENTINEL_ALLOW_SUSPENSION', false),
         'field_tags' => env('SENTINEL_FIELD_TAGS', true),
         'reason_max_length' => 1000,
         'transaction_attempts' => 3,

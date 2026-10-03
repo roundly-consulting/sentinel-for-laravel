@@ -198,6 +198,7 @@ it('writes nothing when one selected row is not intact', function (): void {
 });
 
 it('baselines rows that were never sealed, and only those', function (): void {
+    config()->set('sentinel.sealing.allow_suspension', true);
     $raw = Sentinel::withoutSealing(static fn (): Invoice => invoice(), 'import');
     $deleted = invoice();
     Seal::query()->where('sealable_id', $deleted->id)->where('seal', 'financial')->delete();

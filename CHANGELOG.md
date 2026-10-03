@@ -46,6 +46,10 @@ Initial public release.
   unseal) that detects replayed and rolled-back seals.
 - `Sentinel::for($model)`, `Sentinel::model(Invoice::class)`, `withoutSealing()`,
   `withoutVerification()` and the `HasSeals` trait helpers and scopes.
+- `withoutSealing()` is an explicit opt-in: `sentinel.sealing.allow_suspension` ships off,
+  and a key that is not set (absent, null or a blank `SENTINEL_ALLOW_SUSPENSION=`) keeps
+  suspension refused (`SealingSuspensionNotAllowedException`); set it to `true` where seeders
+  or imports run.
 - `Sentinel::fake()`: a recording fake for application tests that keeps production
   semantics — real definitions, the tampered-write policy applied to scripted statuses
   (`fakeStatus()`, `fakeStatusOnce()`), enforced reasons and policies, and the real
@@ -139,6 +143,11 @@ Initial public release.
   verify-only keys for a read-only ring.
 
 ### Upgrading from a pre-release build
+
+- `sentinel.sealing.allow_suspension` now defaults to off. A host that calls
+  `Sentinel::withoutSealing()` sets `SENTINEL_ALLOW_SUSPENSION=true` where seeders or imports
+  run. A published `config/sentinel.php` keeps the old `env('SENTINEL_ALLOW_SUSPENSION', true)`
+  line until you change its default to `false`.
 
 - Migration `0004_create_sentinel_seals_table` was edited in place to add the nullable
   `attributes_mac` column; there is no new migration. A host that ran an earlier copy must

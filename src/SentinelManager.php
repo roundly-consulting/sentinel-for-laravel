@@ -337,7 +337,8 @@ class SentinelManager
     /**
      * Run the callback with automatic sealing off (seeders, imports). Writes inside are
      * unsealed or stale until re-sealed; strict seals report them. Audited by
-     * `SealingSuspended`; refused when `sentinel.sealing.allow_suspension` is false.
+     * `SealingSuspended`; refused unless `sentinel.sealing.allow_suspension` is on (it ships
+     * off, and a key that is not set keeps it off).
      *
      * @template T
      *

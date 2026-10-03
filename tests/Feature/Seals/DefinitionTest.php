@@ -170,6 +170,7 @@ it('refuses models that are not sealable and seals that are not declared', funct
 
 it('exposes class-level seal information', function (): void {
     $sealed = invoice();
+    config()->set('sentinel.sealing.allow_suspension', true);
     $unsealed = Sentinel::withoutSealing(fn () => invoice(), 'import');
 
     expect(Sentinel::model(Invoice::class)->seals())->toBe(['financial', 'identity'])

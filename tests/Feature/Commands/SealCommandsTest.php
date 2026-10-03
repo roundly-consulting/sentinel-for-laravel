@@ -144,6 +144,7 @@ it('re-seals from the console and lists what it skipped', function (): void {
 });
 
 it('baselines from the console with a required reason', function (): void {
+    config()->set('sentinel.sealing.allow_suspension', true);
     $raw = Sentinel::withoutSealing(static fn (): Invoice => invoice(), 'import');
 
     expect(runArtisan('sentinel:seal-missing', ['model' => Invoice::class])[0])->toBe(2);
