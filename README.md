@@ -447,8 +447,10 @@ between database engines) — see the technical docs for the frozen `sentinel.se
   changed (seals with computed values re-seal on every update). The write and its seal are one
   transaction: if sealing fails, the write rolls back. Every Eloquent write path is covered —
   `save`, `update`, `create`, `firstOrCreate`, `updateOrCreate`, `touch`, `push`, `increment`
-  and `decrement` (also `incrementEach`), `restore`, `delete`, `forceDelete` and the quiet
-  variants.
+  and `decrement` (also `incrementEach` / `decrementEach` on Laravel 13+), `restore`, `delete`,
+  `forceDelete` and the quiet variants. On Laravel 12 a model has no `incrementEach()`: the
+  call falls through to the query builder and updates **every row of the table**, unsealed —
+  use `increment()` per column there.
 - **Explicit.** `Sentinel::seal($invoice)`, `Sentinel::for($invoice)->because('…')->seal()` or
   `$invoice->seal()`. An explicit seal never launders: a tampered model must be acknowledged.
 - **Tampered writes.** Before an update the row is locked and verified. A model changed
