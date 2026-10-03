@@ -13,14 +13,16 @@ Initial public release.
 - The `Sentinel` facade, the injectable `SentinelManager` and one action per operation — one
   API in three styles (no global alias: import `RoundlyConsulting\Sentinel\Facades\Sentinel`).
 - Canonical format `sentinel.seal/1`: RFC 8785 (JCS) documents with exact integers, typed
-  and engine-portable field values (decimals at a fixed scale, UTC datetimes, canonical JSON),
-  and frozen known-answer vectors.
+  and engine-portable field values (decimals at a fixed scale, datetimes as written or — with
+  an offset — in UTC, never confused with each other, canonical JSON), an attribute document
+  (`sentinel.seal-attributes/1`) that proves drift confined to computed values, and frozen
+  known-answer vectors.
 - Key material for `hmac-sha256|384|512`, `ed25519` and `ecdsa-p256-sha256|p384-sha384`
   through `crypto-for-laravel`, with the algorithm pinned per key, per-purpose HKDF subkeys
   (RFC 5869) and `base64:`-only encoding.
 - `sentinel.context` configuration: an application domain separator bound into every MAC.
-- Key rings with `config` (env, the default), `database` (encrypted, integrity-bound
-  envelopes) and `chain` drivers, custom drivers through `Sentinel::extend()`, SP 800-57
+- Key rings with `config` (env, the default), `database` (AES-256-GCM envelopes under a key
+  derived from `APP_KEY` for that purpose only, bound to their row) and `chain` drivers, custom drivers through `Sentinel::extend()`, SP 800-57
   statuses (pending / active / verify-only / retired / revoked) and a configured revocation
   list that beats every driver.
 - `Sentinel::keys()` and the `sentinel:key:generate|rotate|revoke|retire|list` commands
@@ -73,8 +75,8 @@ Initial public release.
   `sentinel.idempotent[:required]` middleware replays a completed request's stored response
   (`Idempotent-Replayed`), answers 422 for a key reused with another payload and 409 (with
   `Retry-After`) while it is still in flight, releases the key on 5xx, never stores
-  `Set-Cookie`, encrypts stored responses and optionally commits the handler and the record
-  in one transaction; `Sentinel::idempotency()->run()` for jobs and commands;
+  `Set-Cookie`, encrypts stored responses bound to their key and optionally commits the
+  handler and the record in one transaction (database store); `Sentinel::idempotency()->run()` for jobs and commands;
   `Http::withIdempotencyKey()` for outgoing requests; database and cache stores (an edited
   stored record fails closed in both).
 - Single-use, purpose-bound nonces (`Sentinel::nonces()->issue()/consume()`, only digests
@@ -88,7 +90,8 @@ Initial public release.
   `Content-Digest`, nonce replay protection) and answers 401 problem details with an
   `Accept-Signature` hint; `Http::withSignature()` signs outgoing requests;
   `Sentinel::signatures()->verifyResponse()` checks signed responses. Verified against the
-  RFC's Appendix B test vectors.
+  RFC's Appendix B test vectors. The application's own signing keys are never accepted inbound
+  (`accept_signing_keys` opts in), and a ring HTTP signatures use can never vouch for a seal.
 - A README covering installation, every configuration key, the threat model (what is and
   is not detected) and the full public API.
 - Partner onboarding without a deploy: `Sentinel::keys()->ring('http')->import()`,
@@ -111,7 +114,8 @@ Initial public release.
 - `sentinel:install`: publishes, generates the default key when missing and prints the next
   steps.
 - The `Idempotent` queue-job middleware: a job dispatched twice runs once; an in-flight
-  duplicate is released back onto the queue.
+  duplicate is released back onto the queue — the running job holds its key for its
+  `$timeout` (or its queue's `retry_after`, or a given `lease`).
 - Idempotent runs return the JSON round-trip of the callback's result on the first run and on
   every replay; a callback whose result cannot be stored never runs a second time.
 - `WithSentinelKeys` and `SentinelTestKeys::install()`: real throwaway keys for a host's test
