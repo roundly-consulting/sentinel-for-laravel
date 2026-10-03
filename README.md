@@ -1073,7 +1073,7 @@ $report->warnings();
 | `app_key` | database keys or `idempotency.encrypt` need `APP_KEY` and it is empty | — |
 | `tables` | a `sentinel_*` table is missing on its connection | — |
 | `models` | a sealable model does not compile, or its table lacks a sealed column | there are no sealable models, or stored types no longer resolve |
-| `anchors` | a configured anchor is unreachable | none is configured |
+| `anchors` | a configured anchor is unreachable, or the `cache` anchor lives in process memory or in the database it protects | none is configured, or the `cache` anchor uses the default store |
 | `checkpoints` | — | ledger entries older than `ledger.backlog_warning_seconds` are not checkpointed |
 | `schedule` | — | scheduling is off and no `sentinel:checkpoint` is scheduled |
 | `retired_keys` | — | seals still use a revoked, retired or unknown key (counts per ring) |

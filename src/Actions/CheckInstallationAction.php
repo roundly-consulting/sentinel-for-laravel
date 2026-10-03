@@ -338,9 +338,34 @@ final readonly class CheckInstallationAction
             }
         }
 
-        return $unreachable === []
-            ? [HealthStatus::Ok, implode(', ', $names)]
-            : [HealthStatus::Failure, 'unreachable: '.implode(', ', $unreachable)];
+        if ($unreachable !== []) {
+            return [HealthStatus::Failure, 'unreachable: '.implode(', ', $unreachable)];
+        }
+
+        return in_array('cache', $names, true) ? self::cacheAnchorPlacement() ?? [HealthStatus::Ok, implode(', ', $names)] : [HealthStatus::Ok, implode(', ', $names)];
+    }
+
+    /**
+     * An anchor is worth something only outside what it protects: a store in process memory
+     * starts empty in every process, and one in a ledger database goes with the checkpoints
+     * an attacker truncates or a restore rolls back.
+     *
+     * @return array{0: HealthStatus, 1: string}|null
+     */
+    private static function cacheAnchorPlacement(): ?array
+    {
+        $configured = config('sentinel.ledger.anchor_drivers.cache.store');
+        $store = is_string($configured) && $configured !== '' ? $configured : config('cache.default');
+        $driver = is_string($store) ? config("cache.stores.{$store}.driver") : null;
+        $ledger = array_map(Tables::connectionName(...), Settings::ledgerConnections());
+        $connection = config("cache.stores.{$store}.connection") ?? config('database.default');
+
+        return match (true) {
+            in_array($driver, ['array', 'null'], true) => [HealthStatus::Failure, "[cache] uses the [{$store}] store, which lives in process memory: every process starts without the anchor"],
+            $driver === 'database' && in_array($connection, $ledger, true) => [HealthStatus::Failure, "[cache] uses the [{$store}] store in the database it protects: a restore or an attacker removes the anchor with the checkpoints"],
+            ! is_string($configured) || $configured === '' => [HealthStatus::Warning, "[cache] uses the default cache store [{$store}]: set SENTINEL_ANCHOR_CACHE_STORE to a store outside the protected database"],
+            default => null,
+        };
     }
 
     /**

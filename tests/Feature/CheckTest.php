@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -334,3 +335,23 @@ it('runs under the fake as in production (read-only diagnostics)', function (): 
 
     expect(Sentinel::check()->get('configuration')?->status)->toBe(HealthStatus::Ok);
 });
+
+it('fails a cache anchor kept in process memory or in the database it protects (dual-review O-33)', function (string $store, ?string $configured, HealthStatus $status, string $message): void {
+    Schema::create('cache', static function (Blueprint $table): void {
+        $table->string('key')->primary();
+        $table->mediumText('value');
+        $table->integer('expiration');
+    });
+    config()->set('cache.stores.review_db', ['driver' => 'database', 'table' => 'cache', 'connection' => null]);
+    config()->set('cache.default', $store);
+    config()->set('sentinel.ledger.anchors', 'cache');
+    config()->set('sentinel.ledger.anchor_drivers.cache.store', $configured);
+
+    expectCheck('anchors', $status, $message);
+})->with([
+    'the default store, array' => ['array', null, HealthStatus::Failure, 'process memory'],
+    'an array store named' => ['file', 'array', HealthStatus::Failure, 'process memory'],
+    'the default store, in the protected database' => ['review_db', null, HealthStatus::Failure, 'the database it protects'],
+    'a store outside the database, named' => ['array', 'file', HealthStatus::Ok, 'cache'],
+    'the default store, unnamed' => ['file', null, HealthStatus::Warning, 'SENTINEL_ANCHOR_CACHE_STORE'],
+]);
