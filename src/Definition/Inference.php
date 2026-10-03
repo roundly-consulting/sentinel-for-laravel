@@ -34,7 +34,10 @@ final class Inference
         }
 
         return match (true) {
-            in_array($base, ['int', 'integer', 'timestamp'], true) => SealType::integer(),
+            in_array($base, ['int', 'integer'], true) => SealType::integer(),
+            // `timestamp` reads a Unix int out of whatever the column holds — usually a
+            // datetime: seal the stored value as it is (declare datetime() to normalise it).
+            $base === 'timestamp' => SealType::auto(),
             in_array($base, ['bool', 'boolean'], true) => SealType::boolean(),
             in_array($base, ['float', 'double', 'real'], true) => null,
             in_array($base, ['string', 'hashed', 'encrypted'], true) => SealType::string(),

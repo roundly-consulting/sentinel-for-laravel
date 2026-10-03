@@ -56,7 +56,7 @@ it('applies a reusable definition under the inline calls', function (): void {
 it('infers declared types from casts', function (?string $cast, ?string $tag): void {
     expect(Inference::fromCast($cast)?->tag())->toBe($tag);
 })->with([
-    [null, 'auto'], ['int', 'int'], ['timestamp', 'int'], ['boolean', 'bool'], ['decimal:3', 'dec:3'], ['decimal:31', null],
+    [null, 'auto'], ['int', 'int'], ['timestamp', 'auto'], ['boolean', 'bool'], ['decimal:3', 'dec:3'], ['decimal:31', null],
     ['float', null], ['double', null], ['real', null], ['string', 'str'], ['hashed', 'str'], ['encrypted', 'str'], ['encrypted:array', 'str'],
     ['date', 'date'], ['immutable_date', 'date'], ['datetime', 'dt'], ['datetime:Y-m-d', 'dt'], ['immutable_datetime', 'dt'],
     ['array', 'json'], ['json', 'json'], ['object', 'json'], ['collection', 'json'],
