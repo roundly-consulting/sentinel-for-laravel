@@ -386,10 +386,16 @@ final class Settings
                 throw InvalidSentinelConfigurationException::invalidValue('ledger.connections', 'must be a non-empty list of connection names (null = default)');
             }
 
-            $names[] = $connection;
+            // One database once: null and the default connection's own name are the same one,
+            // and counting it twice would double every count and every finding.
+            $resolved = $connection ?? (string) config('database.default');
+
+            if (! array_key_exists($resolved, $names)) {
+                $names[$resolved] = $connection;
+            }
         }
 
-        return array_values(array_unique($names));
+        return array_values($names);
     }
 
     public static function ledgerBatchSize(): int

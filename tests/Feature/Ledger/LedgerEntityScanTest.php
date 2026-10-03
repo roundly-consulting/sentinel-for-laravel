@@ -5,13 +5,16 @@ declare(strict_types=1);
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerVerifyOptions;
 use RoundlyConsulting\Sentinel\Enums\LedgerFindingKind;
+use RoundlyConsulting\Sentinel\Events\LedgerIntegrityViolated;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Models\LedgerEntry;
 use RoundlyConsulting\Sentinel\Models\Seal;
+use RoundlyConsulting\Sentinel\Support\SealUsage;
 use RoundlyConsulting\Sentinel\Support\Settings;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Invoice;
 
@@ -101,8 +104,9 @@ it('verifies every configured connection', function (): void {
     invoice();
     config()->set('sentinel.ledger.connections', [null, DB::getDefaultConnection()]);
 
-    expect(Settings::ledgerConnections())->toBe([null, DB::getDefaultConnection()])
-        ->and(Sentinel::verifyLedger()->entries)->toBe(4);
+    // One database, named twice: verified once (dual-review O-31).
+    expect(Settings::ledgerConnections())->toBe([null])
+        ->and(Sentinel::verifyLedger()->entries)->toBe(2);
 
     foreach ([[], 'testing', [''], [1]] as $invalid) {
         config()->set('sentinel.ledger.connections', $invalid);
@@ -185,4 +189,25 @@ it('never ends a history with a pending tombstone whose MAC fails (dual-review O
 
     expect(entityFindings())->toContain("entity_deleted#{$invoice->id}@financial")
         ->and(entityFindings())->toContain("entry_invalid#{$invoice->id}@financial");
+});
+
+it('counts one database once, whether it is named or left null (dual-review O-31 / F-4)', function (): void {
+    invoice();
+    $default = (string) config('database.default');
+    $single = Sentinel::ledger()->verify();
+    $usage = SealUsage::of('default', 'test-default');
+
+    config()->set('sentinel.ledger.connections', [null, $default, $default]);
+
+    expect(Settings::ledgerConnections())->toBe([null]);
+
+    DB::table('sentinel_ledger')->update(['reason' => 'edited']);
+    Event::fake([LedgerIntegrityViolated::class]);
+    $report = Sentinel::ledger()->verify();
+
+    expect($report->entries)->toBe($single->entries)
+        ->and(SealUsage::of('default', 'test-default'))->toBe($usage)
+        ->and(count($report->findings))->toBe(count(array_unique(array_map(static fn (LedgerFinding $finding): string => $finding->entryId.$finding->kind->value, $report->findings))));
+
+    Event::assertDispatchedTimes(LedgerIntegrityViolated::class, 1);
 });

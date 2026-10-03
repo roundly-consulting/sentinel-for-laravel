@@ -281,7 +281,7 @@ The published `config/sentinel.php` documents every key. All of them:
 | `acknowledgement.ability` | ?string | `null` | `SENTINEL_ACKNOWLEDGE_ABILITY` | Gate ability checked before an acknowledgement. |
 | `ledger.enabled` | bool | `true` | `SENTINEL_LEDGER` | Write ledger entries (off loses replay/rollback detection). |
 | `ledger.ring` | a configured ring (null = `keys.default_ring`) | `default` | `SENTINEL_LEDGER_RING` | Ring whose current key signs checkpoints; an unconfigured ring, or one HTTP message signatures use, is refused. |
-| `ledger.connections` | non-empty list (null = the default connection) | `[null]` | — | Connections holding seals and the ledger; every scan, count and check covers each one. |
+| `ledger.connections` | non-empty list (null = the default connection) | `[null]` | — | Connections holding seals and the ledger; every scan, count and check covers each one — once (`null` and the default connection's name are one entry). |
 | `ledger.batch_size` | int 1–100000 | `1000` | — | Entries per checkpoint transaction. |
 | `ledger.backlog_warning_seconds` | int 60–86400 | `600` | — | Age of un-checkpointed entries reported as a backlog. |
 | `ledger.anchors` | comma list of names (`[a-z][a-z0-9_-]{0,63}`) | `''` | `SENTINEL_ANCHORS` | `cache`, `filesystem`, `log` or custom anchors. |
