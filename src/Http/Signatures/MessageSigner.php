@@ -178,6 +178,10 @@ final readonly class MessageSigner
     /**
      * The request and its body bytes; a non-seekable body is replaced by a buffered copy.
      *
+     * The copy is built with Guzzle's PSR-7 `HttpFactory`. That is no runtime require of this
+     * package: `guzzlehttp/psr7` comes with `illuminate/http` (the HTTP client Laravel ships),
+     * which is required, so the class is always present (pinned in ArchTest).
+     *
      * @return array{RequestInterface, string}
      */
     private static function buffered(RequestInterface $request): array

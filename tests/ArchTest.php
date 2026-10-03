@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use GuzzleHttp\Psr7\HttpFactory;
 use RoundlyConsulting\Sentinel\Canonical\FieldTagger;
+use RoundlyConsulting\Sentinel\Http\Signatures\MessageSigner;
 use RoundlyConsulting\Sentinel\Keys\Hkdf;
 use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\Keys\SealingKey;
@@ -201,4 +203,28 @@ it('(i) passes JSON_THROW_ON_ERROR to every json_decode', function (): void {
     });
 
     expect($calls)->toBeGreaterThan(0)->and($offenders)->toBe([]);
+});
+
+/**
+ * Outbound body buffering builds its stream with `GuzzleHttp\Psr7\HttpFactory`. That is not a
+ * runtime require of its own: `guzzlehttp/psr7` arrives with `illuminate/http` (the HTTP client
+ * Laravel ships), so the class is present exactly as long as `illuminate/http` stays required.
+ */
+it('(j) reaches Guzzle PSR-7 only through illuminate/http, from the outbound signer only (dual-review O-22)', function (): void {
+    $require = json_decode((string) file_get_contents(__DIR__.'/../composer.json'), true, flags: JSON_THROW_ON_ERROR)['require'];
+    $users = [];
+
+    eachSourceClass(function (string $class, string $file) use (&$users): void {
+        foreach (SourceScan::imports($file) as $import) {
+            if (str_starts_with($import, 'GuzzleHttp\\')) {
+                $users[] = "{$class} imports {$import}";
+            }
+        }
+    });
+
+    expect($require)->toHaveKey('illuminate/http')
+        ->not->toHaveKey('guzzlehttp/psr7')
+        ->not->toHaveKey('guzzlehttp/guzzle')
+        ->and(class_exists(HttpFactory::class))->toBeTrue()
+        ->and($users)->toBe([MessageSigner::class.' imports '.HttpFactory::class]);
 });
