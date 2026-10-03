@@ -112,6 +112,33 @@ it('rebuilds every seal document byte for byte and reproduces its MAC or signatu
     expect($checked)->toBe(13 * 6);
 });
 
+it('rebuilds the attribute document of every seal with computed fields (dual-review O-1)', function (): void {
+    $signers = new Signers;
+    $cases = array_column(formatVectors()['seal'], null, 'name');
+    $checked = 0;
+
+    foreach (formatVectors()['seal_attributes'] as $vector) {
+        $case = $cases[$vector['case']];
+
+        foreach ($vector['documents'] as $algorithm => $document) {
+            $key = vectorKey($algorithm);
+            $message = new SealMessage($case['ctx'], $case['type'], $case['table'], $case['id'], $case['scope'], $case['seal'], $case['ver'],
+                $case['prev'], 'default', $key->keyId, Algorithm::from($algorithm), vectorAt(),
+                array_map(static fn (array $field): FieldValue => new FieldValue(...$field), $case['fields']));
+
+            expect($message->attributeBytes())->toBe($document['bytes'])
+                ->and(Base64Url::encode($signers->sign($key, Purpose::Seal, $document['bytes'])))->toBe($document['mac'])
+                ->and(oracleVerifies($algorithm, 'seal', $document['bytes'], $document['mac']))->toBeTrue()
+                // Never interchangeable with the seal document's MAC.
+                ->and($signers->verify($key, Purpose::Seal, $message->bytes(), Base64Url::decode($document['mac'])))->toBeFalse();
+
+            $checked++;
+        }
+    }
+
+    expect($checked)->toBe(3 * 4);
+});
+
 it('reproduces the frozen field tags', function (): void {
     $tagger = new FieldTagger;
     $cases = array_column(formatVectors()['seal'], null, 'name');

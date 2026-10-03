@@ -83,6 +83,7 @@ final readonly class Sealer
 
         $message = $this->documents->build($model, $seal, $seal->fields, $row, $key->ring, $key->keyId, $key->algorithm(), $version, $previous, $at);
         $mac = Base64Url::encode($this->signers->sign($key, Purpose::Seal, $message->bytes()));
+        $attributesMac = $message->hasComputed() ? Base64Url::encode($this->signers->sign($key, Purpose::Seal, $message->attributeBytes())) : null;
         $tags = $seal->usesFieldTags() ? $this->tagger->tags($key, $message) : null;
 
         $entry = Settings::ledgerEnabled()
@@ -97,6 +98,7 @@ final readonly class Sealer
             'version' => $version,
             'previous_digest' => $previous,
             'mac' => $mac,
+            'attributes_mac' => $attributesMac,
             'manifest' => json_encode($seal->manifest(), JSON_THROW_ON_ERROR),
             'field_tags' => $tags === null ? null : json_encode($tags, JSON_THROW_ON_ERROR),
             'event' => $event->value,

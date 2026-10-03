@@ -51,6 +51,23 @@ final class ParityRun
     }
 
     /**
+     * Change a computed field's source rows (the fake scripts the drift a real verification
+     * proves with the attribute MAC).
+     */
+    public function drift(Invoice $invoice): void
+    {
+        $manager = app(SentinelManager::class);
+
+        if ($this->fake && $manager instanceof SentinelFake) {
+            $manager->fakeStatus($invoice, VerificationStatus::Tampered, 'financial', ['c:lines']);
+
+            return;
+        }
+
+        DB::table('invoice_lines')->insert(['invoice_id' => $invoice->id, 'sku' => 'D-1', 'quantity' => 2]);
+    }
+
+    /**
      * Rewrite a ledger entry behind the application's back (the fake scripts the finding a
      * real verification reports for it).
      */
@@ -167,6 +184,17 @@ it('behaves exactly like the real manager', function (Closure $scenario): void {
         }
 
         return ['sealed'];
+    }],
+    'computed drift: verified, re-sealed by a write and by seal() (dual-review O-1)' => [static function (ParityRun $run): array {
+        $run->drift($first = invoice());
+        $run->drift($second = invoice());
+        $drift = Sentinel::verify($first, 'financial');
+
+        return [
+            $drift->status->value, $drift->reason, $drift->onlyComputedChanged(), $drift->changedComputed(),
+            $first->update(['note' => 'routine']), $run->state($first),
+            Sentinel::seal($second, 'financial')->event->value, $run->state($second),
+        ];
     }],
     'a listener cancels the save' => [static function (ParityRun $run): array {
         $invoice = invoice();

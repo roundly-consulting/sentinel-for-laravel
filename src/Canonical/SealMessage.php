@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Sentinel\Canonical;
 
 use Carbon\CarbonImmutable;
+use Closure;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Support\Clock;
 
@@ -22,6 +23,11 @@ use RoundlyConsulting\Sentinel\Support\Clock;
 final readonly class SealMessage
 {
     public const string VERSION = 'sentinel.seal/1';
+
+    /**
+     * The attribute document of a seal with computed fields (see {@see attributeBytes()}).
+     */
+    public const string ATTRIBUTES_VERSION = 'sentinel.seal-attributes/1';
 
     /**
      * @param  list<FieldValue>  $fields
@@ -44,6 +50,36 @@ final readonly class SealMessage
 
     public function bytes(): string
     {
+        return $this->encode(self::VERSION, static fn (FieldValue $field): array => $field->tuple());
+    }
+
+    /**
+     * The same document with each computed field reduced to its name: everything but the
+     * computed values — every attribute, the full field list, the key, the version and the
+     * chain — stays bound. Its MAC (`attributes_mac`) proves that a seal whose MAC fails
+     * drifted only in computed values; unlike the field tags, it cannot be forged or trimmed.
+     */
+    public function attributeBytes(): string
+    {
+        return $this->encode(self::ATTRIBUTES_VERSION, static fn (FieldValue $field): array => str_starts_with($field->name, 'c:') ? [$field->name] : $field->tuple());
+    }
+
+    public function hasComputed(): bool
+    {
+        foreach ($this->fields as $field) {
+            if (str_starts_with($field->name, 'c:')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  Closure(FieldValue): list<string|null>  $tuple
+     */
+    private function encode(string $version, Closure $tuple): string
+    {
         $fields = $this->fields;
 
         usort($fields, static fn (FieldValue $a, FieldValue $b): int => strcmp($a->name, $b->name));
@@ -52,7 +88,7 @@ final readonly class SealMessage
             'alg' => $this->algorithm->value,
             'at' => Clock::iso($this->at),
             'ctx' => $this->context,
-            'f' => array_map(static fn (FieldValue $field): array => $field->tuple(), $fields),
+            'f' => array_map($tuple, $fields),
             'id' => $this->id,
             'kid' => $this->keyId,
             'prev' => $this->previous,
@@ -61,7 +97,7 @@ final readonly class SealMessage
             'seal' => $this->seal,
             'table' => $this->table,
             'type' => $this->type,
-            'v' => self::VERSION,
+            'v' => $version,
             'ver' => (string) $this->version,
         ]);
     }

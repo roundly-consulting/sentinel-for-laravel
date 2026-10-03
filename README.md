@@ -522,7 +522,7 @@ $result = app(VerifyModelAction::class)->execute(new VerifyRequest($invoice, 'fi
 | `Intact` | The seal matches the stored values and the ledger. |
 | `Outdated` | Intact, but sealed under an older definition (counts as intact by default; `sentinel:reseal --only-outdated`). |
 | `Unsealed` | A lenient seal that was never written. |
-| `Tampered` | Values changed outside the application (`mac`), or no longer canonicalize (`canonicalization`), or a ledger entry was forged (`ledger_entry`). |
+| `Tampered` | Values changed outside the application (`mac`), only computed values drifted (`computed` — proven by the seal's attribute MAC; writes and `seal()` re-seal it), or no longer canonicalize (`canonicalization`), or a ledger entry was forged (`ledger_entry`). |
 | `Missing` | A strict seal is absent: `seal_deleted` (history exists), `never_sealed`, `unsealed`. |
 | `Stale` | An older seal was restored: `newer_version`, `not_in_ledger`, `ledger_mismatch`. |
 | `UnknownKey`, `RevokedKey`, `RetiredKey` | The sealing key is unknown/pending/damaged, revoked or retired. |

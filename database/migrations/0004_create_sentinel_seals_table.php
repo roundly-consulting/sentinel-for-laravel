@@ -29,6 +29,9 @@ return new class extends Migration
             $table->unsignedBigInteger('version');
             $table->string('previous_digest', 64)->nullable();
             $table->string('mac', 192);
+            // Seals with computed fields only: the MAC of the document without their values,
+            // which proves drift was confined to computed fields.
+            $table->string('attributes_mac', 192)->nullable();
             $table->jsonb('manifest');
             $table->jsonb('field_tags')->nullable();
             $table->string('event', 16);

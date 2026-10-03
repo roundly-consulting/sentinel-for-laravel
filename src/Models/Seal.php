@@ -30,6 +30,7 @@ use RoundlyConsulting\Sentinel\Models\Concerns\StoresUtc;
  * @property int $version
  * @property string|null $previous_digest
  * @property string $mac
+ * @property string|null $attributes_mac
  * @property list<array{0: string, 1: string}>|null $manifest
  * @property array<string, string>|null $field_tags
  * @property SealEvent $event

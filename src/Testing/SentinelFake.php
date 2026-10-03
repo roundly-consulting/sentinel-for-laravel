@@ -1222,9 +1222,30 @@ final class SentinelFake extends SentinelManager
         $faked ??= $this->sticky[$this->identity($model, $seal->name)] ?? $this->sticky[$this->identity($model, null)] ?? new FakedStatus(VerificationStatus::Intact, null);
 
         return new VerificationResult(
-            $faked->status, $faked->status === VerificationStatus::Tampered ? 'mac' : null, $model->getMorphClass(), $model->getKey(),
+            $faked->status, $faked->status === VerificationStatus::Tampered ? self::tamperedReason($faked->changed) : null, $model->getMorphClass(), $model->getKey(),
             $seal->name, changedAttributes: $faked->changed, context: $context, outdatedIsIntact: Settings::outdatedIsIntact(),
         );
+    }
+
+    /**
+     * A scripted change list of computed fields only is computed drift (`Tampered(computed)`,
+     * which writes and seal() re-seal); anything else is a failed MAC.
+     *
+     * @param  list<string>|null  $changed
+     */
+    private static function tamperedReason(?array $changed): string
+    {
+        if ($changed === null || $changed === []) {
+            return 'mac';
+        }
+
+        foreach ($changed as $name) {
+            if (! str_starts_with($name, 'c:')) {
+                return 'mac';
+            }
+        }
+
+        return 'computed';
     }
 
     private function recordSeal(Model $model, CompiledSeal $seal, SealEvent $event, ?string $reason = null, ?Model $actor = null): SealResult

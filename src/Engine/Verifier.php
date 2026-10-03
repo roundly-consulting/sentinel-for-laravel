@@ -15,6 +15,7 @@ use RoundlyConsulting\Crypto\Codec\Base64Url;
 use RoundlyConsulting\Crypto\Codec\InvalidEncodingException;
 use RoundlyConsulting\Crypto\Hash\ConstantTime;
 use RoundlyConsulting\Sentinel\Canonical\FieldTagger;
+use RoundlyConsulting\Sentinel\Canonical\SealMessage;
 use RoundlyConsulting\Sentinel\Casts\UtcDateTime;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
 use RoundlyConsulting\Sentinel\Definition\CompiledSeal;
@@ -190,10 +191,19 @@ final readonly class Verifier
         }
 
         if (! $this->signers->verify($key, Purpose::Seal, $message->bytes(), $mac)) {
+            // Diagnostics only: the stored tags are as writable as the data they describe.
             $stored = $this->tags($row->getRawOriginal('field_tags'));
             $current = $stored === null ? null : $this->tagger->tags($key, $message);
+            $changed = $stored === null || $current === null ? null : $this->tagger->changed($stored, $current);
 
-            return $outcome->result(VerificationStatus::Tampered, 'mac', $stored === null || $current === null ? null : $this->tagger->changed($stored, $current));
+            if (! $this->onlyComputedDrifted($row, $key, $message)) {
+                return $outcome->result(VerificationStatus::Tampered, 'mac', $changed);
+            }
+
+            // Proven computed drift is still never a replayed or rolled-back seal row.
+            $stale = $checkLedger ? $this->ledgerFinding($model, $seal, $row, $outcome) : null;
+
+            return $stale ?? $outcome->result(VerificationStatus::Tampered, 'computed', self::computedOnly($changed));
         }
 
         if ($checkLedger) {
@@ -405,6 +415,42 @@ final readonly class Verifier
         }
 
         return $manifest;
+    }
+
+    /**
+     * Whether everything but the computed values still verifies: the stored attribute MAC
+     * covers every attribute, the whole field list, the key, version and chain — so neither
+     * forged tags nor a trimmed manifest can pass a changed attribute off as computed drift.
+     */
+    private function onlyComputedDrifted(Seal $row, SealingKey $key, SealMessage $message): bool
+    {
+        $raw = $row->getRawOriginal('attributes_mac');
+
+        if ($raw === null || ! $message->hasComputed()) {
+            return false;
+        }
+
+        try {
+            $mac = Base64Url::decode((string) $raw);
+        } catch (InvalidEncodingException) {
+            return false;
+        }
+
+        return $this->signers->verify($key, Purpose::Seal, $message->attributeBytes(), $mac);
+    }
+
+    /**
+     * The computed names among the (untrusted) tag diagnostics — attributes are proven
+     * unchanged here, so a tag naming one was forged. Null when unknown.
+     *
+     * @param  list<string>|null  $changed
+     * @return list<string>|null
+     */
+    private static function computedOnly(?array $changed): ?array
+    {
+        $computed = array_values(array_filter($changed ?? [], static fn (string $name): bool => str_starts_with($name, 'c:')));
+
+        return $computed === [] ? null : $computed;
     }
 
     /**

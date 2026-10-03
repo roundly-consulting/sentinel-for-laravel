@@ -1018,5 +1018,70 @@
             "mac": "Yd3eDApemxeX39NRRl_NlxFDoS82FTPqkaiPTphBaBA",
             "bytes": "{\"alg\":\"hmac-sha256\",\"at\":\"2026-10-02T18:30:00.123456Z\",\"conn\":\"tenant_eu\",\"kid\":\"vec-hmac256\",\"mac\":\"Yd3eDApemxeX39NRRl_NlxFDoS82FTPqkaiPTphBaBA\",\"ring\":\"default\",\"root\":\"p7wQGQuauX-MUDOY5c04xIcKW6DiIpUaDHoQfNNKDCs\",\"seq\":\"2\",\"v\":\"sentinel.anchor/1\"}"
         }
+    ],
+    "seal_attributes": [
+        {
+            "case": "invoice-example",
+            "documents": {
+                "hmac-sha256": {
+                    "bytes": "{\"alg\":\"hmac-sha256\",\"at\":\"2026-10-02T18:30:00.123456Z\",\"ctx\":\"\",\"f\":[[\"a:amount\",\"dec:2\",\"10.50\"],[\"a:paid\",\"bool\",\"1\"],[\"a:status\",\"str\",\"paid\"],[\"c:lines\"]],\"id\":\"42\",\"kid\":\"vec-hmac256\",\"prev\":null,\"ring\":\"default\",\"scope\":\"\",\"seal\":\"financial\",\"table\":\"invoices\",\"type\":\"App\\\\Models\\\\Invoice\",\"v\":\"sentinel.seal-attributes/1\",\"ver\":\"7\"}",
+                    "mac": "el6ynO3PROwA8SmEAc_HTqRZ99v3YtM8SbKTTRS-isU"
+                },
+                "hmac-sha384": {
+                    "bytes": "{\"alg\":\"hmac-sha384\",\"at\":\"2026-10-02T18:30:00.123456Z\",\"ctx\":\"\",\"f\":[[\"a:amount\",\"dec:2\",\"10.50\"],[\"a:paid\",\"bool\",\"1\"],[\"a:status\",\"str\",\"paid\"],[\"c:lines\"]],\"id\":\"42\",\"kid\":\"vec-hmac384\",\"prev\":null,\"ring\":\"default\",\"scope\":\"\",\"seal\":\"financial\",\"table\":\"invoices\",\"type\":\"App\\\\Models\\\\Invoice\",\"v\":\"sentinel.seal-attributes/1\",\"ver\":\"7\"}",
+                    "mac": "5hxxGAsjau7SOhojG9_b9pIWuOTSmJ7rULYD2tbNHfJsWcyaaEM3PRr3bT2Khu4r"
+                },
+                "hmac-sha512": {
+                    "bytes": "{\"alg\":\"hmac-sha512\",\"at\":\"2026-10-02T18:30:00.123456Z\",\"ctx\":\"\",\"f\":[[\"a:amount\",\"dec:2\",\"10.50\"],[\"a:paid\",\"bool\",\"1\"],[\"a:status\",\"str\",\"paid\"],[\"c:lines\"]],\"id\":\"42\",\"kid\":\"vec-hmac512\",\"prev\":null,\"ring\":\"default\",\"scope\":\"\",\"seal\":\"financial\",\"table\":\"invoices\",\"type\":\"App\\\\Models\\\\Invoice\",\"v\":\"sentinel.seal-attributes/1\",\"ver\":\"7\"}",
+                    "mac": "TodPxOmrcgDiO7Me5exlOO4fE1HJNj8EWqjqP7GPY8oPveMIUaaR2L9npxdHXrLxo1lhHXy7RrvhwoirXsqCGQ"
+                },
+                "ed25519": {
+                    "bytes": "{\"alg\":\"ed25519\",\"at\":\"2026-10-02T18:30:00.123456Z\",\"ctx\":\"\",\"f\":[[\"a:amount\",\"dec:2\",\"10.50\"],[\"a:paid\",\"bool\",\"1\"],[\"a:status\",\"str\",\"paid\"],[\"c:lines\"]],\"id\":\"42\",\"kid\":\"vec-ed25519\",\"prev\":null,\"ring\":\"default\",\"scope\":\"\",\"seal\":\"financial\",\"table\":\"invoices\",\"type\":\"App\\\\Models\\\\Invoice\",\"v\":\"sentinel.seal-attributes/1\",\"ver\":\"7\"}",
+                    "mac": "AD3TUbl9sWgBOiIsZIAjBCZzeFztXD4rwXJp-SOHEmEkSvP7OZIGxbQb6phzbf5i79L-nLZEPTYTIVCFwJKLBQ"
+                }
+            }
+        },
+        {
+            "case": "nested-json",
+            "documents": {
+                "hmac-sha256": {
+                    "bytes": "{\"alg\":\"hmac-sha256\",\"at\":\"2026-10-02T18:30:00.123456Z\",\"ctx\":\"\",\"f\":[[\"c:meta\"]],\"id\":\"7\",\"kid\":\"vec-hmac256\",\"prev\":null,\"ring\":\"default\",\"scope\":\"\",\"seal\":\"financial\",\"table\":\"invoices\",\"type\":\"invoice\",\"v\":\"sentinel.seal-attributes/1\",\"ver\":\"1\"}",
+                    "mac": "fU7hs29uNIEUHuLclLCCHWUytf1WWdG0WgD7UC4KPWg"
+                },
+                "hmac-sha384": {
+                    "bytes": "{\"alg\":\"hmac-sha384\",\"at\":\"2026-10-02T18:30:00.123456Z\",\"ctx\":\"\",\"f\":[[\"c:meta\"]],\"id\":\"7\",\"kid\":\"vec-hmac384\",\"prev\":null,\"ring\":\"default\",\"scope\":\"\",\"seal\":\"financial\",\"table\":\"invoices\",\"type\":\"invoice\",\"v\":\"sentinel.seal-attributes/1\",\"ver\":\"1\"}",
+                    "mac": "0R0P9oqId4dORgvE_xVbdva2UmUOZ7FHJLyACSy7kTd6sflUqqASWnFwIDVBR76g"
+                },
+                "hmac-sha512": {
+                    "bytes": "{\"alg\":\"hmac-sha512\",\"at\":\"2026-10-02T18:30:00.123456Z\",\"ctx\":\"\",\"f\":[[\"c:meta\"]],\"id\":\"7\",\"kid\":\"vec-hmac512\",\"prev\":null,\"ring\":\"default\",\"scope\":\"\",\"seal\":\"financial\",\"table\":\"invoices\",\"type\":\"invoice\",\"v\":\"sentinel.seal-attributes/1\",\"ver\":\"1\"}",
+                    "mac": "Nzt0UH-Hcl48bJ9_8X_Ys8bd3hukVOp9AL3yfrgSEDq5XCXh7iCCNkeFhk-iEcM7OH1AD4q3PVKH_A7Bjs6M4w"
+                },
+                "ed25519": {
+                    "bytes": "{\"alg\":\"ed25519\",\"at\":\"2026-10-02T18:30:00.123456Z\",\"ctx\":\"\",\"f\":[[\"c:meta\"]],\"id\":\"7\",\"kid\":\"vec-ed25519\",\"prev\":null,\"ring\":\"default\",\"scope\":\"\",\"seal\":\"financial\",\"table\":\"invoices\",\"type\":\"invoice\",\"v\":\"sentinel.seal-attributes/1\",\"ver\":\"1\"}",
+                    "mac": "beUYKSvsHvBzFQr6q8NImjbq-4ZSre7o3TznmFiYYl8MfbdJxWZbwFf6OeHw0AF0w-FPWmQf6Y2M7sU8JRa1Dg"
+                }
+            }
+        },
+        {
+            "case": "field-sorting",
+            "documents": {
+                "hmac-sha256": {
+                    "bytes": "{\"alg\":\"hmac-sha256\",\"at\":\"2026-10-02T18:30:00.123456Z\",\"ctx\":\"\",\"f\":[[\"a:B\",\"str\",\"upper\"],[\"a:a\",\"str\",\"a\"],[\"a:b\",\"str\",\"b\"],[\"c:a\"],[\"c:z\"]],\"id\":\"10\",\"kid\":\"vec-hmac256\",\"prev\":null,\"ring\":\"default\",\"scope\":\"\",\"seal\":\"financial\",\"table\":\"invoices\",\"type\":\"invoice\",\"v\":\"sentinel.seal-attributes/1\",\"ver\":\"1\"}",
+                    "mac": "cstybaJzdlpA7WL7peCAiXn6qAVRMx8adXQ6F1d9HaA"
+                },
+                "hmac-sha384": {
+                    "bytes": "{\"alg\":\"hmac-sha384\",\"at\":\"2026-10-02T18:30:00.123456Z\",\"ctx\":\"\",\"f\":[[\"a:B\",\"str\",\"upper\"],[\"a:a\",\"str\",\"a\"],[\"a:b\",\"str\",\"b\"],[\"c:a\"],[\"c:z\"]],\"id\":\"10\",\"kid\":\"vec-hmac384\",\"prev\":null,\"ring\":\"default\",\"scope\":\"\",\"seal\":\"financial\",\"table\":\"invoices\",\"type\":\"invoice\",\"v\":\"sentinel.seal-attributes/1\",\"ver\":\"1\"}",
+                    "mac": "NVKzNZAwav8vGe343Zr964mXVqpSR8QUoVnN2HhMRmTc75MjpZScopG8XaFdieMm"
+                },
+                "hmac-sha512": {
+                    "bytes": "{\"alg\":\"hmac-sha512\",\"at\":\"2026-10-02T18:30:00.123456Z\",\"ctx\":\"\",\"f\":[[\"a:B\",\"str\",\"upper\"],[\"a:a\",\"str\",\"a\"],[\"a:b\",\"str\",\"b\"],[\"c:a\"],[\"c:z\"]],\"id\":\"10\",\"kid\":\"vec-hmac512\",\"prev\":null,\"ring\":\"default\",\"scope\":\"\",\"seal\":\"financial\",\"table\":\"invoices\",\"type\":\"invoice\",\"v\":\"sentinel.seal-attributes/1\",\"ver\":\"1\"}",
+                    "mac": "Qhi5rFZc9pnnKab4eoIfigdZM9IcpyjIhb_T-IFBD4Ilr-OYW_kfoCEbXlcYnqk3DjsAuIIq33av1H_FZC28Ow"
+                },
+                "ed25519": {
+                    "bytes": "{\"alg\":\"ed25519\",\"at\":\"2026-10-02T18:30:00.123456Z\",\"ctx\":\"\",\"f\":[[\"a:B\",\"str\",\"upper\"],[\"a:a\",\"str\",\"a\"],[\"a:b\",\"str\",\"b\"],[\"c:a\"],[\"c:z\"]],\"id\":\"10\",\"kid\":\"vec-ed25519\",\"prev\":null,\"ring\":\"default\",\"scope\":\"\",\"seal\":\"financial\",\"table\":\"invoices\",\"type\":\"invoice\",\"v\":\"sentinel.seal-attributes/1\",\"ver\":\"1\"}",
+                    "mac": "kZp-yzXfvfYQjkHSC5NAUUaxFViybkIPBUH8M5pt4dZ3icw4o6OLKy0m0FG-frGp3XbZVAhAepO9S4S1YCQ0DA"
+                }
+            }
+        }
     ]
 }

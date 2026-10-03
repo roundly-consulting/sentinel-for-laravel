@@ -67,21 +67,12 @@ final readonly class VerificationResult
     }
 
     /**
-     * Only changed computed fields (`c:*`) — derived data drifted, no sealed column did.
+     * Only computed values (`c:*`) drifted — no sealed column did (`Tampered(computed)`). Proven
+     * by the seal's attribute MAC, never by the stored field tags.
      */
     public function onlyComputedChanged(): bool
     {
-        if ($this->status !== VerificationStatus::Tampered || $this->reason !== 'mac' || $this->changedAttributes === null || $this->changedAttributes === []) {
-            return false;
-        }
-
-        foreach ($this->changedAttributes as $name) {
-            if (! str_starts_with($name, 'c:')) {
-                return false;
-            }
-        }
-
-        return true;
+        return $this->status === VerificationStatus::Tampered && $this->reason === 'computed';
     }
 
     /**
