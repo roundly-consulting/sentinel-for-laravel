@@ -6,6 +6,7 @@ namespace RoundlyConsulting\Sentinel\DataTransferObjects;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
+use JsonSerializable;
 use LogicException;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use SensitiveParameter;
@@ -17,7 +18,7 @@ use SensitiveParameter;
  * or secret material signs only when imported with `signing: true`. Never dumped or
  * serialized.
  */
-final readonly class ImportKeyRequest
+final readonly class ImportKeyRequest implements JsonSerializable
 {
     public function __construct(
         public string $ring,
@@ -29,6 +30,17 @@ final readonly class ImportKeyRequest
         public ?Model $owner = null,
         public ?string $label = null,
     ) {}
+
+    /**
+     * The same redacted view as a dump: `json_encode()` and a log context never carry the
+     * material.
+     *
+     * @return array<string, mixed>
+     */
+    public function jsonSerialize(): array
+    {
+        return $this->__debugInfo();
+    }
 
     /**
      * @return array<string, mixed>

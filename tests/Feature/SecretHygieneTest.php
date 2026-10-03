@@ -4,11 +4,18 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Event;
+use Monolog\Formatter\NormalizerFormatter;
+use Monolog\Level;
+use Monolog\LogRecord;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ConsumeNonceRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ImportKeyRequest;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyDestination;
 use RoundlyConsulting\Sentinel\Events\KeyGenerated;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Keys\EnvelopeData;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
+use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Tests\TestCase;
 
 /**
@@ -58,4 +65,30 @@ it('never puts material into exception messages', function (): void {
     } catch (Throwable $exception) {
         expect($exception->getMessage())->toContain('entry #1')->not->toContain(substr(TestCase::ROOT_KEY, 7, 20));
     }
+});
+
+it('keeps secret material out of json_encode and log context (dual-review O-32)', function (): void {
+    $generated = Sentinel::keys()->ring()->generate(Algorithm::HmacSha256, destination: KeyDestination::Config);
+    $line = collect(explode("\n", (string) $generated->envSnippet))->first(static fn (string $line): bool => str_starts_with($line, 'SENTINEL_KEY='));
+    $secret = trim(substr((string) $line, strlen('SENTINEL_KEY=')), '"');
+    $rotation = Sentinel::keys()->ring()->rotate();
+    $import = new ImportKeyRequest('http', 'partner', Algorithm::HmacSha256, PARTNER_SECRET);
+    $envelope = new EnvelopeData('http', 'partner', 'hmac-sha256', PARTNER_SECRET, null, 'active', Clock::now());
+    $logged = static fn (object $value): string => (string) json_encode((new NormalizerFormatter)->format(new LogRecord(new DateTimeImmutable, 'app', Level::Info, 'm', ['value' => $value])));
+    $base64 = substr(PARTNER_SECRET, 7);
+
+    expect($secret)->not->toBe('')
+        ->and((string) json_encode($generated))->not->toContain(substr($secret, 7, 20))->not->toContain('SENTINEL_KEY=')->toContain('[redacted]')
+        ->and($logged($generated))->not->toContain('SENTINEL_KEY=')
+        ->and((string) json_encode($rotation))->not->toContain('SENTINEL_KEY=')
+        ->and($logged($rotation))->not->toContain('SENTINEL_KEY=')
+        ->and((string) json_encode($import))->not->toContain(str_replace('/', '\/', $base64))->toContain('partner')
+        ->and($logged($import))->not->toContain(str_replace('/', '\/', $base64))
+        ->and((string) json_encode($envelope))->not->toContain(str_replace('/', '\/', $base64))
+        ->and(json_decode((string) json_encode($generated), true))->toHaveKeys(['info', 'envSnippet', 'publicKey']);
+
+    $nonce = Sentinel::nonces()->issue('password-reset');
+
+    expect((string) json_encode($nonce))->not->toContain($nonce->value)->toContain('[redacted]')
+        ->and((string) json_encode(new ConsumeNonceRequest('password-reset', $nonce->value)))->not->toContain($nonce->value);
 });

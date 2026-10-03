@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Sentinel\Keys;
 
 use Carbon\CarbonImmutable;
+use JsonSerializable;
 use SensitiveParameter;
 
 /**
@@ -13,7 +14,7 @@ use SensitiveParameter;
  *
  * @internal
  */
-final readonly class EnvelopeData
+final readonly class EnvelopeData implements JsonSerializable
 {
     public function __construct(
         public string $ring,
@@ -39,6 +40,16 @@ final readonly class EnvelopeData
             $this->ring, $this->keyId, $this->algorithm, $this->material, $this->public, $status ?? $this->status, $this->activatesAt,
             $signsUntil ?? $this->signsUntil, $verifiesUntil ?? $this->verifiesUntil, $revokedAt ?? $this->revokedAt, $this->owner,
         );
+    }
+
+    /**
+     * The same redacted view as a dump: never the material.
+     *
+     * @return array<string, string|null>
+     */
+    public function jsonSerialize(): array
+    {
+        return $this->__debugInfo();
     }
 
     /**
