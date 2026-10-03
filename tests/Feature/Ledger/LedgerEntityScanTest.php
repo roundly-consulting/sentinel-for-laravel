@@ -127,3 +127,62 @@ it('reads the ledger settings strictly', function (): void {
     config()->set('sentinel.middleware.verified_reaction', 'ignore');
     expect(fn () => Settings::verifiedAborts())->toThrow(InvalidSentinelConfigurationException::class);
 });
+
+/**
+ * A1 with a DML-only account: MySQL `SET foreign_key_checks = 0` and SQLite `PRAGMA
+ * foreign_keys = OFF` are per session (PostgreSQL needs a superuser's
+ * `session_replication_role`, which the test role has).
+ */
+function withoutForeignKeys(Closure $write): void
+{
+    $driver = DB::connection()->getDriverName();
+    $off = ['sqlite' => 'PRAGMA foreign_keys = OFF', 'mysql' => 'SET foreign_key_checks = 0', 'mariadb' => 'SET foreign_key_checks = 0', 'pgsql' => "SET session_replication_role = 'replica'"];
+    $on = ['sqlite' => 'PRAGMA foreign_keys = ON', 'mysql' => 'SET foreign_key_checks = 1', 'mariadb' => 'SET foreign_key_checks = 1', 'pgsql' => "SET session_replication_role = 'origin'"];
+
+    DB::statement($off[$driver]);
+
+    try {
+        $write();
+    } finally {
+        DB::statement($on[$driver]);
+    }
+}
+
+it('verifies entries that claim a checkpoint which does not exist, and never trusts their tombstones (dual-review O-5)', function (): void {
+    $invoice = invoice();
+    Sentinel::ledger()->checkpoint();
+    DB::table('invoices')->where('id', $invoice->getKey())->delete();
+    DB::table('sentinel_seals')->where('sealable_id', $invoice->getKey())->delete();
+
+    withoutForeignKeys(static function () use ($invoice): void {
+        foreach (['financial', 'identity'] as $seal) {
+            DB::table('sentinel_ledger')->insert([
+                'sealable_type' => $invoice->getMorphClass(), 'sealable_id' => $invoice->getKey(), 'seal' => $seal,
+                'event' => 'deleted', 'version' => 99, 'ring' => 'default', 'key_id' => 'test-default',
+                'algorithm' => 'hmac-sha256', 'entry_mac' => 'forged', 'occurred_at' => '2026-10-03 00:00:00.000000',
+                'checkpoint_id' => 424242,
+            ]);
+        }
+    });
+
+    $findings = entityFindings();
+
+    expect($findings)->toContain("orphan_entry#{$invoice->id}@financial")
+        ->and($findings)->toContain("entry_invalid#{$invoice->id}@financial")
+        ->and($findings)->toContain("entity_deleted#{$invoice->id}@financial")
+        ->and($findings)->toContain("entity_deleted#{$invoice->id}@identity")
+        ->and(LedgerFindingKind::OrphanEntry->isViolation())->toBeTrue();
+});
+
+it('never ends a history with a pending tombstone whose MAC fails (dual-review O-5)', function (): void {
+    $invoice = invoice();
+    DB::table('invoices')->where('id', $invoice->getKey())->delete();
+    DB::table('sentinel_ledger')->insert([
+        'sealable_type' => $invoice->getMorphClass(), 'sealable_id' => $invoice->getKey(), 'seal' => 'financial',
+        'event' => 'deleted', 'version' => 9, 'ring' => 'default', 'key_id' => 'test-default',
+        'algorithm' => 'hmac-sha256', 'entry_mac' => 'forged', 'occurred_at' => '2026-10-03 00:00:00.000000',
+    ]);
+
+    expect(entityFindings())->toContain("entity_deleted#{$invoice->id}@financial")
+        ->and(entityFindings())->toContain("entry_invalid#{$invoice->id}@financial");
+});

@@ -47,7 +47,7 @@ it('freezes every enum value', function (string $enum, array $values): void {
     'Reaction' => [Reaction::class, ['throw', 'event', 'log']],
     'TamperedWritePolicy' => [TamperedWritePolicy::class, ['refuse', 'reseal', 'skip']],
     'PersistOperation' => [PersistOperation::class, ['save', 'delete', 'increment']],
-    'LedgerFindingKind' => [LedgerFindingKind::class, ['checkpoint_gap', 'checkpoint_invalid', 'checkpoint_mismatch', 'chain_broken', 'anchor_ahead', 'anchor_mismatch', 'anchor_invalid', 'anchor_unreachable', 'entry_invalid', 'entity_deleted', 'seal_rolled_back', 'seal_missing', 'backlog']],
+    'LedgerFindingKind' => [LedgerFindingKind::class, ['checkpoint_gap', 'checkpoint_invalid', 'checkpoint_mismatch', 'chain_broken', 'anchor_ahead', 'anchor_mismatch', 'anchor_invalid', 'anchor_unreachable', 'entry_invalid', 'orphan_entry', 'entity_deleted', 'seal_rolled_back', 'seal_missing', 'backlog']],
 ]);
 
 it('maps each idempotency rejection to its HTTP status', function (): void {

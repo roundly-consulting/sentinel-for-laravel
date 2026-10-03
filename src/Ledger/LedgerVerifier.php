@@ -41,8 +41,10 @@ use Throwable;
  *     root recomputed over its entries (every entry MAC checked on the way);
  *  2. external anchors — not ahead of the database, matching root, valid checkpoint MAC;
  *  3. entries not yet checkpointed — MACs, and a backlog when the checkpoint job stalls;
+ *     entries claiming a checkpoint that does not exist (only possible with the foreign key
+ *     switched off for a session) are orphans — a violation, MAC-checked too;
  *  4. optionally every entity's ledger head — the row and its seal must still exist at that
- *     version (tombstones end a history).
+ *     version (only a tombstone whose MAC verifies ends a history).
  *
  * Read-only. Ledger evidence is permanent, so an entry or checkpoint signed by a key that has
  * since been *retired* still verifies; a *revoked* key never does.
@@ -81,6 +83,7 @@ final readonly class LedgerVerifier
             }
 
             $this->pending($connection, $run, $chunk);
+            $this->orphans($connection, $run, $chunk);
 
             if ($options->entities) {
                 $this->heads($connection, $run, $chunk);
@@ -319,8 +322,27 @@ final readonly class LedgerVerifier
     }
 
     /**
-     * Every entity's latest ledger entry: unless it is a tombstone, the row and its seal row
-     * must still exist, at that version.
+     * Entries whose `checkpoint_id` names no checkpoint: neither pending nor covered by any
+     * root, so nothing else would ever check them.
+     */
+    private function orphans(?string $connection, LedgerFindings $run, int $chunk): void
+    {
+        $entries = (new LedgerEntry)->getTable();
+        $checkpoints = (new Checkpoint)->getTable();
+
+        $orphans = Tables::ledgerOn($connection)->whereNotNull('checkpoint_id')->whereNotExists(static function (QueryBuilder $claimed) use ($entries, $checkpoints): void {
+            $claimed->selectRaw('1')->from($checkpoints)->whereColumn("{$checkpoints}.id", "{$entries}.checkpoint_id");
+        });
+
+        foreach ($orphans->lazyById($chunk) as $entry) {
+            $run->add(LedgerFindingKind::OrphanEntry, 'the entry claims checkpoint '.$entry->getRawOriginal('checkpoint_id').', which does not exist', null, $entry);
+            $this->entry($entry, $run, null);
+        }
+    }
+
+    /**
+     * Every entity's latest ledger entry: unless it is a tombstone whose MAC verifies, the row
+     * and its seal row must still exist, at that version.
      */
     private function heads(?string $connection, LedgerFindings $run, int $chunk): void
     {
@@ -335,7 +357,9 @@ final readonly class LedgerVerifier
         });
 
         foreach ($heads->lazyById($chunk) as $head) {
-            if (SealEvent::tryFrom((string) $head->getRawOriginal('event'))?->isTombstone() === true) {
+            // The event column alone is writable: a forged tombstone must not hide a deletion.
+            if (SealEvent::tryFrom((string) $head->getRawOriginal('event'))?->isTombstone() === true
+                && $this->writer->verify($head, null, $run->ringsFor($head), historic: true)) {
                 continue;
             }
 

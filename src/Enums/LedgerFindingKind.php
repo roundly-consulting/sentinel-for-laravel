@@ -23,6 +23,7 @@ enum LedgerFindingKind: string
     case AnchorInvalid = 'anchor_invalid';
     case AnchorUnreachable = 'anchor_unreachable';
     case EntryInvalid = 'entry_invalid';
+    case OrphanEntry = 'orphan_entry';
     case EntityDeleted = 'entity_deleted';
     case SealRolledBack = 'seal_rolled_back';
     case SealMissing = 'seal_missing';
