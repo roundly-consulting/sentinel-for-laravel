@@ -48,7 +48,8 @@ final readonly class MessageSigner
             throw NoSigningKeyException::forRing($ring);
         }
 
-        if (! $key->algorithm()->isHttpRegistered()) {
+        // An algorithm RFC 9421 does not register, or one the ring's allow-list retired.
+        if (! $key->algorithm()->isHttpRegistered() || ! Settings::ring($ring)->allows($key->algorithm())) {
             throw AlgorithmNotAllowedException::forRing($ring, $key->algorithm());
         }
 

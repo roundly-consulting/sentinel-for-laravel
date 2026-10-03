@@ -9,9 +9,12 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 use RoundlyConsulting\Sentinel\Contracts\NonceStore;
+use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\SignatureRejection;
+use RoundlyConsulting\Sentinel\Exceptions\AlgorithmNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\HttpSignatureException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 
 /**
  * RFC 9421 defects the dual review found: what a signature covers must be what the
@@ -113,3 +116,17 @@ it('remembers a nonce for the whole last second of the window (dual-review O-10)
 
     expect(rejectionOf(received($signed)))->toBe(SignatureRejection::TooOld);
 })->with(['database', 'cache']);
+
+it('enforces the ring\'s algorithm allow-list when signing and verifying (dual-review O-19)', function (): void {
+    config()->set('sentinel.keys.rings.http.driver', 'database');
+    app(KeyStoreManager::class)->flush();
+    Sentinel::keys()->ring('http')->import('legacy-hmac', Algorithm::HmacSha256, PARTNER_SECRET, signing: true);
+    $signed = Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/events', ['Content-Type' => 'application/json'], '{"a":1}'), 'legacy-hmac');
+
+    // The operator retires shared secrets for the http ring.
+    config()->set('sentinel.keys.rings.http.algorithms', ['ed25519']);
+    app(KeyStoreManager::class)->flush();
+
+    expect(fn () => Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/events'), 'legacy-hmac'))->toThrow(AlgorithmNotAllowedException::class)
+        ->and(rejectionOf(received($signed)))->toBe(SignatureRejection::AlgorithmNotAllowed);
+});

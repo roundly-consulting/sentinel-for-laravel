@@ -24,6 +24,7 @@ use RoundlyConsulting\Sentinel\Keys\Purpose;
 use RoundlyConsulting\Sentinel\Keys\SealingKey;
 use RoundlyConsulting\Sentinel\Keys\Signers;
 use RoundlyConsulting\Sentinel\Support\Clock;
+use RoundlyConsulting\Sentinel\Support\Settings;
 
 /**
  * Verifies an RFC 9421 signature against a profile (plan §4.11.5), in exactly this order:
@@ -223,7 +224,8 @@ final readonly class SignatureVerifier
             $key->status === KeyStatus::Revoked => SignatureRejection::RevokedKey,
             $alg !== null && Algorithm::tryFrom($alg)?->isHttpRegistered() !== true, ! $key->algorithm()->isHttpRegistered() => SignatureRejection::UnsupportedAlgorithm,
             $alg !== null && $alg !== $key->algorithm()->value => SignatureRejection::AlgorithmMismatch,
-            ! $profile->allows($key->algorithm()) => SignatureRejection::AlgorithmNotAllowed,
+            // Both allow-lists: the profile's, and the ring's (a retired algorithm stays retired).
+            ! $profile->allows($key->algorithm()), ! Settings::ring($profile->ring)->allows($key->algorithm()) => SignatureRejection::AlgorithmNotAllowed,
             default => null,
         };
 
