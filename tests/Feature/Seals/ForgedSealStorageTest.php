@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ScanOptions;
@@ -259,4 +260,65 @@ it('still verifies an outdated row whose manifest names a column the definition 
     DB::table('invoices')->where('id', $model->getKey())->update(['note' => 'changed']);
 
     expect(fn () => $class::query()->select('id', 'number', 'amount')->find($model->getKey()))->toThrow(TamperedModelException::class, 'tampered: mac');
+});
+
+/**
+ * A1: delete the seal row and append a ledger row closing the history — with no valid MAC.
+ */
+function forgeTombstone(Model $model, string $seal, string $event = 'unsealed'): void
+{
+    $head = DB::table('sentinel_ledger')->where('sealable_id', $model->getKey())->where('seal', $seal)->orderByDesc('version')->first();
+    DB::table('sentinel_seals')->where('sealable_id', $model->getKey())->where('seal', $seal)->delete();
+    DB::table('sentinel_ledger')->insert([
+        'sealable_type' => $model->getMorphClass(), 'sealable_id' => $model->getKey(), 'seal' => $seal, 'event' => $event,
+        'version' => $head->version + 1, 'ring' => $head->ring, 'key_id' => $head->key_id, 'algorithm' => $head->algorithm,
+        'reason' => 'x', 'entry_mac' => 'AAAA', 'occurred_at' => '2026-10-03 00:00:00.000000',
+    ]);
+}
+
+it('never reads a forged tombstone as a lenient seal\'s legitimate end (dual-review O-4)', function (): void {
+    $invoice = invoice();
+    DB::table('invoices')->where('id', $invoice->id)->update(['number' => 'FORGED']);
+    forgeTombstone($invoice, 'identity');
+
+    $verdict = Sentinel::verify($invoice, 'identity');
+
+    expect($verdict->status)->toBe(VerificationStatus::Tampered)
+        ->and($verdict->reason)->toBe('ledger_entry')
+        ->and($verdict->isIntact())->toBeFalse()
+        ->and(fn () => Invoice::query()->findOrFail($invoice->id)->update(['number' => 'again']))->toThrow(TamperedModelException::class, 'tampered: ledger_entry');
+});
+
+it('never lets seal() re-seal a strict model behind a forged unsealed tombstone (dual-review O-4)', function (): void {
+    $invoice = invoice();
+    DB::table('invoices')->where('id', $invoice->id)->update(['amount' => '0.01']);
+    forgeTombstone($invoice, 'financial');
+
+    expect(Sentinel::verify($invoice, 'financial')->reason)->toBe('ledger_entry')
+        ->and(fn () => Sentinel::seal(Invoice::query()->findOrFail($invoice->id), 'financial'))->toThrow(TamperedModelException::class, 'ledger_entry');
+});
+
+it('treats a re-used id behind a forged deleted tombstone as recreated (dual-review O-4)', function (): void {
+    $invoice = invoice();
+    $id = $invoice->id;
+    forgeTombstone($invoice, 'financial', 'deleted');
+    forgeTombstone($invoice, 'identity', 'deleted');
+    DB::table('invoices')->where('id', $id)->delete();
+
+    expect(fn () => invoice(['id' => $id]))->toThrow(TamperedModelException::class, 'stale: entity_recreated')
+        ->and(DB::table('invoices')->where('id', $id)->exists())->toBeFalse();
+});
+
+it('still honours a genuine tombstone (dual-review O-4)', function (): void {
+    $invoice = invoice();
+    Sentinel::unseal($invoice, 'INC-9: re-imported', seal: 'identity');
+    Sentinel::unseal($invoice, 'INC-9: re-imported', seal: 'financial');
+
+    expect(Sentinel::verify($invoice, 'identity')->status)->toBe(VerificationStatus::Unsealed)
+        ->and(Sentinel::verify($invoice, 'financial')->reason)->toBe('unsealed');
+
+    $id = $invoice->id;
+    $invoice->forceDelete();
+
+    expect(Sentinel::verify(invoice(['id' => $id]))->status)->toBe(VerificationStatus::Intact);
 });

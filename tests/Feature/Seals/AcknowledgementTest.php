@@ -104,10 +104,9 @@ it('checks the configured Gate ability', function (): void {
 
 it('seals explicitly, refusing to launder a tampered model', function (): void {
     $invoice = invoice();
-    Seal::query()->where('sealable_id', $invoice->id)->where('seal', 'identity')->delete();
-    LedgerEntry::query()->where('sealable_id', $invoice->id)->where('seal', 'identity')->toBase()->update(['event' => 'unsealed']);
+    Sentinel::unseal($invoice, 'INC-3: re-imported', seal: 'identity');
 
-    // Missing(unsealed) → explicit seal is the way back.
+    // A lenient seal deliberately unsealed → an explicit seal is the way back.
     expect($invoice->seal('identity')->event)->toBe(SealEvent::Sealed)
         ->and($invoice->seal()->event)->toBe(SealEvent::Resealed);
 

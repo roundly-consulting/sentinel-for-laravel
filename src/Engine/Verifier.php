@@ -317,6 +317,11 @@ final readonly class Verifier
             return $outcome->result(VerificationStatus::Missing, 'seal_deleted', ledgerVersion: $headVersion);
         }
 
+        // A tombstone only ends the history when its entry MAC vouches for it.
+        if ($head !== null && ! $this->sealer->endsHistory($model, $seal, $head)) {
+            return $outcome->result(VerificationStatus::Tampered, 'ledger_entry', ledgerVersion: $headVersion);
+        }
+
         if ($seal->strict) {
             return $outcome->result(VerificationStatus::Missing, $event === SealEvent::Unsealed ? 'unsealed' : 'never_sealed', ledgerVersion: $headVersion);
         }

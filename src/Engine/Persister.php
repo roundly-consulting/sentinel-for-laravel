@@ -150,7 +150,7 @@ final readonly class Persister
         foreach ($seals->auto() as $seal) {
             $head = $this->sealer->head($model, $seal->name);
             $recreated = Tables::seals($model, $seal->name)->exists()
-                || ($head !== null && SealEvent::tryFrom((string) $head->getRawOriginal('event'))?->isTombstone() !== true);
+                || ($head !== null && ! $this->sealer->endsHistory($model, $seal, $head));
 
             if (! $recreated) {
                 $this->sealer->seal($model, $seal, SealEvent::Sealed);

@@ -138,7 +138,7 @@ final readonly class Sealer
     ): bool {
         $sealRow = Tables::seals($model, $seal->name)->lockForUpdate()->first();
         $head = $this->head($model, $seal->name);
-        $ended = $head === null || SealEvent::tryFrom((string) $head->getRawOriginal('event'))?->isTombstone() === true;
+        $ended = $head === null || $this->endsHistory($model, $seal, $head);
 
         // Nothing to remove and no open history to close.
         if ($sealRow === null && $ended) {
@@ -162,6 +162,18 @@ final readonly class Sealer
         $this->container->make(Dispatcher::class)->dispatch(new SealRemoved($model->getMorphClass(), $model->getKey(), $seal->name, $event, $previousStatus));
 
         return $sealRow !== null;
+    }
+
+    /**
+     * Whether a ledger head legitimately ends the history: a tombstone whose entry MAC a key
+     * of a ring the seal accepts vouches for (retired keys included — the ledger outlives
+     * them). The `event` column alone is as writable as any other, so a forged `deleted` /
+     * `unsealed` row never turns a deleted seal into "unsealed" or "never sealed".
+     */
+    public function endsHistory(Model $model, CompiledSeal $seal, LedgerEntry $head): bool
+    {
+        return SealEvent::tryFrom((string) $head->getRawOriginal('event'))?->isTombstone() === true
+            && $this->ledger->verify($head, $model, [$seal->ring, ...$seal->acceptRings], historic: true);
     }
 
     public function head(Model $model, string $seal): ?LedgerEntry
