@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
+use RoundlyConsulting\Sentinel\Contracts\NonceStore;
 use RoundlyConsulting\Sentinel\Enums\SignatureRejection;
 use RoundlyConsulting\Sentinel\Exceptions\HttpSignatureException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
@@ -90,3 +91,25 @@ it('verifies a digest-covered multipart body only when PHP hands over the raw by
     // enable_post_data_reading = Off: php://input keeps the body, and it verifies.
     dispatchSigned(received($sign()))->assertOk();
 });
+
+it('remembers a nonce for the whole last second of the window (dual-review O-10)', function (string $store): void {
+    if ($store === 'cache') {
+        config()->set('sentinel.nonces.store', 'cache');
+        config()->set('sentinel.nonces.cache_store', 'array');
+        app()->forgetInstance(NonceStore::class);
+    }
+
+    $signed = Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/events', ['Content-Type' => 'application/json'], '{"a":1}'), 'partner');
+
+    expect(rejectionOf(received($signed)))->toBeNull()
+        ->and(rejectionOf(received($signed)))->toBe(SignatureRejection::Replayed);
+
+    // 330.4 s later (max_age 300 + skew 30): the window still accepts it — the nonce must hold.
+    Carbon::setTestNow(Carbon::createFromTimestampUTC(1_800_000_000)->addMicroseconds(330_400_000));
+
+    expect(rejectionOf(received($signed)))->toBe(SignatureRejection::Replayed);
+
+    Carbon::setTestNow(Carbon::createFromTimestampUTC(1_800_000_331));
+
+    expect(rejectionOf(received($signed)))->toBe(SignatureRejection::TooOld);
+})->with(['database', 'cache']);

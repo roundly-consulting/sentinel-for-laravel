@@ -89,7 +89,9 @@ final readonly class SignatureVerifier
             throw HttpSignatureException::rejected(SignatureRejection::InvalidSignature, $keyId);
         }
 
-        if ($nonce !== null && ! $remember(self::noncePurpose($key), $nonce, $created + $profile->maxAge + $profile->clockSkew)) {
+        // The window accepts every instant of its last second (whole seconds, inclusive); the
+        // nonce must outlive it, or a replay in that second finds it already forgotten.
+        if ($nonce !== null && ! $remember(self::noncePurpose($key), $nonce, $created + $profile->maxAge + $profile->clockSkew + 1)) {
             throw HttpSignatureException::rejected(SignatureRejection::Replayed, $keyId);
         }
 
