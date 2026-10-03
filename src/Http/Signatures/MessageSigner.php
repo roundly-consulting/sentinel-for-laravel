@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Sentinel\Http\Signatures;
 
+use GuzzleHttp\Psr7\HttpFactory;
 use Psr\Http\Message\RequestInterface;
 use RoundlyConsulting\Crypto\Random\Csprng;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SigningOptions;
@@ -54,10 +55,13 @@ final readonly class MessageSigner
         }
 
         $view = new PsrRequestView($request);
-        $body = $view->body();
+        $requested = $options->components ?? Settings::outboundComponents();
+        // The body is read only for a digest — and a stream that cannot rewind is buffered
+        // first, so the request never goes out with the body signing consumed.
+        [$request, $body] = in_array('content-digest', $requested, true) ? self::buffered($request) : [$request, ''];
         $components = [];
 
-        foreach ($options->components ?? Settings::outboundComponents() as $component) {
+        foreach ($requested as $component) {
             if ($component === 'content-digest' && $body !== '') {
                 $request = $request->withHeader('Content-Digest', ContentDigest::header($body, $options->digest ?? Settings::outboundDigest()));
             }
@@ -109,5 +113,23 @@ final readonly class MessageSigner
         return $request
             ->withHeader('Signature-Input', Serializer::dictionary($inputs))
             ->withHeader('Signature', Serializer::dictionary($signatures));
+    }
+
+    /**
+     * The request and its body bytes; a non-seekable body is replaced by a buffered copy.
+     *
+     * @return array{RequestInterface, string}
+     */
+    private static function buffered(RequestInterface $request): array
+    {
+        $stream = $request->getBody();
+
+        if ($stream->isSeekable()) {
+            return [$request, (new PsrRequestView($request))->body()];
+        }
+
+        $content = $stream->getContents();
+
+        return [$request->withBody((new HttpFactory)->createStream($content)), $content];
     }
 }

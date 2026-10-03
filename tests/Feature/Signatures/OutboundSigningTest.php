@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use GuzzleHttp\Psr7\PumpStream;
 use GuzzleHttp\Psr7\Request as PsrRequest;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Request as ClientRequest;
@@ -119,4 +120,24 @@ it('signs the request as it is finally sent, after every later middleware and ca
     'a later beforeSending callback' => [static fn (PendingRequest $request): PendingRequest => $request->beforeSending(
         static fn (ClientRequest $client): RequestInterface => $client->toPsrRequest()->withHeader('Content-Type', 'application/vnd.api+json'),
     )],
+]);
+
+it('never drains a non-seekable body it signs (dual-review O-22)', function (array $components, bool $digested): void {
+    partnerRing();
+    $chunks = ['{"a":', '1}'];
+    $body = new PumpStream(static function () use (&$chunks): string|false {
+        return array_shift($chunks) ?? false;
+    });
+
+    $signed = Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/e', ['Content-Type' => 'application/json'], $body), 'partner', new SigningOptions(components: $components));
+
+    expect((string) $signed->getBody())->toBe('{"a":1}')
+        ->and($signed->hasHeader('Content-Digest'))->toBe($digested);
+
+    if ($digested) {
+        expect(Sentinel::signatures()->verify(received($signed))->keyId)->toBe('partner');
+    }
+})->with([
+    'content-digest not covered (the body is not read)' => [['@method', '@authority', '@path'], false],
+    'content-digest covered (the body is buffered)' => [['@method', '@authority', '@path', 'content-digest'], true],
 ]);
