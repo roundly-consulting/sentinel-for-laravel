@@ -7,6 +7,7 @@ use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
+use RoundlyConsulting\Sentinel\Ledger\AnchorManager;
 use RoundlyConsulting\Sentinel\Support\Settings;
 
 /**
@@ -119,3 +120,45 @@ it('never runs a suspension behind a mistyped allow_suspension (dual-review O-30
 
     expect(fn () => Sentinel::withoutSealing(static fn (): string => 'ran unsealed', 'import'))->toThrow(InvalidSentinelConfigurationException::class);
 });
+
+it('refuses a non-string optional setting instead of reading it as unset (strict config)', function (string $key, Closure $read): void {
+    config()->set("sentinel.{$key}", ['x']);
+
+    expect($read)->toThrow(InvalidSentinelConfigurationException::class, $key);
+})->with([
+    'log channel' => ['verification.log_channel', static fn () => Settings::logChannel()],
+    'acknowledgement ability' => ['acknowledgement.ability', static fn () => Settings::acknowledgementAbility()],
+]);
+
+it('reads a blank optional setting as unset (strict config)', function (): void {
+    config()->set('sentinel.verification.log_channel', '  ');
+    config()->set('sentinel.acknowledgement.ability', '');
+
+    expect(Settings::logChannel())->toBeNull()
+        ->and(Settings::acknowledgementAbility())->toBeNull();
+});
+
+it('refuses a signature profile ring it cannot check against the sealing rings (strict config)', function (string $key, mixed $value, string $named): void {
+    config()->set($key, $value);
+
+    expect(fn () => Settings::signatureRings())->toThrow(InvalidSentinelConfigurationException::class, $named);
+})->with([
+    'profiles not an array' => ['sentinel.signatures.profiles', 'default', 'signatures.profiles'],
+    'profile not an array' => ['sentinel.signatures.profiles', ['partner' => 'http'], 'signatures.profiles.partner.ring'],
+    'profile ring not a string' => ['sentinel.signatures.profiles', ['partner' => ['ring' => 42]], 'signatures.profiles.partner.ring'],
+    'outbound ring not a string' => ['sentinel.signatures.outbound.ring', ['http'], 'signatures.outbound.ring'],
+]);
+
+it('refuses a mistyped anchor setting instead of anchoring with the default (strict config)', function (string $anchor, string $key, mixed $value): void {
+    config()->set('sentinel.ledger.anchors', $anchor);
+    config()->set("sentinel.ledger.anchor_drivers.{$anchor}.{$key}", $value);
+
+    expect(fn () => app(AnchorManager::class)->build($anchor))
+        ->toThrow(InvalidSentinelConfigurationException::class, "ledger.anchor_drivers.{$anchor}.{$key}");
+})->with([
+    'cache store not a string' => ['cache', 'store', ['redis']],
+    'cache key blank' => ['cache', 'key', ''],
+    'filesystem disk not a string' => ['filesystem', 'disk', 5],
+    'filesystem path blank' => ['filesystem', 'path', ' '],
+    'log channel not a string' => ['log', 'channel', false],
+]);

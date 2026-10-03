@@ -64,16 +64,18 @@ final class AnchorManager
     {
         $config = Settings::anchorDriver($name);
 
+        $prefix = "ledger.anchor_drivers.{$name}";
+
         $anchor = match (true) {
             $name === 'cache' => new CacheAnchor(
-                $this->container->make('cache')->store(self::string($config['store'] ?? null)),
-                self::string($config['key'] ?? null) ?? 'sentinel:ledger:anchor',
+                $this->container->make('cache')->store(Settings::optionalString("{$prefix}.store", $config['store'] ?? null)),
+                self::required("{$prefix}.key", $config['key'] ?? null, 'sentinel:ledger:anchor'),
             ),
             $name === 'filesystem' => new FilesystemAnchor(
-                $this->container->make('filesystem')->disk(self::string($config['disk'] ?? null)),
-                self::string($config['path'] ?? null) ?? 'sentinel/anchors',
+                $this->container->make('filesystem')->disk(Settings::optionalString("{$prefix}.disk", $config['disk'] ?? null)),
+                self::required("{$prefix}.path", $config['path'] ?? null, 'sentinel/anchors'),
             ),
-            $name === 'log' => new LogAnchor($this->container->make(LogManager::class)->channel(self::string($config['channel'] ?? null))),
+            $name === 'log' => new LogAnchor($this->container->make(LogManager::class)->channel(Settings::optionalString("{$prefix}.channel", $config['channel'] ?? null))),
             isset($this->drivers[$name]) => ($this->drivers[$name])($this->container, $config),
             default => throw InvalidSentinelConfigurationException::unknownAnchor($name),
         };
@@ -125,8 +127,18 @@ final class AnchorManager
         return $publications;
     }
 
-    private static function string(mixed $value): ?string
+    /**
+     * A required anchor setting: the default only when absent; blank or non-string throws
+     * rather than silently anchoring under the default key or path.
+     */
+    private static function required(string $key, mixed $value, string $default): string
     {
-        return is_string($value) && $value !== '' ? $value : null;
+        $value ??= $default;
+
+        if (! is_string($value) || trim($value) === '') {
+            throw InvalidSentinelConfigurationException::invalidValue($key, 'must be a non-empty string');
+        }
+
+        return $value;
     }
 }

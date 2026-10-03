@@ -101,14 +101,29 @@ final class Settings
      */
     public static function signatureRings(): array
     {
-        $profiles = config('sentinel.signatures.profiles');
+        $profiles = config('sentinel.signatures.profiles') ?? [];
         $rings = [config('sentinel.signatures.outbound.ring') ?? 'http'];
 
-        foreach (is_array($profiles) ? $profiles : [] as $profile) {
-            $rings[] = is_array($profile) ? ($profile['ring'] ?? 'http') : 'http';
+        if (! is_array($profiles)) {
+            throw InvalidSentinelConfigurationException::invalidValue('signatures.profiles', 'must be an array of profiles');
         }
 
-        return array_values(array_unique(array_filter($rings, is_string(...))));
+        foreach ($profiles as $name => $profile) {
+            $rings[] = is_array($profile) ? ($profile['ring'] ?? 'http') : null;
+
+            // A ring that is not a name cannot be checked against the sealing rings, so it
+            // is refused rather than skipped (skipping it would let a partner ring vouch).
+            if (! is_string(end($rings))) {
+                throw InvalidSentinelConfigurationException::invalidValue("signatures.profiles.{$name}.ring", 'must name a configured key ring');
+            }
+        }
+
+        if (! is_string($rings[0])) {
+            throw InvalidSentinelConfigurationException::invalidValue('signatures.outbound.ring', 'must name a configured key ring');
+        }
+
+        /** @var list<string> $rings */
+        return array_values(array_unique($rings));
     }
 
     /**
@@ -294,16 +309,12 @@ final class Settings
 
     public static function logChannel(): ?string
     {
-        $channel = config('sentinel.verification.log_channel');
-
-        return is_string($channel) && $channel !== '' ? $channel : null;
+        return self::optionalString('verification.log_channel', config('sentinel.verification.log_channel'));
     }
 
     public static function acknowledgementAbility(): ?string
     {
-        $ability = config('sentinel.acknowledgement.ability');
-
-        return is_string($ability) && $ability !== '' ? $ability : null;
+        return self::optionalString('acknowledgement.ability', config('sentinel.acknowledgement.ability'));
     }
 
     public static function ledgerEnabled(): bool
@@ -653,14 +664,17 @@ final class Settings
         return $store;
     }
 
-    private static function optionalString(string $key, mixed $value): ?string
+    /**
+     * A string or null: blank (an empty env value) reads as null, and anything that is not
+     * a string throws rather than silently reading as null.
+     */
+    public static function optionalString(string $key, mixed $value): ?string
     {
-
         if ($value !== null && ! is_string($value)) {
             throw InvalidSentinelConfigurationException::invalidValue($key, 'must be a string or null');
         }
 
-        return $value === null || $value === '' ? null : $value;
+        return $value === null || trim($value) === '' ? null : $value;
     }
 
     private static function headerName(string $key, mixed $value): string
