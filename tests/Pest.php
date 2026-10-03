@@ -129,6 +129,20 @@ function partnerRing(string $kid = 'partner', Algorithm $algorithm = Algorithm::
 }
 
 /**
+ * A second ring for seals (config driver): the http ring holds partners' keys and can never
+ * vouch for a seal or the ledger.
+ */
+function archiveRing(bool $withKey = true): void
+{
+    config()->set('sentinel.keys.rings.archive', [
+        'driver' => 'config', 'key_id' => $withKey ? 'archive-1' : null, 'algorithm' => 'hmac-sha256',
+        'key' => $withKey ? 'base64:'.base64_encode(str_repeat("\x05", 32)) : null,
+        'algorithms' => ['hmac-sha256', 'ed25519', 'ecdsa-p256-sha256', 'ecdsa-p384-sha384'],
+    ]);
+    app(KeyStoreManager::class)->flush();
+}
+
+/**
  * The PSR-7 request as Laravel would receive it.
  */
 function received(RequestInterface $psr, array $server = []): Request

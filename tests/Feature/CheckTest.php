@@ -89,10 +89,11 @@ it('requires a signing key wherever this node seals', function (): void {
 });
 
 it('checks the rings a sealable model and the ledger use', function (): void {
-    config()->set('sentinel.ledger.ring', 'http');
-    config()->set('sentinel.models', [definedBy(static fn ($seals) => $seals->seal('partner')->attributes('number')->ring('http'))]);
+    archiveRing(withKey: false);
+    config()->set('sentinel.ledger.ring', 'archive');
+    config()->set('sentinel.models', [definedBy(static fn ($seals) => $seals->seal('archived')->attributes('number')->ring('archive'))]);
 
-    expectCheck('signing_keys', HealthStatus::Failure, 'ring(s) http');
+    expectCheck('signing_keys', HealthStatus::Failure, 'ring(s) archive');
 
     config()->set('sentinel.ledger.enabled', false);
     config()->set('sentinel.models', [definedBy(static fn ($seals) => $seals->seal('broken')->attributes('bad-column'))]);

@@ -145,18 +145,19 @@ it('accepts seals of an extra ring during a ring migration', function (): void {
         }
     };
 
+    archiveRing();
     $class = definedBy($define(null, []));
     $model = $class::query()->create(['number' => 'n']);
 
-    // The seal moves to the http ring; seals made in the default ring keep verifying only
+    // The seal moves to the archive ring; seals made in the default ring keep verifying only
     // while acceptRings() names it.
-    $class::$define = $define('http', ['default']);
+    $class::$define = $define('archive', ['default']);
     app()->forgetInstance(DefinitionRegistry::class);
 
     expect(Sentinel::verify($model)->status)->toBe(VerificationStatus::Intact)
         ->and(Sentinel::verify($model)->ring)->toBe('default');
 
-    $class::$define = $define('http', []);
+    $class::$define = $define('archive', []);
     app()->forgetInstance(DefinitionRegistry::class);
 
     expect(Sentinel::verify($model)->reason)->toBe('ring_not_accepted');

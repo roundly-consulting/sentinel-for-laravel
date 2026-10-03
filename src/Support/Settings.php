@@ -70,7 +70,30 @@ final class Settings
             throw InvalidSentinelConfigurationException::invalidValue('keys.default_ring', 'must be a ring name ([a-z][a-z0-9_-]{0,63})');
         }
 
+        if (in_array($value, self::signatureRings(), true)) {
+            throw InvalidSentinelConfigurationException::invalidValue('keys.default_ring', 'must not be a ring HTTP message signatures use (a partner\'s key would vouch for seals)');
+        }
+
         return $value;
+    }
+
+    /**
+     * The rings HTTP message signatures use — every profile's and the outbound one. They hold
+     * partners' keys (and secrets partners know), so no seal, ledger entry or checkpoint may
+     * ever be vouched for by one of them.
+     *
+     * @return list<string>
+     */
+    public static function signatureRings(): array
+    {
+        $profiles = config('sentinel.signatures.profiles');
+        $rings = [config('sentinel.signatures.outbound.ring') ?? 'http'];
+
+        foreach (is_array($profiles) ? $profiles : [] as $profile) {
+            $rings[] = is_array($profile) ? ($profile['ring'] ?? 'http') : 'http';
+        }
+
+        return array_values(array_unique(array_filter($rings, is_string(...))));
     }
 
     /**
@@ -308,6 +331,10 @@ final class Settings
 
         if (! is_string($ring) || ! in_array($ring, self::rings(), true)) {
             throw InvalidSentinelConfigurationException::invalidValue('ledger.ring', 'must name a configured key ring');
+        }
+
+        if (in_array($ring, self::signatureRings(), true)) {
+            throw InvalidSentinelConfigurationException::invalidValue('ledger.ring', 'must not be a ring HTTP message signatures use (a partner\'s key would vouch for the ledger)');
         }
 
         return $ring;

@@ -67,13 +67,14 @@ it('infers declared types from casts', function (?string $cast, ?string $tag): v
 ]);
 
 it('compiles every option of the builder', function (): void {
+    archiveRing();
     $class = definedBy(static function (SealBuilder $seals): void {
         $seals->seal('all')
             ->attributes('number')
             ->string('currency')->integer('customer_id')->boolean('paid')->decimal('amount', 2)->float('ratio', 3)
             ->datetime('created_at')->date('due_on')->json('meta')->binary('note')->plaintext('secret')
             ->computed('total', static fn (Model $m): string => '1', SealType::decimal(2))
-            ->ring('default')->acceptRings('http')->algorithms(Algorithm::HmacSha256, Algorithm::HmacSha256)
+            ->ring('default')->acceptRings('archive')->algorithms(Algorithm::HmacSha256, Algorithm::HmacSha256)
             ->manual()->auto()->manual()->verifyOnRetrieve(Reaction::Log)->fieldTags(false)
             ->scope(static fn (Model $m): string => 'x')->onTamperedWrite(TamperedWritePolicy::Skip)->strict();
     });
@@ -85,8 +86,8 @@ it('compiles every option of the builder', function (): void {
         ['a:meta', 'json'], ['a:note', 'bin'], ['a:number', 'auto'], ['a:paid', 'bool'], ['a:ratio', 'flt:3'], ['a:secret', 'plain'],
         ['c:total', 'dec:2'],
     ])
-        ->and($seal->acceptRings)->toBe(['http'])
-        ->and($seal->acceptsRing('http'))->toBeTrue()
+        ->and($seal->acceptRings)->toBe(['archive'])
+        ->and($seal->acceptsRing('archive'))->toBeTrue()
         ->and($seal->algorithms)->toBe([Algorithm::HmacSha256])
         ->and($seal->auto)->toBeFalse()
         ->and($seal->verifiesOnRetrieve)->toBeTrue()
@@ -149,6 +150,7 @@ it('lists every definition problem at once', function (): void {
             ->toContain('uses the unknown ring [nowhere]')
             ->toContain('seal [noalgo] allows no algorithm')
             ->toContain('allows [hmac-sha512], which ring [http] does not')
+            ->toContain('seal [outside] uses the ring [http], which HTTP message signatures use')
             ->toContain('uses [stdClass], which is not a SealDefinition');
     }
 });

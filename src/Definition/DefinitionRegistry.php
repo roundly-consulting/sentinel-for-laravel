@@ -188,11 +188,18 @@ final class DefinitionRegistry
         $ring = $definition->declaredRing() ?? Settings::defaultRing();
         $algorithms = $this->algorithms($name, $ring, $definition->declaredAlgorithms(), $problems);
 
+        // A partner's key — or a secret a partner knows — must never vouch for a seal.
+        if (in_array($ring, Settings::signatureRings(), true)) {
+            $problems[] = "seal [{$name}] uses the ring [{$ring}], which HTTP message signatures use";
+        }
+
         foreach ($definition->declaredAcceptRings() as $accepted) {
             if ($accepted === $ring) {
                 $problems[] = "seal [{$name}] lists its own ring [{$ring}] in acceptRings()";
             } elseif (! in_array($accepted, Settings::rings(), true)) {
                 $problems[] = "seal [{$name}] accepts the unknown ring [{$accepted}]";
+            } elseif (in_array($accepted, Settings::signatureRings(), true)) {
+                $problems[] = "seal [{$name}] accepts the ring [{$accepted}], which HTTP message signatures use";
             }
         }
 

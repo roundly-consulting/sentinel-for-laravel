@@ -9,12 +9,17 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 use RoundlyConsulting\Sentinel\Contracts\NonceStore;
+use RoundlyConsulting\Sentinel\Definition\SealBuilder;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
+use RoundlyConsulting\Sentinel\Enums\HealthStatus;
 use RoundlyConsulting\Sentinel\Enums\SignatureRejection;
 use RoundlyConsulting\Sentinel\Exceptions\AlgorithmNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\HttpSignatureException;
+use RoundlyConsulting\Sentinel\Exceptions\InvalidSealDefinitionException;
+use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
+use RoundlyConsulting\Sentinel\Support\Settings;
 
 /**
  * RFC 9421 defects the dual review found: what a signature covers must be what the
@@ -152,4 +157,22 @@ it('never accepts the application\'s own signing key inbound by default (dual-re
     config()->set('sentinel.signatures.profiles.default.accept_signing_keys', true);
 
     expect(rejectionOf(received(Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/x'), 'our-webhooks'))))->toBeNull();
+});
+
+it('never lets a ring HTTP signatures use vouch for a seal or the ledger (dual-review O-23)', function (): void {
+    $class = definedBy(static fn (SealBuilder $seals) => $seals->seal('default')->ring('http')->attributes('number', 'amount'));
+    $accepting = definedBy(static fn (SealBuilder $seals) => $seals->seal('default')->acceptRings('partner')->attributes('number'));
+
+    expect(fn () => new $class)->toThrow(InvalidSealDefinitionException::class, 'HTTP message signatures use')
+        ->and(fn () => new $accepting)->toThrow(InvalidSealDefinitionException::class, 'HTTP message signatures use');
+
+    config()->set('sentinel.keys.default_ring', 'http');
+
+    expect(fn () => Settings::defaultRing())->toThrow(InvalidSentinelConfigurationException::class, 'keys.default_ring');
+
+    config()->set('sentinel.keys.default_ring', 'default');
+    config()->set('sentinel.ledger.ring', 'http');
+
+    expect(fn () => Settings::ledgerRing())->toThrow(InvalidSentinelConfigurationException::class, 'ledger.ring')
+        ->and(Sentinel::check()->get('configuration')?->status)->toBe(HealthStatus::Failure);
 });

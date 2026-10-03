@@ -254,7 +254,7 @@ The published `config/sentinel.php` documents every key. All of them:
 | `actor_key_type` | `bigint`\|`uuid`\|`ulid` | `bigint` | `SENTINEL_ACTOR_KEY_TYPE` | Id type of actors, key owners and nonce subjects. |
 | `models` | list of class-strings | `[]` | — | Models `sentinel:verify` scans first when given none; every class that has seals is discovered after them. |
 | `database.connection` | ?string | `null` | `SENTINEL_DB_CONNECTION` | Connection of `sentinel_keys`, `sentinel_idempotency_keys`, `sentinel_nonces`. |
-| `keys.default_ring` | ring name (`[a-z][a-z0-9_-]{0,63}`) | `default` | `SENTINEL_DEFAULT_RING` | Ring used by seals that name none. |
+| `keys.default_ring` | ring name (`[a-z][a-z0-9_-]{0,63}`) | `default` | `SENTINEL_DEFAULT_RING` | Ring used by seals that name none. Never a ring HTTP message signatures use (refused). |
 | `keys.revoked` | string (`ring:kid,…`) | `''` | `SENTINEL_REVOKED_KEYS` | Revoked keys — beats every driver, survives a restored key row. |
 | `keys.rings.default.driver` | string | `config` | `SENTINEL_KEY_DRIVER` | `config`, `database`, `chain` or a custom driver. |
 | `keys.rings.default.algorithms` | list | all six | — | The ring's algorithm allow-list. |
@@ -280,7 +280,7 @@ The published `config/sentinel.php` documents every key. All of them:
 | `verification.retrieve_checks_ledger` | bool | `false` | `SENTINEL_RETRIEVE_CHECKS_LEDGER` | Ledger check on retrieve (one more query per model). |
 | `acknowledgement.ability` | ?string | `null` | `SENTINEL_ACKNOWLEDGE_ABILITY` | Gate ability checked before an acknowledgement. |
 | `ledger.enabled` | bool | `true` | `SENTINEL_LEDGER` | Write ledger entries (off loses replay/rollback detection). |
-| `ledger.ring` | a configured ring (null = `keys.default_ring`) | `default` | `SENTINEL_LEDGER_RING` | Ring whose current key signs checkpoints; an unconfigured ring is refused. |
+| `ledger.ring` | a configured ring (null = `keys.default_ring`) | `default` | `SENTINEL_LEDGER_RING` | Ring whose current key signs checkpoints; an unconfigured ring, or one HTTP message signatures use, is refused. |
 | `ledger.connections` | non-empty list (null = the default connection) | `[null]` | — | Connections holding seals and the ledger; every scan, count and check covers each one. |
 | `ledger.batch_size` | int 1–100000 | `1000` | — | Entries per checkpoint transaction. |
 | `ledger.backlog_warning_seconds` | int 60–86400 | `600` | — | Age of un-checkpointed entries reported as a backlog. |
