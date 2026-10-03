@@ -139,6 +139,23 @@ it('enforces the ring\'s algorithm allow-list when signing and verifying (dual-r
         ->and(rejectionOf(received($signed)))->toBe(SignatureRejection::AlgorithmNotAllowed);
 });
 
+it('answers algorithm_not_allowed for an excluded algorithm and unsupported_algorithm only for an unregistered one (dual-review O-25)', function (): void {
+    config()->set('sentinel.keys.rings.http.driver', 'database');
+    config()->set('sentinel.signatures.outbound.ring', 'http');
+    config()->set('sentinel.signatures.profiles.default.accept_signing_keys', true);
+    app(KeyStoreManager::class)->flush();
+    Sentinel::keys()->ring('http')->import('shared-hmac', Algorithm::HmacSha256, PARTNER_SECRET, signing: true);
+    $signed = Sentinel::signatures()->sign(new PsrRequest('POST', 'https://api.example.com/events'), 'shared-hmac');
+    $unregistered = $signed->withHeader('Signature-Input', str_replace(';keyid=', ';alg="rsa-pss-sha512";keyid=', $signed->getHeaderLine('Signature-Input')));
+
+    expect(rejectionOf(received($unregistered)))->toBe(SignatureRejection::UnsupportedAlgorithm);
+
+    // A registered algorithm the profile does not list is "not allowed", not "unsupported".
+    config()->set('sentinel.signatures.profiles.default.algorithms', ['ed25519']);
+
+    expect(rejectionOf(received($signed)))->toBe(SignatureRejection::AlgorithmNotAllowed);
+});
+
 it('never accepts the application\'s own signing key inbound by default (dual-review O-20)', function (): void {
     config()->set('sentinel.keys.rings.http.driver', 'database');
     config()->set('sentinel.signatures.outbound.ring', 'http');
