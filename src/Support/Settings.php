@@ -19,14 +19,14 @@ use RoundlyConsulting\Sentinel\Keys\RingConfig;
 /**
  * Validated readers for `config/sentinel.php`. Every value is checked at first use and an
  * invalid one throws {@see InvalidSentinelConfigurationException} — never a silent fallback
- * on a security-relevant key. Booleans go through the toolkit's strict reader
- * (`SENTINEL_X=off` means off, `SENTINEL_X=disabled` throws — a typo never reads as the
- * default), integers through its range checks.
+ * on a security-relevant key. Booleans go through the toolkit's boolean reader, which is
+ * strict (`SENTINEL_X=off` means off, `SENTINEL_X=disabled` throws — a typo never reads as
+ * the default), integers through its range checks.
  */
 final class Settings
 {
     /**
-     * A strict boolean (the toolkit's reader): `true`/`false`, `on`/`off`, `yes`/`no`, `1`/`0`
+     * A strict boolean (the toolkit's `boolean()` reader): `true`/`false`, `on`/`off`, `yes`/`no`, `1`/`0`
      * (any case) and `''` (false); null — an absent key — is the default, and anything else
      * throws instead of silently reading as the default (`SENTINEL_ALLOW_SUSPENSION=disabled`
      * must never leave suspension on). Callers read the value with `config()` themselves, so
@@ -36,7 +36,7 @@ final class Settings
      */
     public static function flag(string $key, mixed $value, bool $default): bool
     {
-        return Config::for(["sentinel.{$key}" => $value], InvalidSentinelConfigurationException::class)->strictBoolean("sentinel.{$key}", $default);
+        return Config::for(["sentinel.{$key}" => $value], InvalidSentinelConfigurationException::class)->boolean("sentinel.{$key}", $default);
     }
 
     /**
