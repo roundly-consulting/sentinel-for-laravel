@@ -437,8 +437,9 @@ fails on the first `new` — and validated as a whole: an unknown ring, an undec
 closure that is not `static`, a duplicate field — every problem is listed in one
 `InvalidSealDefinitionException`. Reading a model costs nothing extra unless one of its seals
 declares `verifyOnRetrieve()`. Values are canonicalized from what the database
-holds (read back under a row lock), typed and engine-portable — see the technical docs for
-the frozen `sentinel.seal/1` format.
+holds (read back under a row lock), typed and engine-portable for declared or cast types (an
+uncast, undeclared column is typed by what the driver returns — declare it if seals must move
+between database engines) — see the technical docs for the frozen `sentinel.seal/1` format.
 
 ## Sealing and writes
 
