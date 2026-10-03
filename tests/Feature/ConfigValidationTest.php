@@ -2,7 +2,10 @@
 
 declare(strict_types=1);
 
+use RoundlyConsulting\Sentinel\Enums\HealthStatus;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
+use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Support\Settings;
 
@@ -75,3 +78,44 @@ it('refuses an invalid outbound signing configuration with the key name', functi
     'non-printable tag' => ['tag', "app\n", static fn () => Settings::outboundTag()],
     'non-string tag' => ['tag', 7, static fn () => Settings::outboundTag()],
 ]);
+
+it('refuses a mistyped boolean instead of reading it as the default (dual-review O-30 / F-3)', function (string $key, Closure $read): void {
+    config()->set("sentinel.{$key}", 'disabled');
+
+    expect($read)->toThrow(InvalidSentinelConfigurationException::class, "sentinel.{$key}")
+        ->and(Sentinel::check()->get('configuration')?->status)->toBe(HealthStatus::Failure);
+
+    config()->set("sentinel.{$key}", 'off');
+
+    expect($read())->toBeFalse();
+
+    config()->set("sentinel.{$key}", 'YES');
+
+    expect($read())->toBeTrue();
+})->with([
+    'sealing.auto' => ['sealing.auto', static fn (): bool => Settings::autoSeal()],
+    'sealing.allow_suspension' => ['sealing.allow_suspension', static fn (): bool => Settings::allowSuspension()],
+    'sealing.field_tags' => ['sealing.field_tags', static fn (): bool => Settings::fieldTags()],
+    'verification.check_ledger' => ['verification.check_ledger', static fn (): bool => Settings::checkLedger()],
+    'verification.outdated_is_intact' => ['verification.outdated_is_intact', static fn (): bool => Settings::outdatedIsIntact()],
+    'verification.retrieve_checks_ledger' => ['verification.retrieve_checks_ledger', static fn (): bool => Settings::retrieveChecksLedger()],
+    'ledger.enabled' => ['ledger.enabled', static fn (): bool => Settings::ledgerEnabled()],
+    'idempotency.accept_unquoted' => ['idempotency.accept_unquoted', static fn (): bool => Settings::idempotencyAcceptsUnquoted()],
+    'idempotency.store_client_errors' => ['idempotency.store_client_errors', static fn (): bool => Settings::storesClientErrors()],
+    'idempotency.store_server_errors' => ['idempotency.store_server_errors', static fn (): bool => Settings::storesServerErrors()],
+    'idempotency.transactional' => ['idempotency.transactional', static fn (): bool => Settings::idempotencyTransactional()],
+    'idempotency.encrypt' => ['idempotency.encrypt', static fn (): bool => Settings::idempotencyEncrypt()],
+    'signatures.outbound.include_alg' => ['signatures.outbound.include_alg', static fn (): bool => Settings::outboundIncludesAlg()],
+    'signatures.advertise' => ['signatures.advertise', static fn (): bool => Settings::advertisesSignatures()],
+    'schedule.enabled' => ['schedule.enabled', static fn (): bool => Settings::scheduleEnabled()],
+    'signatures.profiles.default.require_nonce' => ['signatures.profiles.default.require_nonce', static fn (): bool => ProfileResolver::resolve()->requireNonce],
+    'signatures.profiles.default.require_query' => ['signatures.profiles.default.require_query', static fn (): bool => ProfileResolver::resolve()->requireQuery],
+    'signatures.profiles.default.require_content_digest' => ['signatures.profiles.default.require_content_digest', static fn (): bool => ProfileResolver::resolve()->requireContentDigest],
+    'signatures.profiles.default.accept_signing_keys' => ['signatures.profiles.default.accept_signing_keys', static fn (): bool => ProfileResolver::resolve()->acceptSigningKeys],
+]);
+
+it('never runs a suspension behind a mistyped allow_suspension (dual-review O-30)', function (): void {
+    config()->set('sentinel.sealing.allow_suspension', 'disabled');
+
+    expect(fn () => Sentinel::withoutSealing(static fn (): string => 'ran unsealed', 'import'))->toThrow(InvalidSentinelConfigurationException::class);
+});

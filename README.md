@@ -347,11 +347,12 @@ Ring, profile, anchor and store names follow `[a-z][a-z0-9_-]{0,63}`. Add rings 
 `sentinel:key:generate --ring=<ring>` prints `SENTINEL_<RING>_*` lines — read them in the
 ring's section with `env()`) and inbound policies under `signatures.profiles.<name>`.
 
-**How values are read.** Booleans accept `true`/`false`, `on`/`off`, `yes`/`no`, `1`/`0` (any
-case) and `''` (false); any other value counts as the key's default instead of throwing, so
-spell them exactly. Every other setting is validated at first use: a value out of
-range, an unknown enum case or a malformed list throws `InvalidSentinelConfigurationException`
-naming the key — it never falls back to a default. `php artisan about` shows a Sentinel section
+**How values are read.** Every setting is validated at first use, and an invalid one throws
+`InvalidSentinelConfigurationException` naming the key — it never falls back to a default.
+Booleans accept `true`/`false`, `on`/`off`, `yes`/`no`, `1`/`0` (any case) and `''` (false);
+any other value throws (`SENTINEL_ALLOW_SUSPENSION=disabled` is an error, never "allowed"),
+and only an unset key takes its default. A value out of range, an unknown enum case or a
+malformed list throws the same way. `php artisan about` shows a Sentinel section
 (rings, driver, signing key present or missing, flags, anchors, stores, sealable models,
 schedule — never key material), and `sentinel:check` reports every invalid setting at once.
 

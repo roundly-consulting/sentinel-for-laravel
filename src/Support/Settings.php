@@ -19,11 +19,26 @@ use RoundlyConsulting\Sentinel\Keys\RingConfig;
 /**
  * Validated readers for `config/sentinel.php`. Every value is checked at first use and an
  * invalid one throws {@see InvalidSentinelConfigurationException} — never a silent fallback
- * on a security-relevant key. Booleans and integers go through the toolkit's `Config`
- * helpers, so `SENTINEL_X=off` means off.
+ * on a security-relevant key. Booleans go through the toolkit's strict reader
+ * (`SENTINEL_X=off` means off, `SENTINEL_X=disabled` throws — a typo never reads as the
+ * default), integers through its range checks.
  */
 final class Settings
 {
+    /**
+     * A strict boolean (the toolkit's reader): `true`/`false`, `on`/`off`, `yes`/`no`, `1`/`0`
+     * (any case) and `''` (false); null — an absent key — is the default, and anything else
+     * throws instead of silently reading as the default (`SENTINEL_ALLOW_SUSPENSION=disabled`
+     * must never leave suspension on). Callers read the value with `config()` themselves, so
+     * the key stays visible to the config contract.
+     *
+     * @param  string  $key  the key under `sentinel.`, for the error message
+     */
+    public static function flag(string $key, mixed $value, bool $default): bool
+    {
+        return Config::for(["sentinel.{$key}" => $value], InvalidSentinelConfigurationException::class)->strictBoolean("sentinel.{$key}", $default);
+    }
+
     /**
      * The application context bound into every MAC (`sentinel.context`). Changing it
      * invalidates every seal, by design: two apps sharing keys cannot forge each other's.
@@ -236,17 +251,17 @@ final class Settings
 
     public static function autoSeal(): bool
     {
-        return Config::boolean('sentinel.sealing.auto', true);
+        return self::flag('sealing.auto', config('sentinel.sealing.auto'), true);
     }
 
     public static function allowSuspension(): bool
     {
-        return Config::boolean('sentinel.sealing.allow_suspension', true);
+        return self::flag('sealing.allow_suspension', config('sentinel.sealing.allow_suspension'), true);
     }
 
     public static function fieldTags(): bool
     {
-        return Config::boolean('sentinel.sealing.field_tags', true);
+        return self::flag('sealing.field_tags', config('sentinel.sealing.field_tags'), true);
     }
 
     public static function onTamperedWrite(): TamperedWritePolicy
@@ -269,12 +284,12 @@ final class Settings
 
     public static function checkLedger(): bool
     {
-        return Config::boolean('sentinel.verification.check_ledger', true);
+        return self::flag('verification.check_ledger', config('sentinel.verification.check_ledger'), true);
     }
 
     public static function outdatedIsIntact(): bool
     {
-        return Config::boolean('sentinel.verification.outdated_is_intact', true);
+        return self::flag('verification.outdated_is_intact', config('sentinel.verification.outdated_is_intact'), true);
     }
 
     public static function logChannel(): ?string
@@ -293,7 +308,7 @@ final class Settings
 
     public static function ledgerEnabled(): bool
     {
-        return Config::boolean('sentinel.ledger.enabled', true);
+        return self::flag('ledger.enabled', config('sentinel.ledger.enabled'), true);
     }
 
     /**
@@ -434,7 +449,7 @@ final class Settings
 
     public static function retrieveChecksLedger(): bool
     {
-        return Config::boolean('sentinel.verification.retrieve_checks_ledger', false);
+        return self::flag('verification.retrieve_checks_ledger', config('sentinel.verification.retrieve_checks_ledger'), false);
     }
 
     public static function verifiedStatus(): int
@@ -525,17 +540,17 @@ final class Settings
 
     public static function idempotencyAcceptsUnquoted(): bool
     {
-        return Config::boolean('sentinel.idempotency.accept_unquoted', true);
+        return self::flag('idempotency.accept_unquoted', config('sentinel.idempotency.accept_unquoted'), true);
     }
 
     public static function storesClientErrors(): bool
     {
-        return Config::boolean('sentinel.idempotency.store_client_errors', true);
+        return self::flag('idempotency.store_client_errors', config('sentinel.idempotency.store_client_errors'), true);
     }
 
     public static function storesServerErrors(): bool
     {
-        return Config::boolean('sentinel.idempotency.store_server_errors', false);
+        return self::flag('idempotency.store_server_errors', config('sentinel.idempotency.store_server_errors'), false);
     }
 
     /**
@@ -545,7 +560,7 @@ final class Settings
      */
     public static function idempotencyTransactional(): bool
     {
-        $transactional = Config::boolean('sentinel.idempotency.transactional', false);
+        $transactional = self::flag('idempotency.transactional', config('sentinel.idempotency.transactional'), false);
 
         if ($transactional && self::idempotencyStore() !== 'database') {
             throw InvalidSentinelConfigurationException::invalidValue('idempotency.transactional', 'needs idempotency.store = database — a cache record is not rolled back with the transaction');
@@ -556,7 +571,7 @@ final class Settings
 
     public static function idempotencyEncrypt(): bool
     {
-        return Config::boolean('sentinel.idempotency.encrypt', true);
+        return self::flag('idempotency.encrypt', config('sentinel.idempotency.encrypt'), true);
     }
 
     public static function maxResponseBytes(): int
@@ -710,12 +725,12 @@ final class Settings
 
     public static function outboundIncludesAlg(): bool
     {
-        return Config::boolean('sentinel.signatures.outbound.include_alg', false);
+        return self::flag('signatures.outbound.include_alg', config('sentinel.signatures.outbound.include_alg'), false);
     }
 
     public static function advertisesSignatures(): bool
     {
-        return Config::boolean('sentinel.signatures.advertise', true);
+        return self::flag('signatures.advertise', config('sentinel.signatures.advertise'), true);
     }
 
     /**
@@ -723,7 +738,7 @@ final class Settings
      */
     public static function scheduleEnabled(): bool
     {
-        return Config::boolean('sentinel.schedule.enabled', true);
+        return self::flag('schedule.enabled', config('sentinel.schedule.enabled'), true);
     }
 
     /**

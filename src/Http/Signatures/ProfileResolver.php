@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Sentinel\Http\Signatures;
 
-use RoundlyConsulting\PackageToolkit\Support\Config;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Support\Settings;
@@ -49,13 +48,13 @@ final class ProfileResolver
             is_string($label) ? $label : null,
             is_string($tag) ? $tag : null,
             self::components("{$prefix}.components", config("sentinel.signatures.profiles.{$name}.components") ?? []),
-            Config::boolean("sentinel.signatures.profiles.{$name}.require_query", true),
-            Config::boolean("sentinel.signatures.profiles.{$name}.require_content_digest", true),
-            Config::boolean("sentinel.signatures.profiles.{$name}.require_nonce", true),
+            Settings::flag("signatures.profiles.{$name}.require_query", config("sentinel.signatures.profiles.{$name}.require_query"), true),
+            Settings::flag("signatures.profiles.{$name}.require_content_digest", config("sentinel.signatures.profiles.{$name}.require_content_digest"), true),
+            Settings::flag("signatures.profiles.{$name}.require_nonce", config("sentinel.signatures.profiles.{$name}.require_nonce"), true),
             self::seconds("{$prefix}.max_age", config("sentinel.signatures.profiles.{$name}.max_age"), 1, 86400, 300),
             self::seconds("{$prefix}.clock_skew", config("sentinel.signatures.profiles.{$name}.clock_skew"), 0, 3600, 30),
             self::algorithms("{$prefix}.algorithms", config("sentinel.signatures.profiles.{$name}.algorithms")),
-            Config::boolean("sentinel.signatures.profiles.{$name}.accept_signing_keys", false),
+            Settings::flag("signatures.profiles.{$name}.accept_signing_keys", config("sentinel.signatures.profiles.{$name}.accept_signing_keys"), false),
         );
     }
 
