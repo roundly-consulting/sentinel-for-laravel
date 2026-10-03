@@ -33,6 +33,7 @@ use RoundlyConsulting\Sentinel\Definition\DefinitionRegistry;
 use RoundlyConsulting\Sentinel\Engine\DocumentBuilder;
 use RoundlyConsulting\Sentinel\Engine\LedgerWriter;
 use RoundlyConsulting\Sentinel\Engine\ReadBack;
+use RoundlyConsulting\Sentinel\Engine\SchemaColumns;
 use RoundlyConsulting\Sentinel\Engine\Sealer;
 use RoundlyConsulting\Sentinel\Engine\Verifier;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
@@ -110,6 +111,8 @@ final class SentinelServiceProvider extends PackageServiceProvider
         $this->app->scoped(KeyCache::class);
         // Suspension flags: never outlive the request or job that set them.
         $this->app->scoped(SealingScope::class);
+        // Table column listings: one schema query per table per request / job, then gone.
+        $this->app->scoped(SchemaColumns::class);
 
         // Stateless engine services (final readonly, no key material of their own): built
         // once per request / job instead of once per verified row, and flushed with the

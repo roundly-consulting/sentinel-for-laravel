@@ -62,6 +62,7 @@ final readonly class Verifier
         private DocumentBuilder $documents,
         private LedgerWriter $ledger,
         private Sealer $sealer,
+        private SchemaColumns $schema,
         private Container $container,
     ) {}
 
@@ -287,7 +288,9 @@ final readonly class Verifier
     /**
      * Every attribute the stored manifest names is a column of the table: the seal's own, or
      * (an older definition) one the schema still has. A name that is neither was edited in —
-     * it would make the read fail (PostgreSQL/MySQL) or pass for a partial select.
+     * it would make the read fail (PostgreSQL/MySQL) or pass for a partial select. The schema
+     * listing is memoised per request (`SchemaColumns`), so rows sealed under an older
+     * definition cost one schema query per table, not one per row.
      *
      * @param  list<list<string>>  $manifest
      */
@@ -301,7 +304,7 @@ final readonly class Verifier
             }
         }
 
-        return $unknown === [] || array_diff($unknown, $model->getConnection()->getSchemaBuilder()->getColumnListing($model->getTable())) === [];
+        return $unknown === [] || $this->schema->exist($model, $unknown);
     }
 
     /**
