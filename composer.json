@@ -18,7 +18,7 @@
         "http-message-signatures",
         "rfc9421"
     ],
-    "homepage": "https://github.com/roundly-consulting/sentinel-for-laravel",
+    "homepage": "https://roundly-consulting.com/open-source/docs/sentinel-for-laravel",
     "license": "MIT",
     "authors": [
         {
@@ -27,6 +27,9 @@
             "role": "Developer"
         }
     ],
+    "support": {
+        "docs": "https://roundly-consulting.com/open-source/docs/sentinel-for-laravel"
+    },
     "require": {
         "php": "^8.4",
         "ext-hash": "*",
