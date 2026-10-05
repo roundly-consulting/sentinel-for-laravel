@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Sentinel\Keys;
 
 use LogicException;
-use RoundlyConsulting\Crypto\Signature\EdDSA;
 use RoundlyConsulting\Crypto\Signature\Key\EcKey;
 use RoundlyConsulting\Crypto\Signature\Key\HmacSecret;
 use RoundlyConsulting\Crypto\Signature\Key\OkpKey;
@@ -20,7 +19,7 @@ use SensitiveParameter;
  *  - HMAC: a root secret of 32..1024 random bytes (crypto `HmacSecret`: never empty, never
  *    PEM/DER key material, never a single repeated byte). Subkeys are HKDF-derived per use.
  *  - Ed25519: the 64-byte libsodium secret key and/or the 32-byte public key; a secret key
- *    must embed its own public key (proven by a sign/verify probe), so an arbitrary 64-byte
+ *    must embed its own public key (crypto checks it against the seed), so an arbitrary 64-byte
  *    HMAC secret cannot load as `ed25519`.
  *  - ECDSA: PKCS#8 / SPKI PEM whose curve matches the algorithm (P-256 ↔ ecdsa-p256-sha256).
  *
@@ -32,8 +31,6 @@ final readonly class KeyMaterial
     private const int HMAC_MIN_BYTES = 32;
 
     private const int HMAC_MAX_BYTES = 1024;
-
-    private const string ED25519_PROBE = 'sentinel.key-probe/1';
 
     private function __construct(
         public Algorithm $algorithm,
@@ -198,26 +195,22 @@ final readonly class KeyMaterial
     {
         $algorithm = Algorithm::Ed25519;
 
+        // crypto checks a secret key's embedded public half against its seed, so a 64-byte key it
+        // refuses is the right shape but not a keypair; any other length is the wrong shape.
+        $refusal = match (true) {
+            $private === null => 'the public key must be 32 bytes',
+            strlen($private) === SODIUM_CRYPTO_SIGN_SECRETKEYBYTES => 'the secret key does not embed its own public key',
+            default => 'the secret key must be the 64-byte libsodium secret key',
+        };
+
         $key = CryptoErrors::translate(
             $algorithm,
             static fn (): OkpKey => $private !== null ? OkpKey::fromSecretKey($private) : OkpKey::ed25519((string) $public),
-            $private !== null ? 'the secret key must be the 64-byte libsodium secret key' : 'the public key must be 32 bytes',
+            $refusal,
         );
 
-        if ($private !== null) {
-            $proven = CryptoErrors::translate($algorithm, static function () use ($key): bool {
-                $probe = new EdDSA($key);
-
-                return $probe->verify(self::ED25519_PROBE, $probe->sign(self::ED25519_PROBE));
-            });
-
-            if (! $proven) {
-                throw InvalidKeyMaterialException::wrongType($algorithm, 'the secret key does not embed its own public key');
-            }
-
-            if ($public !== null && $public !== $key->publicKey) {
-                throw InvalidKeyMaterialException::wrongType($algorithm, 'the public key does not belong to the secret key');
-            }
+        if ($private !== null && $public !== null && $public !== $key->publicKey) {
+            throw InvalidKeyMaterialException::wrongType($algorithm, 'the public key does not belong to the secret key');
         }
 
         return new self($algorithm, okp: $key);

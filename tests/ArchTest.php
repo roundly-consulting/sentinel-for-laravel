@@ -157,10 +157,10 @@ it('(f) marks every Canonical, Keys, Engine and Ledger class @internal', functio
     expect($checked)->toBeGreaterThan(10)->and($offenders)->toBe([]);
 });
 
-it('(g) touches crypto Hmac, Hs, EdDSA and Es only from FieldTagger, Signers and KeyMaterial', function (): void {
-    // KeyMaterial needs EdDSA for one thing: proving an Ed25519 secret key embeds its own
-    // public key (a sign/verify probe) before it is ever accepted.
-    $allowed = [FieldTagger::class, Signers::class, KeyMaterial::class];
+it('(g) touches crypto Hmac, Hs, EdDSA and Es only from FieldTagger and Signers', function (): void {
+    // KeyMaterial no longer probes Ed25519 keys: crypto >= 1.0.1 refuses a secret key whose
+    // public half does not match its seed.
+    $allowed = [FieldTagger::class, Signers::class];
     $primitives = ['RoundlyConsulting\Crypto\Hash\Hmac', 'RoundlyConsulting\Crypto\Signature\Hs', 'RoundlyConsulting\Crypto\Signature\EdDSA', 'RoundlyConsulting\Crypto\Signature\Es'];
     $users = [];
 
