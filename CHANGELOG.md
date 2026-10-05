@@ -6,13 +6,21 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+## 1.0.1 - 2026-10-05
+
 ### Changed
 
-- Requires `roundly-consulting/crypto-for-laravel` `^1.0.1`. crypto now refuses an Ed25519 secret key whose public half doesn't match its seed, so sentinel drops its own sign/verify probe. Upgrade: `composer update roundly-consulting/crypto-for-laravel`.
+- Requires `roundly-consulting/crypto-for-laravel` `^1.0.1`. crypto now refuses an Ed25519 secret
+  key whose public half doesn't match its seed, so sentinel drops its own sign/verify probe.
+  Upgrade: `composer update roundly-consulting/crypto-for-laravel`.
+- Maintenance: `composer.json` `homepage` and `support.docs` now point to the documentation site.
+- Documentation: the README banner uses an absolute image URL, so it also renders on Packagist and
+  other sites.
 
 ### Fixed
 
-- A 64-byte Ed25519 secret key that isn't a real keypair is refused with "the secret key does not embed its own public key", not the misleading "must be the 64-byte libsodium secret key".
+- A 64-byte Ed25519 secret key that isn't a real keypair is refused with "the secret key does not
+  embed its own public key", not the misleading "must be the 64-byte libsodium secret key".
 
 ## 1.0.0 - 2026-10-03
 
