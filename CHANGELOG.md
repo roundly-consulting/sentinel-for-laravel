@@ -6,6 +6,12 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+### Fixed
+
+- On a PHP build without ext-sodium, loading an Ed25519 secret key throws
+  `InvalidKeyMaterialException::unsupported` again, not `Error: Undefined constant
+  "SODIUM_CRYPTO_SIGN_SECRETKEYBYTES"` (a 1.0.1 regression).
+
 ## 1.0.1 - 2026-10-05
 
 ### Changed

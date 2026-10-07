@@ -70,6 +70,35 @@ final class SourceScan
     }
 
     /**
+     * Global constants and functions a file names (`NAME`, `\NAME`, `name(`) whose name matches
+     * the pattern — member names after `->` / `::` and declarations are not references.
+     *
+     * @return list<string>
+     */
+    public static function globalNames(string $file, string $pattern): array
+    {
+        $tokens = self::meaningful($file);
+        $names = [];
+
+        foreach ($tokens as $i => $token) {
+            $name = ltrim($token->text, '\\');
+            $previous = $tokens[$i - 1] ?? null;
+
+            if (! $token->is([T_STRING, T_NAME_FULLY_QUALIFIED]) || preg_match($pattern, $name) !== 1) {
+                continue;
+            }
+
+            if ($previous !== null && $previous->is([T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR, T_DOUBLE_COLON, T_FUNCTION, T_CONST])) {
+                continue;
+            }
+
+            $names[] = $name;
+        }
+
+        return $names;
+    }
+
+    /**
      * Static calls `Class::method(` where Class's short or imported name matches.
      *
      * @param  list<string>  $classes  short names (`Date`, `Carbon`)

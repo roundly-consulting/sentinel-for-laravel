@@ -228,3 +228,24 @@ it('(j) reaches Guzzle PSR-7 only through illuminate/http, from the outbound sig
         ->and(class_exists(HttpFactory::class))->toBeTrue()
         ->and($users)->toBe([MessageSigner::class.' imports '.HttpFactory::class]);
 });
+
+/**
+ * ext-sodium can be compiled out. crypto checks for it and throws UnsupportedAlgorithmException,
+ * which Keys\CryptoErrors turns into InvalidKeyMaterialException::unsupported — but a SODIUM_*
+ * constant or sodium_*() call in src throws an Error before crypto is ever asked.
+ */
+it('(k) names no ext-sodium constant or function, so a host without it gets ::unsupported', function (): void {
+    $offenders = [];
+
+    eachSourceClass(function (string $class, string $file) use (&$offenders): void {
+        foreach (SourceScan::globalNames($file, '/^sodium_/i') as $name) {
+            $offenders[] = "{$class} names {$name}";
+        }
+    });
+
+    // The scan is live: it finds Signers' guard, which names ext-sodium only inside a string.
+    $signers = (string) (new ReflectionClass(Signers::class))->getFileName();
+
+    expect(SourceScan::globalNames($signers, '/^function_exists$/'))->toBe(['function_exists'])
+        ->and($offenders)->toBe([]);
+});

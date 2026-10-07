@@ -32,6 +32,13 @@ final readonly class KeyMaterial
 
     private const int HMAC_MAX_BYTES = 1024;
 
+    /**
+     * libsodium's seed ‖ public key. A literal, not `SODIUM_CRYPTO_SIGN_SECRETKEYBYTES`: on a
+     * host without ext-sodium that constant is undefined and loading would throw an `Error`
+     * before crypto reports the missing extension (→ `InvalidKeyMaterialException::unsupported`).
+     */
+    private const int ED25519_SECRET_BYTES = 64;
+
     private function __construct(
         public Algorithm $algorithm,
         #[SensitiveParameter] private ?HmacSecret $secret = null,
@@ -199,7 +206,7 @@ final readonly class KeyMaterial
         // refuses is the right shape but not a keypair; any other length is the wrong shape.
         $refusal = match (true) {
             $private === null => 'the public key must be 32 bytes',
-            strlen($private) === SODIUM_CRYPTO_SIGN_SECRETKEYBYTES => 'the secret key does not embed its own public key',
+            strlen($private) === self::ED25519_SECRET_BYTES => 'the secret key does not embed its own public key',
             default => 'the secret key must be the 64-byte libsodium secret key',
         };
 
