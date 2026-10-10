@@ -84,7 +84,8 @@ final readonly class UpdateAndResealAction
         $ids = [];
         $failures = [];
 
-        $query->clone()->chunkById($chunk, function (Collection $models) use ($seals, &$ids, &$failures): void {
+        // Paged by key: a caller's order would stay the primary sort and skip or repeat rows.
+        $query->clone()->reorder()->chunkById($chunk, function (Collection $models) use ($seals, &$ids, &$failures): void {
             foreach ($models as $model) {
                 $ids[] = $model->getKey();
                 array_push($failures, ...$this->failures($model, $seals, false));

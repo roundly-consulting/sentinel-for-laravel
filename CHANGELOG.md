@@ -47,6 +47,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - A checkpoint batch larger than the engine's bind-parameter limit (SQLite 32 766, PostgreSQL
   and MySQL 65 535) no longer fails with "too many SQL variables" on every run. `batch_size`
   allows up to 100 000, and a large `sealMissing()` baseline creates exactly such a backlog.
+- `resealWhere()` and `updateAndReseal()` cover every selected row when the query has its own
+  `orderBy`. They page by key, but the caller's order stayed the primary sort, so rows were
+  skipped (left tampered or not updated) or handled twice.
 
 ## 1.0.2 - 2026-10-07
 

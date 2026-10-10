@@ -41,7 +41,8 @@ final readonly class ResealWhereAction
         $tally = ['acknowledged' => 0, 'skipped' => 0, 'failed' => 0];
 
         $this->scope->withoutVerification(function () use ($query, $request, $seals, $reason, $actor, &$tally): void {
-            $query->chunkById(max(1, $request->chunk), function (Collection $models) use ($seals, $reason, $actor, &$tally): void {
+            // Paged by key: a caller's order would stay the primary sort and skip or repeat rows.
+            $query->reorder()->chunkById(max(1, $request->chunk), function (Collection $models) use ($seals, $reason, $actor, &$tally): void {
                 foreach ($models as $model) {
                     foreach ($seals as $seal) {
                         try {

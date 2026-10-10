@@ -182,6 +182,27 @@ it('mass-updates deliberately: verify all, update, re-seal with the reason (§10
         ->and(Sentinel::verifyMany([$first, $second, $other])->allIntact())->toBeTrue();
 });
 
+/**
+ * Chat review C-6: chunkById pages by id, so the caller's order must not stay the primary sort.
+ */
+it('covers every selected row whatever order the query asks for', function (): void {
+    $invoices = array_map(static fn (string $number): Invoice => invoice(['number' => $number]), ['A', 'D', 'B', 'C']);
+    $byNumber = static fn (Builder $query) => $query->orderByDesc('number');
+
+    $updated = Sentinel::model(Invoice::class)->updateAndReseal($byNumber, ['note' => 'migrated'], 'FIN-14 notes', chunk: 2);
+
+    expect($updated->resealed)->toBe(4)
+        ->and(Invoice::query()->pluck('note')->all())->toBe(['migrated', 'migrated', 'migrated', 'migrated'])
+        ->and(Sentinel::verifyMany($invoices)->allIntact())->toBeTrue();
+
+    DB::table('invoices')->update(['amount' => '0.00']);
+
+    $acknowledged = Sentinel::model(Invoice::class)->resealWhere($byNumber, 'FIN-15 zeroed', seal: 'financial', chunk: 2);
+
+    expect($acknowledged->acknowledged)->toBe(4)
+        ->and(array_map(static fn (Invoice $invoice): VerificationStatus => Sentinel::verify($invoice)->status, $invoices))->each->toBe(VerificationStatus::Intact);
+});
+
 it('writes nothing when one selected row is not intact', function (): void {
     $intact = invoice(['status' => 'draft']);
     $tampered = invoice(['status' => 'draft']);
