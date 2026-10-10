@@ -26,6 +26,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   in under the fake signs, and a key the fake revoked or retired no longer does (the ring falls
   back to its next key, as in production). `rotateKey()` and `mac()` under the fake pass over
   such a key too.
+- `Sentinel::fake()`: `revokeKey()` and `retireKey()` return the dates production does —
+  `revokedAt` on a revocation, `verifiesUntil` on a retirement (an earlier end of verification
+  is kept) — and keep the key's other dates (`signsUntil`, `verifiesUntil`, `revokedAt`).
 
 ## 1.1.0 - 2026-10-10
 

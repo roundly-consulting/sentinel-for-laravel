@@ -1075,21 +1075,32 @@ final class SentinelFake extends SentinelManager
 
         $key = $this->storedKey($request->ring, $request->keyId);
 
-        return $this->record('revokeKey', $request, $this->keys["{$request->ring}\0{$request->keyId}"] = new KeyInfo(
-            $request->ring, $request->keyId, $key->algorithm, KeyStatus::Revoked, 'database', false,
-            $key->activatesAt, label: $key->label, ownerType: $key->ownerType, ownerId: $key->ownerId,
-        ));
+        // As in production: revoked now (or when it was revoked before); every other date stays.
+        return $this->record('revokeKey', $request, $this->change($key, KeyStatus::Revoked, revokedAt: $key->revokedAt ?? Clock::now()));
     }
 
     public function retireKey(string $ring, string $keyId): KeyInfo
     {
         Settings::ring($ring);
         $key = $this->storedKey($ring, $keyId);
+        $now = Clock::now();
 
-        // A revoked key stays revoked: revocation beats every other status, as in production.
-        return $this->record('retireKey', [$ring, $keyId], $this->keys["{$ring}\0{$keyId}"] = new KeyInfo(
-            $ring, $keyId, $key->algorithm, $key->status === KeyStatus::Revoked ? KeyStatus::Revoked : KeyStatus::Retired, 'database', false,
-            $key->activatesAt, label: $key->label, ownerType: $key->ownerType, ownerId: $key->ownerId,
+        // As in production: verification ends now, unless it ended earlier; a revoked key stays
+        // revoked (revocation beats every other status).
+        return $this->record('retireKey', [$ring, $keyId], $this->change(
+            $key, KeyStatus::Retired, verifiesUntil: $key->verifiesUntil !== null && $key->verifiesUntil->lessThan($now) ? $key->verifiesUntil : $now,
+        ));
+    }
+
+    /**
+     * Change a stored key as the database store would — its manual status and the given dates,
+     * the rest kept — and report it as the store would.
+     */
+    private function change(KeyInfo $key, KeyStatus $status, ?CarbonImmutable $verifiesUntil = null, ?CarbonImmutable $revokedAt = null): KeyInfo
+    {
+        return $this->resolved($this->keys["{$key->ring}\0{$key->keyId}"] = new KeyInfo(
+            $key->ring, $key->keyId, $key->algorithm, $status, $key->driver, false, $key->activatesAt,
+            $key->signsUntil, $verifiesUntil ?? $key->verifiesUntil, $revokedAt ?? $key->revokedAt, $key->label, $key->ownerType, $key->ownerId,
         ));
     }
 

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
@@ -787,4 +788,46 @@ it('falls back from a real key the fake revoked or retired, as production does',
 
     expect($scenario('fake'))->toBe($real)
         ->and($real)->toBe(['newest' => true, 'older' => true, 'none' => null, 'database' => true, 'config' => 'test-default', 'mac' => 'config']);
+});
+
+/**
+ * Follow-up #104: the fake's revoke and retire results carry the dates production's do — the
+ * revocation time, the end of verification — and keep the key's other dates.
+ */
+it('revokes and retires with production\'s dates under the fake', function (): void {
+    Carbon::setTestNow(CarbonImmutable::parse('2026-10-10 12:00:00.123456', 'UTC'));
+    $now = '2026-10-10T12:00:00.123456Z';
+    $scenario = static function (string $run): array {
+        $ring = Sentinel::keys()->ring('http');
+        $ring->generate(Algorithm::HmacSha256, "a-{$run}");
+        $ring->rotate();
+        $ring->generate(Algorithm::HmacSha256, "b-{$run}");
+        $ring->generate(Algorithm::HmacSha256, "c-{$run}");
+        $dates = static fn (?KeyInfo $key): array => [
+            $key?->status->value, $key?->canSign,
+            $key?->signsUntil === null ? null : Clock::iso($key->signsUntil),
+            $key?->verifiesUntil === null ? null : Clock::iso($key->verifiesUntil),
+            $key?->revokedAt === null ? null : Clock::iso($key->revokedAt),
+        ];
+
+        $revoked = $ring->revoke("a-{$run}", 'leaked');
+        $retired = $ring->retire("b-{$run}");
+        $ring->revoke("c-{$run}", 'leaked');
+        $both = $ring->retire("c-{$run}");
+
+        return [
+            $dates($revoked), $dates($ring->find("a-{$run}")), $dates($retired), $dates($ring->find("b-{$run}")),
+            $dates($both), $dates($ring->find("c-{$run}")),
+        ];
+    };
+
+    $real = $scenario('real');
+    Sentinel::fake();
+
+    expect($scenario('fake'))->toBe($real)
+        ->and($real[0])->toBe(['revoked', false, $now, null, $now])
+        ->and($real[2])->toBe(['retired', false, null, $now, null])
+        ->and($real[4])->toBe(['revoked', false, null, $now, $now]);
+
+    Carbon::setTestNow();
 });
