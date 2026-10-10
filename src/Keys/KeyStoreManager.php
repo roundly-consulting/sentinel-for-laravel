@@ -145,7 +145,7 @@ final class KeyStoreManager
         return new ChainKeyStore($config->name, array_map(
             fn (string $driver): KeyStore => $this->driver($driver, $config, "keys.rings.{$config->name}.drivers"),
             $config->drivers,
-        ));
+        ), Settings::revokedKeys());
     }
 
     private function driver(string $driver, RingConfig $config, string $configKey): KeyStore

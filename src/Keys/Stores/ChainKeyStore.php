@@ -18,19 +18,27 @@ final readonly class ChainKeyStore implements KeyStore
 {
     /**
      * @param  list<KeyStore>  $stores
+     * @param  list<string>  $revoked  `ring:kid` entries of `sentinel.keys.revoked`
      */
     public function __construct(
         private string $ring,
         private array $stores,
+        private array $revoked = [],
     ) {}
 
     public function signingKey(): SealingKey
     {
         foreach ($this->stores as $store) {
             try {
-                return $store->signingKey();
+                $key = $store->signingKey();
             } catch (NoSigningKeyException) {
                 continue;
+            }
+
+            // The built-in stores skip a revoked key themselves; a custom one never sees the list,
+            // so its revoked key must not end the search either.
+            if (! in_array("{$key->ring}:{$key->keyId}", $this->revoked, true)) {
+                return $key;
             }
         }
 

@@ -117,6 +117,54 @@ it('registers custom drivers and applies the revocation list on top of them', fu
         ->and(fn () => keyStores()->signingKey('vault'))->toThrow(NoSigningKeyException::class);
 });
 
+/**
+ * Chat review C-16: a chain moves on past a revoked key of a custom driver, as it does past a
+ * built-in store's (which apply the list themselves).
+ */
+it('falls back to the next chained store when a custom driver\'s key is revoked', function (): void {
+    $material = KeyMaterial::generate(Algorithm::HmacSha256);
+    Sentinel::extend('vault', static fn (): KeyStore => new class($material) implements KeyStore
+    {
+        public function __construct(private readonly KeyMaterial $material) {}
+
+        public function signingKey(): SealingKey
+        {
+            return new SealingKey('default', 'vault-1', $this->material, KeyStatus::Active, 'vault');
+        }
+
+        public function find(string $keyId): ?SealingKey
+        {
+            return $keyId === 'vault-1' ? $this->signingKey() : null;
+        }
+
+        public function all(): array
+        {
+            return [];
+        }
+
+        public function supportsWrites(): bool
+        {
+            return false;
+        }
+    });
+    config()->set('sentinel.keys.rings.default.driver', 'chain');
+    config()->set('sentinel.keys.rings.default.drivers', ['vault', 'config']);
+
+    expect(keyStores()->signingKey('default')->keyId)->toBe('vault-1');
+
+    config()->set('sentinel.keys.revoked', 'default:vault-1');
+    keyStores()->flush();
+
+    expect(keyStores()->signingKey('default')->keyId)->toBe(TestCase::ROOT_KEY_ID)
+        ->and(Sentinel::currentKey()->keyId)->toBe(TestCase::ROOT_KEY_ID);
+
+    // With no other store to fall back to, a revoked key still signs nothing.
+    config()->set('sentinel.keys.rings.default.drivers', ['vault']);
+    keyStores()->flush();
+
+    expect(fn () => keyStores()->signingKey('default'))->toThrow(NoSigningKeyException::class);
+});
+
 it('refuses a custom driver factory that returns no key store', function (): void {
     Sentinel::extend('broken', static fn (): stdClass => new stdClass);
     config()->set('sentinel.keys.rings.broken', [...config('sentinel.keys.rings.default'), 'driver' => 'broken']);
