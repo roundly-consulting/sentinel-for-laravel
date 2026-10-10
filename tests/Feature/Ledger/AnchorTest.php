@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPayload;
@@ -154,6 +155,40 @@ it('treats an anchor already holding this checkpoint or a newer one of the same 
     Event::assertNotDispatched(AnchorPublishFailed::class);
 });
 
+/**
+ * Chat review C-3: Laravel's disks (`throw` false) and some cache stores report a failed
+ * write by returning false, not by throwing.
+ */
+it('reports an anchor write that its store refused as a failed publication', function (): void {
+    Event::fake([AnchorPublishFailed::class]);
+    $log = Log::spy();
+    $log->shouldReceive('channel')->andReturn($log);
+    $root = sys_get_temp_dir().'/sentinel-anchor-'.bin2hex(random_bytes(6));
+    $connection = DB::getDefaultConnection();
+    mkdir("{$root}/sentinel/anchors/{$connection}", 0755, true);
+    chmod("{$root}/sentinel/anchors/{$connection}", 0555);
+    config()->set('filesystems.disks.read-only', ['driver' => 'local', 'root' => $root, 'throw' => false]);
+    config()->set('cache.stores.nowhere', ['driver' => 'null']);
+    config()->set('sentinel.ledger.anchor_drivers.filesystem.disk', 'read-only');
+    config()->set('sentinel.ledger.anchor_drivers.cache.store', 'nowhere');
+    config()->set('sentinel.ledger.anchors', 'cache,filesystem');
+    invoice();
+
+    try {
+        $result = Sentinel::checkpoint();
+    } finally {
+        chmod("{$root}/sentinel/anchors/{$connection}", 0755);
+        File::deleteDirectory($root);
+    }
+
+    expect(array_map(static fn ($publication): string => $publication->anchor.':'.($publication->published ? 'ok' : 'failed'), $result?->anchors ?? []))->toBe(['cache:failed', 'filesystem:failed'])
+        ->and($result?->anchors[0]->error)->toContain('did not write')
+        ->and($result?->anchors[1]->error)->toContain('did not write');
+
+    Event::assertDispatchedTimes(AnchorPublishFailed::class, 2);
+    $log->shouldHaveReceived('warning')->twice();
+});
+
 it('writes each numbered filesystem anchor file once', function (): void {
     Storage::fake('local');
     $anchor = app(AnchorManager::class)->build('filesystem');
@@ -167,6 +202,12 @@ it('writes each numbered filesystem anchor file once', function (): void {
         ->toThrow(AnchorPublishException::class, 'already holds another seq 1')
         ->and(AnchorCodec::decode((string) Storage::disk('local')->get('sentinel/anchors/main/1.json'))->root)->toBe('root')
         ->and(AnchorCodec::decode((string) Storage::disk('local')->get('sentinel/anchors/main/latest.json'))->root)->toBe('root');
+
+    // The numbered file is in place, but latest.json cannot be written (C-3).
+    Storage::disk('local')->delete('sentinel/anchors/main/latest.json');
+    Storage::disk('local')->makeDirectory('sentinel/anchors/main/latest.json');
+
+    expect(fn () => $anchor->publish($payload))->toThrow(AnchorPublishException::class, 'did not write [sentinel/anchors/main/latest.json]');
 });
 
 it('reports a rewritten, forged or unreachable anchor', function (Closure $tamper, string $expected): void {

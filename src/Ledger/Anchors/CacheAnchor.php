@@ -7,6 +7,7 @@ namespace RoundlyConsulting\Sentinel\Ledger\Anchors;
 use Illuminate\Contracts\Cache\Repository;
 use RoundlyConsulting\Sentinel\Contracts\Anchor;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPayload;
+use RoundlyConsulting\Sentinel\Exceptions\AnchorPublishException;
 use RoundlyConsulting\Sentinel\Ledger\AnchorCodec;
 
 /**
@@ -29,7 +30,13 @@ final readonly class CacheAnchor implements Anchor
 
     public function publish(AnchorPayload $payload): void
     {
-        $this->cache->forever($this->key.':'.$payload->connection, AnchorCodec::encode($payload));
+        $key = $this->key.':'.$payload->connection;
+
+        // A store that cannot keep the value (the `null` store, a full memcached) says so by
+        // returning false, not by throwing.
+        if (! $this->cache->forever($key, AnchorCodec::encode($payload))) {
+            throw AnchorPublishException::notWritten('cache', $key);
+        }
     }
 
     public function latest(string $connection): ?AnchorPayload

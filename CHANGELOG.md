@@ -18,6 +18,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   `sentinel:verify --ledger` called the rolled-back ledger intact. Now the publication is
   refused (`published: false`, `AnchorPublishFailed`, a log warning) and the anchor keeps its
   copy until someone investigates. Filesystem anchors write each `{seq}.json` only once.
+- An anchor write that its store refused is reported as a failed publication. A disk with
+  `throw` off (Laravel's default) or a cache store such as `null` returns false instead of
+  throwing, and the checkpoint used to count that as published, with no event and no log line,
+  so rollback detection looked armed while the anchor stayed empty.
 
 ## 1.0.2 - 2026-10-07
 

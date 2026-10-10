@@ -42,11 +42,13 @@ final readonly class FilesystemAnchor implements Anchor
             if ($this->disk->get($numbered) !== $json) {
                 throw AnchorPublishException::diverged("anchor [filesystem] already holds another seq {$payload->seq}");
             }
-        } else {
-            $this->disk->put($numbered, $json);
+        } elseif (! $this->disk->put($numbered, $json)) {
+            throw AnchorPublishException::notWritten('filesystem', $numbered);
         }
 
-        $this->disk->put("{$directory}/latest.json", $json);
+        if (! $this->disk->put("{$directory}/latest.json", $json)) {
+            throw AnchorPublishException::notWritten('filesystem', "{$directory}/latest.json");
+        }
     }
 
     public function latest(string $connection): ?AnchorPayload

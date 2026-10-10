@@ -18,4 +18,13 @@ final class AnchorPublishException extends SentinelException
     {
         return new self("Refused to publish the checkpoint: {$detail}. The anchor keeps its copy (was the database restored?); investigate before clearing it.");
     }
+
+    /**
+     * The store reported a failed write by returning false (a disk with `throw` off, a cache
+     * store that dropped the value).
+     */
+    public static function notWritten(string $anchor, string $target): self
+    {
+        return new self("The [{$anchor}] anchor did not write [{$target}]: its store reported a failure.");
+    }
 }
