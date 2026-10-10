@@ -404,6 +404,11 @@ return [
     | weekly — or off (a blank value is not set, so the default applies). Set
     | `enabled` to false to schedule the commands yourself.
     |
+    | While none of Sentinel's tables exists — a host that gets Sentinel only as
+    | another package's dependency — the tasks skip instead of failing every
+    | run: no need to turn the schedule off there. `sentinel:check` fails while
+    | they skip, so a host that forgot to migrate still hears about it.
+    |
     */
 
     'schedule' => [

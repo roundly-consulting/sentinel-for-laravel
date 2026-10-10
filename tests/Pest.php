@@ -21,6 +21,7 @@ use RoundlyConsulting\Sentinel\Tests\HostKeys\HostKeysTestCase;
 use RoundlyConsulting\Sentinel\Tests\Install\InstallTestCase;
 use RoundlyConsulting\Sentinel\Tests\KeyTypes\UuidKeyTestCase;
 use RoundlyConsulting\Sentinel\Tests\TestCase;
+use RoundlyConsulting\Sentinel\Tests\Transitive\TransitiveHostTestCase;
 use RoundlyConsulting\Testing\Database\DriverMatrix;
 
 // Explicit paths, not ->in(__DIR__): the KeyTypes directory runs on its own base case (the
@@ -30,6 +31,7 @@ uses(TestCase::class)->in('ArchTest.php', 'ConfigContractTest.php', 'Feature', '
 uses(UuidKeyTestCase::class)->in('KeyTypes');
 uses(HostKeysTestCase::class)->in('HostKeys');
 uses(InstallTestCase::class)->in('Install');
+uses(TransitiveHostTestCase::class)->in('Transitive');
 
 /**
  * A sealed invoice (financial + identity seals).

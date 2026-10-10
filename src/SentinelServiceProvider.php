@@ -59,6 +59,7 @@ use RoundlyConsulting\Sentinel\Support\GateAcknowledgementPolicy;
 use RoundlyConsulting\Sentinel\Support\ModelDiscovery;
 use RoundlyConsulting\Sentinel\Support\SealingScope;
 use RoundlyConsulting\Sentinel\Support\Settings;
+use RoundlyConsulting\Sentinel\Support\Upkeep;
 use Throwable;
 
 final class SentinelServiceProvider extends PackageServiceProvider
@@ -113,6 +114,8 @@ final class SentinelServiceProvider extends PackageServiceProvider
         $this->app->scoped(SealingScope::class);
         // Table column listings: one schema query per table per request / job, then gone.
         $this->app->scoped(SchemaColumns::class);
+        // Whether Sentinel's tables exist: looked up once per scheduler run, then gone.
+        $this->app->scoped(Upkeep::class);
 
         // Stateless engine services (final readonly, no key material of their own): built
         // once per request / job instead of once per verified row, and flushed with the
@@ -160,31 +163,44 @@ final class SentinelServiceProvider extends PackageServiceProvider
 
     /**
      * The upkeep tasks (`sentinel.schedule`): checkpoint (with the ledger on), a full verify
-     * that tolerates an empty install, prune — each without overlapping, on one server.
+     * that tolerates an empty install, prune — each without overlapping, on one server, and
+     * skipped on a host without any of Sentinel's tables (one that gets Sentinel only as
+     * another package's dependency) instead of failing every run.
      */
     private static function schedule(Schedule $schedule): void
     {
-        if (! Settings::scheduleEnabled()) {
+        $tasks = Upkeep::tasks();
+
+        if ($tasks === []) {
             return;
         }
 
-        $ledger = Settings::ledgerEnabled();
-        $tasks = [
-            'checkpoint' => $ledger ? ['sentinel:checkpoint', [], 'Sentinel: checkpoint and anchor the ledger'] : null,
-            'verify' => ['sentinel:verify', $ledger ? ['--allow-empty', '--ledger'] : ['--allow-empty'], 'Sentinel: verify every sealed model'],
+        $commands = [
+            'checkpoint' => ['sentinel:checkpoint', [], 'Sentinel: checkpoint and anchor the ledger'],
+            'verify' => ['sentinel:verify', Settings::ledgerEnabled() ? ['--allow-empty', '--ledger'] : ['--allow-empty'], 'Sentinel: verify every sealed model'],
             'prune' => ['sentinel:prune', [], 'Sentinel: prune expired idempotency keys and nonces'],
         ];
 
-        foreach ($tasks as $task => $command) {
-            $frequency = Settings::scheduleFrequency($task);
-
-            if ($frequency === null || $command === null) {
-                continue;
-            }
-
-            [$name, $parameters, $description] = $command;
-            $schedule->command($name, $parameters)->{$frequency}()->withoutOverlapping()->onOneServer()->description($description);
+        foreach ($tasks as $task => $frequency) {
+            [$name, $parameters, $description] = $commands[$task];
+            $schedule->command($name, $parameters)->{$frequency}()->withoutOverlapping()->onOneServer()->description($description)
+                ->skip(static fn (Upkeep $upkeep): bool => $upkeep->skips($task));
         }
+    }
+
+    /**
+     * `auto`, `manual`, or which scheduled tasks skip for want of tables. An invalid task
+     * frequency is reported like any invalid setting.
+     */
+    private static function scheduleMode(): string
+    {
+        if (! Settings::scheduleEnabled()) {
+            return 'manual';
+        }
+
+        $skipped = app(Upkeep::class)->skipped();
+
+        return $skipped === [] ? 'auto' : 'auto ('.implode(', ', $skipped).' skipped: no tables)';
     }
 
     private static function idempotencyStore(Container $app): IdempotencyStore
@@ -258,7 +274,7 @@ final class SentinelServiceProvider extends PackageServiceProvider
                 'Nonce store' => Settings::nonceStore(),
                 'Signature profiles' => (string) count(is_array(config('sentinel.signatures.profiles')) ? config('sentinel.signatures.profiles') : []),
                 'Sealable models' => self::sealableModels(),
-                'Schedule' => Settings::scheduleEnabled() ? 'auto' : 'manual',
+                'Schedule' => self::scheduleMode(),
             ];
         } catch (SentinelException) {
             $rows = ['Default ring / driver' => 'invalid configuration'];

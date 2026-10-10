@@ -29,7 +29,9 @@ use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Support\ModelDiscovery;
 use RoundlyConsulting\Sentinel\Support\SealUsage;
 use RoundlyConsulting\Sentinel\Support\Settings;
+use RoundlyConsulting\Sentinel\Support\StorageTable;
 use RoundlyConsulting\Sentinel\Support\Tables;
+use RoundlyConsulting\Sentinel\Support\Upkeep;
 use Throwable;
 
 /**
@@ -49,6 +51,7 @@ final readonly class CheckInstallationAction
         private AnchorManager $anchors,
         private DefinitionRegistry $registry,
         private Inspector $inspector,
+        private Upkeep $upkeep,
     ) {}
 
     public function execute(): HealthReport
@@ -220,45 +223,22 @@ final readonly class CheckInstallationAction
      */
     private function tables(): array
     {
-        $needed = [];
-        $keyConnection = Settings::keyConnection();
-
-        if (array_filter(Settings::rings(), self::usesDatabase(...)) !== []) {
-            $needed[] = [$keyConnection, 'sentinel_keys'];
-        }
-
-        if (Settings::idempotencyStore() === 'database') {
-            $needed[] = [$keyConnection, 'sentinel_idempotency_keys'];
-        }
-
-        if (Settings::nonceStore() === 'database') {
-            $needed[] = [$keyConnection, 'sentinel_nonces'];
-        }
-
-        foreach (Settings::ledgerConnections() as $connection) {
-            $needed[] = [$connection, 'sentinel_seals'];
-
-            if (Settings::ledgerEnabled()) {
-                $needed[] = [$connection, 'sentinel_ledger'];
-                $needed[] = [$connection, 'sentinel_checkpoints'];
-            }
-        }
-
+        $needed = StorageTable::needed();
         $missing = [];
 
-        foreach ($needed as [$connection, $table]) {
-            $name = Tables::connectionName($connection);
+        foreach ($needed as $table) {
+            $name = Tables::connectionName($table->connection);
 
             try {
-                $exists = $this->container->make('db')->connection($connection)->getSchemaBuilder()->hasTable($table);
+                $exists = $this->container->make('db')->connection($table->connection)->getSchemaBuilder()->hasTable($table->table);
             } catch (Throwable $exception) {
-                $missing[] = "{$table} on [{$name}] (connection failed: ".class_basename($exception).')';
+                $missing[] = "{$table->table} on [{$name}] (connection failed: ".class_basename($exception).')';
 
                 continue;
             }
 
             if (! $exists) {
-                $missing[] = "{$table} on [{$name}]";
+                $missing[] = "{$table->table} on [{$name}]";
             }
         }
 
@@ -409,12 +389,19 @@ final readonly class CheckInstallationAction
     }
 
     /**
+     * The upkeep runs: scheduled automatically and not skipped for want of tables, or
+     * scheduled by hand.
+     *
      * @return array{0: HealthStatus, 1: string}
      */
     private function schedule(): array
     {
         if (Settings::scheduleEnabled()) {
-            return [HealthStatus::Ok, 'auto (sentinel.schedule)'];
+            $skipped = $this->upkeep->skipped();
+
+            return $skipped === []
+                ? [HealthStatus::Ok, 'auto (sentinel.schedule)']
+                : [HealthStatus::Failure, 'auto (sentinel.schedule), but '.implode(', ', $skipped)." skip every run: none of Sentinel's tables exists — publish and run the migrations (php artisan vendor:publish --tag=sentinel-migrations)"];
         }
 
         if (! Settings::ledgerEnabled()) {

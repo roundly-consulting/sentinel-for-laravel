@@ -6,6 +6,17 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+### Fixed
+
+- A host that gets Sentinel only as another package's dependency, and so never ran its
+  migrations, no longer has `sentinel:checkpoint`, `sentinel:verify` and `sentinel:prune` fail
+  on every scheduler run: while none of Sentinel's tables exists, the scheduled tasks skip, with
+  no need to set `SENTINEL_SCHEDULE=false`. A host with any of the tables keeps every task
+  exactly as before, and a prune of a cache store or a store you bound always runs.
+  `sentinel:check` now fails its `schedule` check while tasks skip, and the `about` Schedule row
+  names them, so an install that forgot to migrate stays loud. `about` also reports an invalid
+  `sentinel.schedule` frequency as invalid configuration.
+
 ## 1.1.1 - 2026-10-10
 
 ### Changed

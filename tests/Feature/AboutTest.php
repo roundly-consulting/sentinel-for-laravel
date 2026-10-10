@@ -42,13 +42,16 @@ it('reports flags the way the environment means them', function (): void {
         ->toMatch('/Anchors\W+cache, log/')->toMatch('/Sealable models\W+1 configured, 0 discovered/');
 });
 
-it('reports invalid configuration instead of failing about', function (): void {
-    config()->set('sentinel.keys.default_ring', 'Bad Ring');
+it('reports invalid configuration instead of failing about', function (string $key, mixed $value): void {
+    config()->set($key, $value);
 
     Artisan::call('about', ['--only' => 'sentinel']);
 
     expect(Artisan::output())->toContain('invalid configuration');
-});
+})->with([
+    'a ring' => ['sentinel.keys.default_ring', 'Bad Ring'],
+    'a schedule task' => ['sentinel.schedule.verify', 'sometimes'],
+]);
 
 it('reports the signing key by presence only, and how the upkeep is scheduled', function (string $key, string $presence): void {
     config()->set('sentinel.keys.rings.default.key', $key === '' ? null : $key);

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Support\Settings;
 
@@ -41,6 +43,32 @@ it('schedules checkpoint, verify and prune by default', function (): void {
         ->and($events['sentinel:checkpoint']->description)->toBe('Sentinel: checkpoint and anchor the ledger');
 });
 
+it('runs every task on a host with the tables, for one schema query per run', function (): void {
+    $events = sentinelEvents();
+    $queries = 0;
+    DB::listen(static function () use (&$queries): void {
+        $queries++;
+    });
+
+    foreach ($events as $command => $event) {
+        expect($event->filtersPass(app()))->toBeTrue($command);
+    }
+
+    // The first table found settles it for all three tasks.
+    expect($queries)->toBe(1);
+});
+
+it('runs every task while any of the tables exists, so a half-migrated install fails as loudly as before', function (): void {
+    // Only the nonces table: the host uses Sentinel's storage, so nothing is skipped.
+    foreach (['sentinel_seals', 'sentinel_ledger', 'sentinel_checkpoints', 'sentinel_idempotency_keys', 'sentinel_keys'] as $table) {
+        Schema::drop($table);
+    }
+
+    foreach (sentinelEvents() as $command => $event) {
+        expect($event->filtersPass(app()))->toBeTrue($command);
+    }
+});
+
 it('takes the configured frequencies, and turns single tasks off', function (): void {
     config()->set('sentinel.schedule.checkpoint', 'everyFiveMinutes');
     config()->set('sentinel.schedule.verify', 'hourly');
@@ -71,6 +99,12 @@ it('schedules no checkpoint and verifies without --ledger while the ledger is of
 
 it('schedules nothing when disabled', function (string $value): void {
     config()->set('sentinel.schedule.enabled', $value);
+
+    expect(sentinelEvents())->toBe([]);
+
+    // Off means off: the scheduler is built without reading another upkeep setting.
+    config()->set('sentinel.ledger.enabled', 'maybe');
+    config()->set('sentinel.schedule.verify', 'sometimes');
 
     expect(sentinelEvents())->toBe([]);
 })->with(['false', 'off', '0']);
