@@ -50,7 +50,7 @@ it('reports every check in a stable order', function (): void {
     $report = Sentinel::check();
 
     expect(array_map(static fn (HealthCheck $check): string => $check->name, $report->checks))
-        ->toBe(['configuration', 'signing_keys', 'app_key', 'tables', 'models', 'anchors', 'checkpoints', 'schedule', 'retired_keys', 'stores'])
+        ->toBe(['configuration', 'signing_keys', 'app_key', 'tables', 'models', 'anchors', 'checkpoints', 'schedule', 'retired_keys', 'stores', 'key_envelopes'])
         ->and(array_map(static fn (HealthCheck $check): HealthStatus => $check->status, $report->checks))->each->toBe(HealthStatus::Ok)
         ->and($report->failed())->toBeFalse()
         ->and($report->failures())->toBe([])
@@ -115,6 +115,43 @@ it('reports an unusable signing key without its material or id', function (): vo
     expect($check->status)->toBe(HealthStatus::Failure)
         ->and($check->message)->toBe('ring [default]: InvalidKeyMaterialException')
         ->and($check->message)->not->toContain(TestCase::ROOT_KEY_ID);
+});
+
+it('warns while database keys use the legacy envelope, and fails under require_bound_label (label binding)', function (): void {
+    expectCheck('key_envelopes', HealthStatus::Ok, 'every database key binds its label');
+
+    macRing();
+    legacyKey('http', 'old-a', 'ACME');
+    legacyKey('http', 'old-b');
+    legacyKey('logs', 'old-c', 'billing');
+    Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, keyId: 'fresh', label: 'Fresh');
+
+    $check = checked('key_envelopes');
+
+    expect($check->status)->toBe(HealthStatus::Warning)
+        ->and($check->message)->toContain('3 database key(s) use the legacy envelope (sentinel.key/1), which does not bind the label: 2 in ring [http], 1 in ring [logs]')
+        ->toContain('run `php artisan sentinel:key:reseal`, check the labels it prints, then set SENTINEL_REQUIRE_BOUND_LABEL=true')
+        ->not->toContain('old-a')->not->toContain('ACME')->not->toContain('billing');
+
+    $this->artisan('sentinel:check')->assertSuccessful();
+
+    config()->set('sentinel.keys.require_bound_label', true);
+    app(KeyStoreManager::class)->flush();
+
+    expectCheck('key_envelopes', HealthStatus::Failure, 'sentinel.keys.require_bound_label is on, so they fail their integrity check — turn it off, run `php artisan sentinel:key:reseal`, then turn it back on');
+
+    $this->artisan('sentinel:check')->assertFailed();
+
+    config()->set('sentinel.keys.require_bound_label', false);
+    Artisan::call('sentinel:key:reseal');
+
+    expectCheck('key_envelopes', HealthStatus::Ok, 'every database key binds its label');
+});
+
+it('has no key envelopes to check when no ring stores keys in the database', function (): void {
+    config()->set('sentinel.keys.rings.http.driver', 'config');
+
+    expectCheck('key_envelopes', HealthStatus::Ok, 'no ring stores keys in the database');
 });
 
 it('requires APP_KEY when database keys or idempotency encryption use it', function (): void {

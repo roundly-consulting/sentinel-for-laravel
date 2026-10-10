@@ -30,6 +30,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - `sentinel.keys.require_bound_label` (`SENTINEL_REQUIRE_BOUND_LABEL`, off by default). When on,
   a key in the pre-1.2 envelope format fails its integrity check like any tampered key.
 - `sentinel:key:list` has a Label column, shown quoted and escaped.
+- `Sentinel::check()` / `sentinel:check` has a `key_envelopes` check. It warns while database
+  keys still use the pre-1.2 envelope format and fails if `require_bound_label` is on while they
+  do. It names rings and counts, never a key id or label.
 
 ### Changed
 

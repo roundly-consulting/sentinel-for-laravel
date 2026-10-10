@@ -23,8 +23,10 @@ use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\NoSigningKeyException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
+use RoundlyConsulting\Sentinel\Keys\KeyEnvelope;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Ledger\AnchorManager;
+use RoundlyConsulting\Sentinel\Models\Key;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Support\ModelDiscovery;
 use RoundlyConsulting\Sentinel\Support\SealUsage;
@@ -38,8 +40,8 @@ use Throwable;
  * The installation health check behind `Sentinel::check()` and `sentinel:check`: every
  * misconfiguration that silently weakens the guarantees, reported in one place and in a
  * stable order — configuration, signing keys, `APP_KEY`, tables, models, anchors, checkpoint
- * backlog, scheduling, seals on retired keys, stores. Read-only. Messages name rings, tables
- * and classes — never key material and never a key id.
+ * backlog, scheduling, seals on retired keys, stores, key envelopes. Read-only. Messages name
+ * rings, tables and classes — never key material, a key id or a label.
  */
 final readonly class CheckInstallationAction
 {
@@ -52,6 +54,7 @@ final readonly class CheckInstallationAction
         private DefinitionRegistry $registry,
         private Inspector $inspector,
         private Upkeep $upkeep,
+        private KeyEnvelope $envelope,
     ) {}
 
     public function execute(): HealthReport
@@ -67,6 +70,7 @@ final readonly class CheckInstallationAction
             'schedule' => $this->schedule(...),
             'retired_keys' => $this->retiredKeys(...),
             'stores' => $this->stores(...),
+            'key_envelopes' => $this->keyEnvelopes(...),
         ];
 
         $report = [];
@@ -485,6 +489,46 @@ final readonly class CheckInstallationAction
         return $problems === []
             ? [HealthStatus::Ok, Settings::idempotencyStore().' (idempotency), '.Settings::nonceStore().' (nonces)']
             : [HealthStatus::Failure, implode(' ', $problems)];
+    }
+
+    /**
+     * Database keys still in the legacy envelope (`sentinel.key/1`, written before 1.2) do not
+     * bind their label — a database writer can change it unnoticed — until they are re-sealed
+     * (`sentinel:key:reseal`). Under `keys.require_bound_label` they fail their integrity check.
+     *
+     * @return array{0: HealthStatus, 1: string}
+     */
+    private function keyEnvelopes(): array
+    {
+        $rings = array_values(array_filter(Settings::rings(), self::usesDatabase(...)));
+
+        if ($rings === []) {
+            return [HealthStatus::Ok, 'no ring stores keys in the database'];
+        }
+
+        $legacy = [];
+
+        foreach (Key::query()->whereIn('ring', $rings)->lazyById() as $row) {
+            if ($this->envelope->version($row) === KeyEnvelope::LEGACY_VERSION) {
+                $legacy[$row->ring] = ($legacy[$row->ring] ?? 0) + 1;
+            }
+        }
+
+        if ($legacy === []) {
+            return [HealthStatus::Ok, 'every database key binds its label'];
+        }
+
+        $counts = [];
+
+        foreach ($legacy as $ring => $count) {
+            $counts[] = "{$count} in ring [{$ring}]";
+        }
+
+        $message = array_sum($legacy).' database key(s) use the legacy envelope ('.KeyEnvelope::LEGACY_VERSION.'), which does not bind the label: '.implode(', ', $counts);
+
+        return Settings::requireBoundLabel()
+            ? [HealthStatus::Failure, $message.'; sentinel.keys.require_bound_label is on, so they fail their integrity check — turn it off, run `php artisan sentinel:key:reseal`, then turn it back on']
+            : [HealthStatus::Warning, $message.' — run `php artisan sentinel:key:reseal`, check the labels it prints, then set SENTINEL_REQUIRE_BOUND_LABEL=true'];
     }
 
     /**

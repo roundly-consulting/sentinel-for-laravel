@@ -11,8 +11,9 @@ use RoundlyConsulting\Sentinel\SentinelManager;
 
 /**
  * The installation health check (`Sentinel::check()`): signing keys, APP_KEY, tables,
- * models, anchors, checkpoint backlog, scheduling, seals on retired keys and stores. Exits 1
- * on a failure — and, with `--strict`, on a warning too. Never prints key material or key ids.
+ * models, anchors, checkpoint backlog, scheduling, seals on retired keys, stores and legacy
+ * key envelopes. Exits 1 on a failure — and, with `--strict`, on a warning too. Never prints
+ * key material, key ids or labels.
  */
 final class CheckCommand extends Command
 {
