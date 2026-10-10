@@ -45,3 +45,19 @@ it('refuses invalid idempotency, nonce and problem settings', function (string $
     ['sentinel.nonces.length', 16, fn () => Settings::nonceLength()],
     ['sentinel.problems.type_base', 'not a url', fn () => Settings::problemTypeBase()],
 ]);
+
+/**
+ * Chat review C-29: bounds that admit no key would refuse every request with a 400.
+ */
+it('refuses a minimum key length above the maximum', function (): void {
+    config()->set('sentinel.idempotency.min_length', 100);
+    config()->set('sentinel.idempotency.max_length', 50);
+
+    expect(fn () => Settings::idempotencyMinLength())->toThrow(InvalidSentinelConfigurationException::class, 'sentinel.idempotency.min_length')
+        ->and(fn () => Settings::idempotencyMaxLength())->toThrow(InvalidSentinelConfigurationException::class, 'sentinel.idempotency.min_length');
+
+    config()->set('sentinel.idempotency.max_length', 100);
+
+    expect(Settings::idempotencyMinLength())->toBe(100)
+        ->and(Settings::idempotencyMaxLength())->toBe(100);
+});

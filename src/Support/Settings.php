@@ -562,13 +562,22 @@ final class Settings
         return Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.idempotency.lock_seconds', 60, min: 1, max: 3600);
     }
 
+    /**
+     * A minimum above the maximum admits no key, so every request would get a 400: refused.
+     */
     public static function idempotencyMinLength(): int
     {
-        return Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.idempotency.min_length', 16, min: 1, max: 255);
+        $min = Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.idempotency.min_length', 16, min: 1, max: 255);
+        $max = Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.idempotency.max_length', 255, min: 1, max: 255);
+
+        return $min <= $max ? $min : throw InvalidSentinelConfigurationException::invalidValue('idempotency.min_length', 'must not exceed sentinel.idempotency.max_length');
     }
 
     public static function idempotencyMaxLength(): int
     {
+        // Checks the pair first (a minimum above the maximum throws).
+        self::idempotencyMinLength();
+
         return Config::using(InvalidSentinelConfigurationException::class)->integer('sentinel.idempotency.max_length', 255, min: 1, max: 255);
     }
 

@@ -79,6 +79,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - `currentSeal()` returns the stored seal row with a null `sealedAt` when its `sealed_at` is
   corrupt, instead of throwing `CorruptRecordException`, so `sentinel:inspect` shows the row,
   its status (`malformed (sealed_at)`) and its history rather than aborting.
+- `sentinel.idempotency.min_length` above `max_length` is refused with
+  `InvalidSentinelConfigurationException` naming `idempotency.min_length`. Each bound was checked
+  on its own, so the pair passed validation and every key was then refused (a 400 on every
+  request).
 
 ### Security
 
