@@ -180,7 +180,11 @@ it('inspects one row with values redacted unless asked', function (): void {
  */
 it('inspects a seal row whose sealed_at is corrupt', function (): void {
     $invoice = invoice();
-    DB::table('sentinel_seals')->where('sealable_id', $invoice->id)->where('seal', 'financial')->update(['sealed_at' => 'garbage']);
+
+    // A real engine refuses the value in a datetime column; only SQLite keeps it.
+    if (! corrupt(fn () => DB::table('sentinel_seals')->where('sealable_id', $invoice->id)->where('seal', 'financial')->update(['sealed_at' => 'garbage']))) {
+        return;
+    }
 
     $record = Sentinel::currentSeal($invoice, 'financial');
     [$status, $output] = runArtisan('sentinel:inspect', ['model' => Invoice::class, 'id' => (string) $invoice->id, '--seal' => 'financial']);
