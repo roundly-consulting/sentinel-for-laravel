@@ -6,6 +6,8 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+## 1.1.2 - 2026-10-10
+
 ### Fixed
 
 - A host that gets Sentinel only as another package's dependency, and so never ran its
@@ -15,7 +17,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   exactly as before, and a prune of a cache store or a store you bound always runs.
   `sentinel:check` now fails its `schedule` check while tasks skip, and the `about` Schedule row
   names them, so an install that forgot to migrate stays loud. `about` also reports an invalid
-  `sentinel.schedule` frequency as invalid configuration.
+  `sentinel.schedule` frequency as invalid configuration. A host that set
+  `SENTINEL_SCHEDULE=false` only because Sentinel came in as another package's dependency can
+  remove it.
 
 ## 1.1.1 - 2026-10-10
 
