@@ -28,6 +28,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\HealthReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentCall;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ImportKeyRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedMac;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedNonce;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssueNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
@@ -95,6 +96,8 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static list<KeyInfo> listKeys(string|null $ring = null)
  * @method static KeyInfo|null findKey(string $ring, string $keyId)
  * @method static KeyInfo currentKey(string|null $ring = null)
+ * @method static KeyInfo verifyMac(string $ring, string $keyId, string $message, string $mac)
+ * @method static IssuedMac mac(string $ring, string $message)
  * @method static SentinelManager extend(string $driver, Closure $factory)
  * @method static LedgerAccessor ledger()
  * @method static CheckpointResult|null checkpoint(CheckpointOptions|null $options = null)

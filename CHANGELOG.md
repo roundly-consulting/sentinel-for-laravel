@@ -13,6 +13,18 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - `Contracts\WriteOnlyAnchor`: a marker for anchors nothing can be read back from (the built-in
   `log` anchor implements it). Implement it on a custom write-only anchor so the checkpoint run
   does not re-send it the newest checkpoint every minute.
+- MACs over arbitrary bytes on a key ring: `Sentinel::keys()->ring($ring)->verifyMac($keyId,
+  $message, $mac)` (or `Sentinel::verifyMac($ring, …)`) checks
+  `base64url-no-padding(HMAC(secret, message))` with the raw shared secret of the key the kid
+  names in that ring, so a peer in any language computes it with a plain HMAC. The algorithm
+  comes from the key (`hmac-sha256`; `hmac-sha384`/`-512` where the ring allows them), the
+  compare is constant-time, and active and verify-only keys verify. It returns the key's
+  `KeyInfo` (owner, label — never material) so the caller can bind the sender's identity, and
+  refuses with `MacVerificationException`, whose `reason()` is a `MacRejection`.
+- `mac($message)` on the ring handle (or `Sentinel::mac($ring, …)`) MACs with the ring's current
+  signing key and returns an `IssuedMac` (kid, algorithm, MAC).
+- MAC keys live in a ring of their own: `verifyMac()` and `mac()` refuse a ring that seals, the
+  ledger or HTTP message signatures use (`SealingMisconfiguredException`).
 
 ### Changed
 

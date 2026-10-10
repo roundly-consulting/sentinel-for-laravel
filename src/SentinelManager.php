@@ -24,11 +24,13 @@ use RoundlyConsulting\Sentinel\Actions\Idempotency\CompleteIdempotentRequestActi
 use RoundlyConsulting\Sentinel\Actions\Idempotency\ForgetIdempotencyKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\ReleaseIdempotentRequestAction;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\RunIdempotentAction;
+use RoundlyConsulting\Sentinel\Actions\Keys\ComputeMacAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\GenerateKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\ImportKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\RetireKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\RevokeKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\RotateKeyAction;
+use RoundlyConsulting\Sentinel\Actions\Keys\VerifyMacAction;
 use RoundlyConsulting\Sentinel\Actions\Ledger\CreateCheckpointAction;
 use RoundlyConsulting\Sentinel\Actions\Ledger\VerifyLedgerAction;
 use RoundlyConsulting\Sentinel\Actions\Nonces\ConsumeNonceAction;
@@ -68,6 +70,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentCall;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ImportKeyRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedMac;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedNonce;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssueNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
@@ -103,6 +106,7 @@ use RoundlyConsulting\Sentinel\Enums\VerificationContext;
 use RoundlyConsulting\Sentinel\Events\SealingSuspended;
 use RoundlyConsulting\Sentinel\Exceptions\CorruptRecordException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidIdempotencyKeyException;
+use RoundlyConsulting\Sentinel\Exceptions\MacVerificationException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Http\Middleware\VerifyHttpSignature;
@@ -689,6 +693,26 @@ class SentinelManager
     public function currentKey(?string $ring = null): KeyInfo
     {
         return KeyInfo::fromKey($this->container->make(KeyStoreManager::class)->signingKey($ring ?? Settings::defaultRing()));
+    }
+
+    /**
+     * Verify a MAC over arbitrary bytes with the key `$keyId` names in `$ring` (and only there):
+     * `HMAC(raw secret, message)` as unpadded base64url, the algorithm taken from the key. The
+     * returned key carries no material — bind its owner or label to the sender.
+     *
+     * @throws MacVerificationException with the reason a MAC is refused
+     */
+    public function verifyMac(string $ring, string $keyId, string $message, #[SensitiveParameter] string $mac): KeyInfo
+    {
+        return $this->container->make(VerifyMacAction::class)->execute($ring, $keyId, $message, $mac);
+    }
+
+    /**
+     * MAC arbitrary bytes with the ring's current signing key (the counterpart of `verifyMac()`).
+     */
+    public function mac(string $ring, string $message): IssuedMac
+    {
+        return $this->container->make(ComputeMacAction::class)->execute($ring, $message);
     }
 
     /**

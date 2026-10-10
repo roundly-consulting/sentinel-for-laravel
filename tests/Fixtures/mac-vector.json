@@ -1,0 +1,58 @@
+{
+    "description": "HMAC-SHA256 over the exact message bytes, keyed with the raw shared secret (no HKDF). The MAC is base64url without padding (RFC 4648 section 5). Every entry of malformed must be refused as malformed_mac.",
+    "algorithm": "hmac-sha256",
+    "ring": "logs",
+    "key_id": "billing-1",
+    "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "secret_config": "base64:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "message": "{\"service\":\"billing\",\"level\":\"info\",\"message\":\"Faktúra č. 42 zaplatená — 12,50 €\",\"seq\":2}",
+    "message_hex": "7b2273657276696365223a2262696c6c696e67222c226c6576656c223a22696e666f222c226d657373616765223a2246616b74c3ba726120c48d2e203432207a61706c6174656ec3a120e280942031322c353020e282ac222c22736571223a327d",
+    "mac": "Y1UfB_bFvWHrQqhxf-i-W3nf1_GipIV2KqQNdu_aFRk",
+    "mac_hex": "63551f07f6c5bd61eb42a8717fe8be5b79dfd7f1a2a485762aa40d76efda1519",
+    "malformed": [
+        {
+            "why": "padded",
+            "mac": "Y1UfB_bFvWHrQqhxf-i-W3nf1_GipIV2KqQNdu_aFRk="
+        },
+        {
+            "why": "standard base64 alphabet",
+            "mac": "Y1UfB/bFvWHrQqhxf+i+W3nf1/GipIV2KqQNdu/aFRk"
+        },
+        {
+            "why": "trailing newline",
+            "mac": "Y1UfB_bFvWHrQqhxf-i-W3nf1_GipIV2KqQNdu_aFRk\n"
+        },
+        {
+            "why": "leading space",
+            "mac": " Y1UfB_bFvWHrQqhxf-i-W3nf1_GipIV2KqQNdu_aFRk"
+        },
+        {
+            "why": "inner space",
+            "mac": "Y1UfB_bFvWHrQqhxf-i- W3nf1_GipIV2KqQNdu_aFRk"
+        },
+        {
+            "why": "non-canonical final character",
+            "mac": "Y1UfB_bFvWHrQqhxf-i-W3nf1_GipIV2KqQNdu_aFRl"
+        },
+        {
+            "why": "one character short",
+            "mac": "Y1UfB_bFvWHrQqhxf-i-W3nf1_GipIV2KqQNdu_aFR"
+        },
+        {
+            "why": "31 bytes (a prefix of the MAC)",
+            "mac": "Y1UfB_bFvWHrQqhxf-i-W3nf1_GipIV2KqQNdu_aFQ"
+        },
+        {
+            "why": "33 bytes (the MAC plus one byte)",
+            "mac": "Y1UfB_bFvWHrQqhxf-i-W3nf1_GipIV2KqQNdu_aFRkA"
+        },
+        {
+            "why": "hex instead of base64url",
+            "mac": "63551f07f6c5bd61eb42a8717fe8be5b79dfd7f1a2a485762aa40d76efda1519"
+        },
+        {
+            "why": "empty",
+            "mac": ""
+        }
+    ]
+}

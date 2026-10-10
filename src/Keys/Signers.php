@@ -15,9 +15,10 @@ use SensitiveParameter;
  * Purpose-bound signing and verification through crypto-for-laravel (one of only two
  * classes allowed to touch crypto's `Hmac`/`EdDSA`/`Es` directly — arch-pinned).
  *
- * HMAC keys never MAC with the root secret: each purpose gets an HKDF subkey bound to the
- * ring, `kid` and algorithm, so a key moved to another ring or algorithm can never reproduce
- * a MAC. Signatures: Ed25519 (64 bytes) and raw ECDSA `r‖s` (64 / 96 bytes).
+ * HMAC keys never MAC seals or the ledger with the root secret: each of those purposes gets an
+ * HKDF subkey bound to the ring, `kid` and algorithm, so a key moved to another ring or
+ * algorithm can never reproduce a MAC. HTTP signatures and raw MACs use the shared secret as
+ * the peer holds it. Signatures: Ed25519 (64 bytes) and raw ECDSA `r‖s` (64 / 96 bytes).
  *
  * @internal
  */
@@ -74,9 +75,9 @@ final readonly class Signers
     {
         $algorithm = $key->algorithm();
 
-        // RFC 9421 peers MAC with the shared secret itself; such keys live in their own ring,
-        // so a partner's secret can never derive a seal or ledger subkey.
-        if ($purpose === Purpose::Http) {
+        // RFC 9421 peers and raw-MAC peers MAC with the shared secret itself; such keys live in
+        // their own ring, so a partner's secret can never derive a seal or ledger subkey.
+        if ($purpose === Purpose::Http || $purpose === Purpose::Mac) {
             return $key->material()->hmacRoot();
         }
 

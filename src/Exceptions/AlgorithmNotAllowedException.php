@@ -23,6 +23,14 @@ final class AlgorithmNotAllowedException extends SentinelException
         return new self("The algorithm [{$algorithm->value}] is not allowed in key ring [{$ring}].");
     }
 
+    /**
+     * `mac()` found a signing key that computes no MAC (Ed25519, ECDSA).
+     */
+    public static function notHmac(string $ring, string $keyId, Algorithm $algorithm): self
+    {
+        return new self("The signing key [{$keyId}] of key ring [{$ring}] is an [{$algorithm->value}] key; a MAC needs an hmac-* key.");
+    }
+
     public static function unknownName(string $name, string $where): self
     {
         $shown = preg_match('/^[A-Za-z0-9._-]{1,64}$/D', $name) === 1 ? $name : '(invalid)';

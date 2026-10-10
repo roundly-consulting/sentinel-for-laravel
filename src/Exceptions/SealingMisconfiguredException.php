@@ -17,6 +17,18 @@ final class SealingMisconfiguredException extends SentinelException
         return new self("Key ring [{$shown}] is not configured under sentinel.keys.rings.");
     }
 
+    /**
+     * MAC keys are shared with peers by design, so they live in a ring of their own: a peer
+     * holding a seal or ledger ring's secret could derive its subkeys, and a MAC over a
+     * signature base would be a valid HTTP signature.
+     */
+    public static function notAMacRing(string $ring): self
+    {
+        $shown = preg_match('/^[a-z0-9_-]{1,64}$/D', $ring) === 1 ? $ring : '(invalid)';
+
+        return new self("Key ring [{$shown}] cannot hold MAC keys: seals, the ledger or HTTP message signatures use it. Configure a ring of its own under sentinel.keys.rings.");
+    }
+
     public static function notSealable(string $class): self
     {
         return new self("[{$class}] is not sealable: it must implement RoundlyConsulting\\Sentinel\\Contracts\\Sealable and use RoundlyConsulting\\Sentinel\\Concerns\\HasSeals.");

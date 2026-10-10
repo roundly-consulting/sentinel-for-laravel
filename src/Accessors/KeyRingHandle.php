@@ -10,12 +10,14 @@ use Illuminate\Database\Eloquent\Model;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ImportKeyRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedMac;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RevokeKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotationResult;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyDestination;
+use RoundlyConsulting\Sentinel\Exceptions\MacVerificationException;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use SensitiveParameter;
 
@@ -105,5 +107,25 @@ final readonly class KeyRingHandle
     public function retire(string $keyId): KeyInfo
     {
         return $this->manager->retireKey($this->ring, $keyId);
+    }
+
+    /**
+     * Verify a MAC a peer computed over `$message` with this ring's key `$keyId`:
+     * `base64url-no-padding(HMAC(raw secret, message bytes))`, the algorithm taken from the key.
+     * Active and verify-only keys verify; the returned key carries no material.
+     *
+     * @throws MacVerificationException with the reason a MAC is refused
+     */
+    public function verifyMac(string $keyId, string $message, #[SensitiveParameter] string $mac): KeyInfo
+    {
+        return $this->manager->verifyMac($this->ring, $keyId, $message, $mac);
+    }
+
+    /**
+     * MAC `$message` with this ring's current signing key; send the returned kid and MAC along.
+     */
+    public function mac(string $message): IssuedMac
+    {
+        return $this->manager->mac($this->ring, $message);
     }
 }

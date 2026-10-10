@@ -129,6 +129,50 @@ function partnerRing(string $kid = 'partner', Algorithm $algorithm = Algorithm::
 }
 
 /**
+ * The cross-language MAC vector (tests/Fixtures/mac-vector.json).
+ *
+ * @return array{algorithm: string, ring: string, key_id: string, secret_hex: string, secret_config: string, message: string, message_hex: string, mac: string, mac_hex: string, malformed: list<array{why: string, mac: string}>}
+ */
+function macVector(): array
+{
+    /** @var array{algorithm: string, ring: string, key_id: string, secret_hex: string, secret_config: string, message: string, message_hex: string, mac: string, mac_hex: string, malformed: list<array{why: string, mac: string}>} */
+    return json_decode((string) file_get_contents(__DIR__.'/Fixtures/mac-vector.json'), true, flags: JSON_THROW_ON_ERROR);
+}
+
+/**
+ * A ring of its own for MACs over arbitrary bytes (`logs`): the vector's secret is its config
+ * key, and a database store behind it takes imported per-service keys.
+ *
+ * @param  array<string, mixed>  $overrides
+ */
+function macRing(array $overrides = []): void
+{
+    $vector = macVector();
+
+    config()->set('sentinel.keys.rings.logs', [
+        'driver' => 'chain',
+        'drivers' => ['config', 'database'],
+        'algorithms' => ['hmac-sha256', 'hmac-sha384', 'ed25519'],
+        'key_id' => $vector['key_id'],
+        'algorithm' => 'hmac-sha256',
+        'key' => $vector['secret_config'],
+        ...$overrides,
+    ]);
+    app(KeyStoreManager::class)->flush();
+}
+
+/**
+ * The MAC a peer holding the secret computes — independently of Sentinel: plain hash_hmac over
+ * the raw secret, base64url without padding.
+ */
+function peerMac(string $secretConfig, string $message, string $hash = 'sha256'): string
+{
+    $secret = base64_decode(substr($secretConfig, strlen('base64:')), true);
+
+    return rtrim(strtr(base64_encode(hash_hmac($hash, $message, (string) $secret, true)), '+/', '-_'), '=');
+}
+
+/**
  * A second ring for seals (config driver): the http ring holds partners' keys and can never
  * vouch for a seal or the ledger.
  */
