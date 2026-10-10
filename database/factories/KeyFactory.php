@@ -39,14 +39,14 @@ final class KeyFactory extends Factory
     public function configure(): static
     {
         // Material is generated for the final algorithm and sealed into the envelope together
-        // with every bound column, so a factory key always opens cleanly.
+        // with every bound column — the label included — so a factory key always opens cleanly.
         return $this->afterMaking(static function (Key $key): void {
             $material = KeyMaterial::generate(Algorithm::from($key->algorithm));
 
             app(KeyEnvelope::class)->apply($key, new EnvelopeData(
                 $key->ring, $key->kid, $key->algorithm, $material->encodedPrivate(), $material->encodedPublic(), $key->status,
                 $key->activates_at, $key->signs_until, $key->verifies_until, $key->revoked_at,
-                $key->owner_type === null ? null : $key->owner_type.':'.$key->owner_id,
+                $key->owner_type === null ? null : $key->owner_type.':'.$key->owner_id, $key->label,
             ));
         });
     }

@@ -32,7 +32,7 @@ final class KeyImportCommand extends Command
         {--activate-at= : When the key becomes usable (UTC unless an offset is given)}
         {--owner-type= : Morph type or class of the model that owns the key (e.g. the partner)}
         {--owner-id= : Key of the model that owns the key}
-        {--label= : A short label}';
+        {--label= : A short label, bound into the key (UTF-8, at most 191 characters)}';
 
     protected $description = 'Import a partner or existing key into a Sentinel key ring';
 

@@ -60,8 +60,11 @@ final class KeyDriverException extends SentinelException
         return new self("A key id in ring [{$ring}] must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}.");
     }
 
+    /**
+     * The label is bound into the key's envelope (canonical JSON), so it is text.
+     */
     public static function invalidLabel(): self
     {
-        return new self('A key label must be at most 191 characters.');
+        return new self('A key label must be valid UTF-8 of at most 191 characters.');
     }
 }

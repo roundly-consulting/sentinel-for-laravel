@@ -160,6 +160,17 @@ final class Settings
     }
 
     /**
+     * Whether a database key must bind its label (`sentinel.key/2`, written since 1.2). On, a
+     * legacy `sentinel.key/1` row — whose label column a database writer can change unnoticed,
+     * and which a restore from an old backup brings back — fails its integrity check. Off (the
+     * default) until every row is re-sealed with `sentinel:key:reseal`.
+     */
+    public static function requireBoundLabel(): bool
+    {
+        return self::flag('keys.require_bound_label', config('sentinel.keys.require_bound_label'), false);
+    }
+
+    /**
      * The configured ring names.
      *
      * @return list<string>

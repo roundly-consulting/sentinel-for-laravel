@@ -182,6 +182,7 @@ it('validates every input before storing anything', function (string $kid, Algor
     'disallowed algorithm' => ['k', Algorithm::HmacSha512, PARTNER_SECRET, null, AlgorithmNotAllowedException::class, 'hmac-sha512'],
     'invalid kid' => ['-bad kid', Algorithm::HmacSha256, PARTNER_SECRET, null, KeyDriverException::class, 'must match'],
     'overlong label' => ['k', Algorithm::HmacSha256, PARTNER_SECRET, str_repeat('l', 192), KeyDriverException::class, 'at most 191'],
+    'label that is not UTF-8' => ['k', Algorithm::HmacSha256, PARTNER_SECRET, "caf\xE9", KeyDriverException::class, 'valid UTF-8'],
     'short HMAC secret' => ['k', Algorithm::HmacSha256, 'base64:'.base64_encode(str_repeat('a', 31)), null, InvalidKeyMaterialException::class, 'at least 32'],
     'raw passphrase' => ['k', Algorithm::HmacSha256, 'correct horse battery staple, very long', null, InvalidKeyMaterialException::class, 'PEM block or "base64:'],
     'malformed base64' => ['k', Algorithm::Ed25519, 'base64:!!!', null, InvalidKeyMaterialException::class, 'not canonical'],

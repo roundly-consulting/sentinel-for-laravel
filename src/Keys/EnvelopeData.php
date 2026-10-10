@@ -9,8 +9,9 @@ use JsonSerializable;
 use SensitiveParameter;
 
 /**
- * The authoritative content of a database key (`sentinel.key/1`), held encrypted in the
- * row's `envelope`.
+ * The authoritative content of a database key, held encrypted in the row's `envelope`
+ * ({@see KeyEnvelope}): every field, the label included (`sentinel.key/2`; a legacy
+ * `sentinel.key/1` envelope carries no label, so its label is read from the column).
  *
  * @internal
  */
@@ -28,6 +29,7 @@ final readonly class EnvelopeData implements JsonSerializable
         public ?CarbonImmutable $verifiesUntil = null,
         public ?CarbonImmutable $revokedAt = null,
         public ?string $owner = null,
+        public ?string $label = null,
     ) {}
 
     public function with(
@@ -38,7 +40,7 @@ final readonly class EnvelopeData implements JsonSerializable
     ): self {
         return new self(
             $this->ring, $this->keyId, $this->algorithm, $this->material, $this->public, $status ?? $this->status, $this->activatesAt,
-            $signsUntil ?? $this->signsUntil, $verifiesUntil ?? $this->verifiesUntil, $revokedAt ?? $this->revokedAt, $this->owner,
+            $signsUntil ?? $this->signsUntil, $verifiesUntil ?? $this->verifiesUntil, $revokedAt ?? $this->revokedAt, $this->owner, $this->label,
         );
     }
 

@@ -77,6 +77,7 @@ it('refuses algorithms outside the ring, taken and invalid key ids, and long lab
         ->and(fn () => http()->generate(Algorithm::HmacSha256, 'taken'))->toThrow(KeyDriverException::class, 'already has a key [taken]')
         ->and(fn () => http()->generate(Algorithm::HmacSha256, "bad\nkid"))->toThrow(KeyDriverException::class)
         ->and(fn () => http()->generate(Algorithm::HmacSha256, label: str_repeat('x', 192)))->toThrow(KeyDriverException::class, '191')
+        ->and(fn () => http()->generate(Algorithm::HmacSha256, label: "caf\xE9"))->toThrow(KeyDriverException::class, 'valid UTF-8')
         ->and(fn () => Sentinel::keys()->ring()->generate(Algorithm::HmacSha256))->toThrow(KeyDriverException::class, 'no database driver');
 });
 

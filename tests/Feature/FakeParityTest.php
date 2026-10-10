@@ -424,6 +424,8 @@ it('behaves exactly like the real manager', function (Closure $scenario): void {
     'import private material without signing' => [static fn (): mixed => Sentinel::keys()->ring('http')->import('own', Algorithm::Ed25519, (string) KeyMaterial::generate(Algorithm::Ed25519)->encodedPrivate())],
     'generate into a config-only ring (dual-review O-34)' => [static fn (): mixed => Sentinel::keys()->ring('default')->generate(Algorithm::HmacSha256)],
     'generate with an overlong label (dual-review O-34)' => [static fn (): mixed => Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, label: str_repeat('x', 300))],
+    'generate with a label that is not UTF-8 (label binding)' => [static fn (): mixed => Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, label: "caf\xE9")],
+    'import with a label that is not UTF-8 (label binding)' => [static fn (): mixed => Sentinel::keys()->ring('http')->import('acme', Algorithm::HmacSha256, PARTNER_SECRET, label: "caf\xE9")],
     'generate a kid that is taken (dual-review O-34)' => [static function (ParityRun $run): mixed {
         $kid = $run->fake ? 'twice-fake' : 'twice-real';
         Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, keyId: $kid);

@@ -826,7 +826,7 @@ final class SentinelFake extends SentinelManager
     // ── keys ──────────────────────────────────────────────────────────────────
 
     /**
-     * Production's checks and material (nothing stored): an overlong label, a taken kid or a
+     * Production's checks and material (nothing stored): an overlong or non-UTF-8 label, a taken kid or a
      * database key in a config-only ring are refused as in production, and a config key comes
      * with its environment lines.
      */
@@ -844,7 +844,7 @@ final class SentinelFake extends SentinelManager
             throw KeyDriverException::invalidKeyId($request->ring);
         }
 
-        if ($request->label !== null && mb_strlen($request->label) > 191) {
+        if ($request->label !== null && (! mb_check_encoding($request->label, 'UTF-8') || mb_strlen($request->label) > 191)) {
             throw KeyDriverException::invalidLabel();
         }
 
@@ -894,7 +894,7 @@ final class SentinelFake extends SentinelManager
             throw KeyDriverException::invalidKeyId($request->ring);
         }
 
-        if ($request->label !== null && mb_strlen($request->label) > 191) {
+        if ($request->label !== null && (! mb_check_encoding($request->label, 'UTF-8') || mb_strlen($request->label) > 191)) {
             throw KeyDriverException::invalidLabel();
         }
 

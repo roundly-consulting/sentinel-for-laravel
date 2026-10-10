@@ -81,11 +81,17 @@ return [
     | `ring:kid,…` and beats every driver (a restored database row stays
     | revoked). Generate keys with `php artisan sentinel:key:generate`.
     |
+    | require_bound_label — refuse database keys whose envelope predates 1.2
+    | (`sentinel.key/1`), whose label is not bound: a database writer could
+    | change it unnoticed. After upgrading, run `php artisan sentinel:key:reseal`,
+    | check the labels it prints, then turn this on.
+    |
     */
 
     'keys' => [
         'default_ring' => env('SENTINEL_DEFAULT_RING', 'default'),
         'revoked' => env('SENTINEL_REVOKED_KEYS', ''),
+        'require_bound_label' => env('SENTINEL_REQUIRE_BOUND_LABEL', false),
 
         'rings' => [
             'default' => [

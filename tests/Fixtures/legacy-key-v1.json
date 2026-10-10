@@ -1,0 +1,22 @@
+{
+    "written_by": "roundly-consulting/sentinel-for-laravel 1.1.2 (be91902), Sentinel::keys()->ring('logs')->import(...)",
+    "app_key": "base64:ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0A=",
+    "secret": "base64:QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+    "row": {
+        "ring": "logs",
+        "kid": "billing-legacy",
+        "algorithm": "hmac-sha256",
+        "status": "verify_only",
+        "envelope": "sentinel:aes-256-gcm:2jQ1rhP0pMUN_-eVR1SK6zR4siPHkqvjbRCasBeMgJ26_4KXPw5x-p_-2MCtAze61WUW8SXL-g62KNQofDCjTbRYiRDS9pHbDVMKIrN7ZHC3GPFAtRBWN4JmI3E3dzh_LyJnt4vrPWlH0VbLQaPxzagLIBHlElw60GQwzq2b_a2eUZd3aQpCHuk__Eu0ob4aNJtg6q0gLE3uAnc_QYA9eJ1XLAN57l8h7MoyfDQS7podTWjNZFaos01HnpEQrzqGtn3cL_SKmGSDYsFFx74b_rAOALO-mZEQITHK3B1yzYAkHkGpStqEotkwdw3Qs6qpzaQpbii4q2Yf3Ulyy5_ueWIT9cQ8TCOaK17mZZe0CuTLYqrPq5q0lHI_mAy_fzZdcEqjxIHA5KAbTfOtKy4DyOHtMLTjlAWKhn_VXgOS-K5MQhT3RK_s94JCqVL_tI3N-rWM0crBqsnU_ToR4OPccrIhKgsolNCO2fG-eZI3UGYI8MTOO_sI5iewRN4WHbrK",
+        "activates_at": "2026-10-01 00:00:00.000000",
+        "signs_until": null,
+        "verifies_until": null,
+        "revoked_at": null,
+        "revocation_reason": null,
+        "label": "billing service",
+        "owner_type": "RoundlyConsulting\\Sentinel\\Tests\\Fixtures\\Models\\User",
+        "owner_id": 1,
+        "created_at": "2026-10-01 12:00:00.123456",
+        "updated_at": "2026-10-01 12:00:00.123456"
+    }
+}

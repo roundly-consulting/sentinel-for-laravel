@@ -22,6 +22,7 @@ use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Keys\Purpose;
 use RoundlyConsulting\Sentinel\Keys\Signers;
+use RoundlyConsulting\Sentinel\Models\Key;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\User;
@@ -77,6 +78,24 @@ it('returns the owner and label an imported per-service key is bound to', functi
         ->and($info->status)->toBe(KeyStatus::VerifyOnly)
         ->and($info->canSign)->toBeFalse()
         ->and($info->driver)->toBe('database');
+});
+
+/*
+ * The label is what a consumer binds the sender to (cosmos-logging's sink does), so an edited
+ * label must never vouch for a MAC: the key fails its integrity check and is unknown.
+ */
+it('refuses a MAC under a key whose label was edited out of band (label binding)', function (): void {
+    $service = User::query()->create(['name' => 'billing']);
+    Sentinel::keys()->ring('logs')->import('billing-2', Algorithm::HmacSha256, MAC_SERVICE_SECRET, owner: $service, label: 'billing');
+    $message = '{"service":"billing","seq":4}';
+
+    expect(Sentinel::keys()->ring('logs')->verifyMac('billing-2', $message, peerMac(MAC_SERVICE_SECRET, $message))->label)->toBe('billing');
+
+    Key::query()->where('ring', 'logs')->where('kid', 'billing-2')->update(['label' => 'payments']);
+    app(KeyStoreManager::class)->flush();
+
+    expect(macRefusal(fn () => Sentinel::keys()->ring('logs')->verifyMac('billing-2', $message, peerMac(MAC_SERVICE_SECRET, $message))))
+        ->toBe(MacRejection::UnknownKey);
 });
 
 it('accepts a verify-only key — a rotated-out config key included', function (): void {

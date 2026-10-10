@@ -65,11 +65,11 @@ function matrixRestoreEntity(array $snapshot, Invoice $invoice): void
     }
 }
 
-function matrixDatabaseKey(): void
+function matrixDatabaseKey(?string $label = null): void
 {
     config()->set('sentinel.keys.rings.default.driver', 'database');
     app(KeyStoreManager::class)->flush();
-    Sentinel::keys()->ring()->generate(Algorithm::HmacSha256, 'db-key');
+    Sentinel::keys()->ring()->generate(Algorithm::HmacSha256, 'db-key', label: $label);
 }
 
 /**
@@ -228,6 +228,14 @@ it('detects exactly what the threat model promises', function (Closure $attack, 
         matrixDatabaseKey();
         $a = invoice();
         DB::table('sentinel_keys')->update(['algorithm' => 'hmac-sha512']);
+        app(KeyStoreManager::class)->flush();
+
+        return [$a];
+    }, true, true],
+    '#14 rewrite the label of a database key' => [static function (): array {
+        matrixDatabaseKey('ACME billing');
+        $a = invoice();
+        DB::table('sentinel_keys')->update(['label' => 'Evil Corp']);
         app(KeyStoreManager::class)->flush();
 
         return [$a];

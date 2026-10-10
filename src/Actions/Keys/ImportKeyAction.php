@@ -47,7 +47,7 @@ final readonly class ImportKeyAction
             throw KeyDriverException::invalidKeyId($request->ring);
         }
 
-        if ($request->label !== null && mb_strlen($request->label) > 191) {
+        if ($request->label !== null && (! mb_check_encoding($request->label, 'UTF-8') || mb_strlen($request->label) > 191)) {
             throw KeyDriverException::invalidLabel();
         }
 

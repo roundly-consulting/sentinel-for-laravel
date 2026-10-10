@@ -98,6 +98,7 @@ it('refuses a mistyped boolean instead of reading it as the default (dual-review
 
     expect($read())->toBeTrue();
 })->with([
+    'keys.require_bound_label' => ['keys.require_bound_label', static fn (): bool => Settings::requireBoundLabel()],
     'sealing.auto' => ['sealing.auto', static fn (): bool => Settings::autoSeal()],
     'sealing.allow_suspension' => ['sealing.allow_suspension', static fn (): bool => Settings::allowSuspension()],
     'sealing.field_tags' => ['sealing.field_tags', static fn (): bool => Settings::fieldTags()],

@@ -9,6 +9,7 @@ use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
 use RoundlyConsulting\Sentinel\Events\KeyIntegrityViolated;
 use RoundlyConsulting\Sentinel\Exceptions\NoSigningKeyException;
+use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Keys\KeyEnvelope;
 use RoundlyConsulting\Sentinel\Keys\KeyLookup;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
@@ -142,4 +143,36 @@ it('round-trips owner, label and material of a stored key', function (): void {
         ->and($resolved?->canSign())->toBeTrue()
         ->and($key->owner)->toBeInstanceOf(User::class)
         ->and($key->toArray())->not->toHaveKey('envelope');
+});
+
+/*
+ * Label binding (1.2, `sentinel.key/2`): consumers bind on a key's label (`verifyMac()` hands it
+ * back for exactly that), so it is bound like the owner — in the plaintext and the associated
+ * data. Before, the label was a plain column a database writer could change unnoticed.
+ */
+it('detects an out-of-band edit of a key label (label binding)', function (?string $label, ?string $edited): void {
+    Event::fake([KeyIntegrityViolated::class]);
+    Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, keyId: 'victim', label: $label);
+
+    expect(httpKeys()->find('http', 'victim')?->label)->toBe($label);
+
+    Key::query()->where('ring', 'http')->where('kid', 'victim')->update(['label' => $edited]);
+
+    expect(httpKeys()->lookup('http', 'victim'))->toEqual(new KeyLookup(null, KeyLookup::INTEGRITY));
+
+    Event::assertDispatched(KeyIntegrityViolated::class, static fn (KeyIntegrityViolated $event): bool => $event->ring === 'http' && $event->keyId === 'victim' && $event->driver === 'database');
+})->with([
+    'label rewritten' => ['Partner A', 'Partner B'],
+    'label nulled' => ['Partner A', null],
+    'label set where it was null' => [null, 'Partner B'],
+]);
+
+it('binds the label of a factory key too (label binding)', function (): void {
+    Key::factory()->ring('http')->create(['kid' => 'made', 'label' => 'Partner A']);
+
+    expect(httpKeys()->find('http', 'made')?->label)->toBe('Partner A');
+
+    Key::query()->where('kid', 'made')->update(['label' => 'Partner B']);
+
+    expect(httpKeys()->lookup('http', 'made'))->toEqual(new KeyLookup(null, KeyLookup::INTEGRITY));
 });

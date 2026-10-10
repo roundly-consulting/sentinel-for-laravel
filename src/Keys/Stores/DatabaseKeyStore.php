@@ -30,7 +30,8 @@ use RoundlyConsulting\Sentinel\Support\Clock;
 use SensitiveParameter;
 
 /**
- * Keys in `sentinel_keys`, each row an encrypted, integrity-bound envelope (plan §4.4.9).
+ * Keys in `sentinel_keys`, each row an encrypted, integrity-bound envelope (plan §4.4.9) that
+ * binds its label too ({@see KeyEnvelope}).
  * Decrypted keys are memoized for the current request only (this store lives in the scoped
  * {@see KeyCache}). A row that fails its integrity check is treated as unknown and reported
  * through {@see KeyIntegrityViolated}.
@@ -105,17 +106,17 @@ final class DatabaseKeyStore implements KeyStore
     }
 
     /**
-     * Store a new key (its envelope and query columns together). The manual status is bound
-     * into the envelope: an imported partner key stays verify-only.
+     * Store a new key (its envelope and query columns together). The manual status and the
+     * label are bound into the envelope: an imported partner key stays verify-only, and its
+     * label is the one it was stored with.
      */
     public function insert(string $keyId, #[SensitiveParameter] KeyMaterial $material, CarbonImmutable $activatesAt, ?Model $owner, ?string $label, KeyStatus $status = KeyStatus::Active): SealingKey
     {
         $row = new Key;
-        $row->label = $label;
 
         $this->envelope->apply($row, new EnvelopeData(
             $this->ring, $keyId, $material->algorithm->value, $material->encodedPrivate(), $material->encodedPublic(),
-            $status->value, $activatesAt, owner: $owner === null ? null : $owner->getMorphClass().':'.$owner->getKey(),
+            $status->value, $activatesAt, owner: $owner === null ? null : $owner->getMorphClass().':'.$owner->getKey(), label: $label,
         ));
 
         try {
@@ -130,7 +131,8 @@ final class DatabaseKeyStore implements KeyStore
     }
 
     /**
-     * Change a stored key under a row lock (no lost updates), re-encrypting its envelope.
+     * Change a stored key under a row lock (no lost updates), re-encrypting its envelope — in
+     * the current format, so a legacy row's label is bound from here on.
      *
      * @param  Closure(EnvelopeData): EnvelopeData  $change
      */
@@ -165,8 +167,7 @@ final class DatabaseKeyStore implements KeyStore
                 $data->public,
             );
         } catch (KeyIntegrityException|InvalidKeyMaterialException) {
-            $this->cache->markIntegrityFailure($this->ring, $keyId);
-            $this->events->dispatch(new KeyIntegrityViolated($this->ring, $keyId, 'database'));
+            $this->violated($keyId);
 
             return $this->loaded[$keyId] = null;
         }
@@ -181,7 +182,16 @@ final class DatabaseKeyStore implements KeyStore
 
         return $this->loaded[$keyId] = new SealingKey(
             $this->ring, $keyId, $material, $status, 'database', $data->activatesAt, $data->signsUntil,
-            $data->verifiesUntil, $data->revokedAt, $row->label, $ownerType, $ownerId,
+            $data->verifiesUntil, $data->revokedAt, $data->label, $ownerType, $ownerId,
         );
+    }
+
+    /**
+     * A row failed its integrity check: the key is unknown for this request, and the host hears of it.
+     */
+    private function violated(string $keyId): void
+    {
+        $this->cache->markIntegrityFailure($this->ring, $keyId);
+        $this->events->dispatch(new KeyIntegrityViolated($this->ring, $keyId, 'database'));
     }
 }

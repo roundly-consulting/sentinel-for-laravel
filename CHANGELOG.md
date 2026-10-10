@@ -6,6 +6,30 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+### Added
+
+- `sentinel.keys.require_bound_label` (`SENTINEL_REQUIRE_BOUND_LABEL`, off by default). When on,
+  a key in the pre-1.2 envelope format fails its integrity check like any tampered key.
+
+### Changed
+
+- A key label must be valid UTF-8, as well as at most 191 characters. `generate()`, `import()`,
+  `sentinel:key:generate`, `sentinel:key:import` and `Sentinel::fake()` refuse any other label
+  with `KeyDriverException`. PostgreSQL and MySQL refused such labels already.
+
+### Security
+
+- A database key's label is now bound into its encrypted envelope, alongside its owner, status
+  and dates: it is in the plaintext and in the associated data. Before, the label was a plain
+  column that a database writer could change undetected, while `verifyMac()` hands the label
+  back precisely so a receiver can bind the sender to it. Now an edited, removed or added label
+  makes the key fail its integrity check: `KeyIntegrityViolated` fires and the key is unknown
+  (`UnknownKey` for a MAC, `unknown_key` for a seal). Every key write now re-seals a pre-1.2 key
+  in the new format and binds the label it holds: revocation, retirement and rotation do this.
+  Until `require_bound_label` is on, a pre-1.2 envelope restored from a backup is still
+  accepted with whatever label its column holds. This is the same class as the accepted
+  "restore an older key envelope" threat. `SENTINEL_REVOKED_KEYS` still beats it.
+
 ## 1.1.2 - 2026-10-10
 
 ### Fixed

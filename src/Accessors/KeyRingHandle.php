@@ -75,7 +75,7 @@ final readonly class KeyRingHandle
 
     /**
      * Import a key — PEM or `base64:` material — into this ring's database store, bound to
-     * its owner (e.g. the partner model). Verify-only unless `signing` is true.
+     * its owner (e.g. the partner model) and label. Verify-only unless `signing` is true.
      */
     public function import(
         string $keyId,

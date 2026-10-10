@@ -14,10 +14,11 @@ use RoundlyConsulting\Sentinel\Models\Concerns\StoresUtc;
 use RoundlyConsulting\Sentinel\Support\Settings;
 
 /**
- * A database-driver key. The `envelope` (ciphertext from the app encrypter, hidden from
- * serialization) is authoritative: it binds ring, kid, algorithm, material, status, dates and
- * owner, and every plain column here exists only for querying — an edited column is caught
- * as an integrity failure, never trusted.
+ * A database-driver key. The `envelope` (Sentinel's own AES-256-GCM ciphertext, hidden from
+ * serialization) is authoritative: it binds ring, kid, algorithm, material, status, dates,
+ * owner and label, and every plain column here exists only for querying — an edited column is
+ * caught as an integrity failure, never trusted. (A legacy `sentinel.key/1` envelope, written
+ * before 1.2, does not bind the label: `sentinel:key:reseal` upgrades it.)
  *
  * @property int $id
  * @property string $ring

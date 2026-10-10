@@ -2,19 +2,27 @@
 
 declare(strict_types=1);
 
+use Carbon\CarbonImmutable;
 use GuzzleHttp\Psr7\Request as PsrRequest;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\ExpectationFailedException;
 use Psr\Http\Message\RequestInterface;
+use RoundlyConsulting\Sentinel\Canonical\Jcs;
 use RoundlyConsulting\Sentinel\Concerns\HasSeals;
 use RoundlyConsulting\Sentinel\Contracts\Sealable;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SigningOptions;
 use RoundlyConsulting\Sentinel\Definition\SealBuilder;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
+use RoundlyConsulting\Sentinel\Keys\StorageCipher;
+use RoundlyConsulting\Sentinel\Models\Key;
+use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Invoice;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\PlainRecord;
 use RoundlyConsulting\Sentinel\Tests\HostKeys\HostKeysTestCase;
@@ -238,4 +246,107 @@ function tally(array $outcomes): array
     ksort($counts);
 
     return $counts;
+}
+
+/*
+ * Key envelope formats, worked out here from the wire format alone — never through src/ — so a
+ * test pins the format instead of agreeing with whatever the code writes:
+ *
+ *  - `sentinel.key/1` (Sentinel 1.1 and earlier): the label is a plain column, in neither the
+ *    plaintext nor the associated data;
+ *  - `sentinel.key/2` (1.2): the label is a plaintext member and in the associated data.
+ */
+
+/**
+ * The associated data a stored key row's envelope is bound to, in one format.
+ *
+ * @param  array<string, mixed>  $row  the raw `sentinel_keys` columns
+ */
+function keyIdentity(array $row, string $version): string
+{
+    $iso = static fn (mixed $at): ?string => $at === null ? null : Clock::iso(CarbonImmutable::parse((string) $at, 'UTC'));
+    $identity = [
+        'activates_at' => $iso($row['activates_at']), 'alg' => $row['algorithm'], 'kid' => $row['kid'],
+        'owner' => $row['owner_type'] === null ? null : $row['owner_type'].':'.$row['owner_id'],
+        'revoked_at' => $iso($row['revoked_at'] ?? null), 'ring' => $row['ring'], 'signs_until' => $iso($row['signs_until'] ?? null),
+        'status' => $row['status'], 'v' => $version, 'verifies_until' => $iso($row['verifies_until'] ?? null),
+    ];
+
+    return Jcs::encode($version === 'sentinel.key/2' ? [...$identity, 'label' => $row['label']] : $identity);
+}
+
+/**
+ * The raw `sentinel_keys` row of a key.
+ *
+ * @return array<string, mixed>
+ */
+function keyRow(string $ring, string $kid): array
+{
+    return (array) DB::table('sentinel_keys')->where('ring', $ring)->where('kid', $kid)->first();
+}
+
+/**
+ * The decrypted envelope of a stored key and the format it authenticates as (`format`), or
+ * null when it authenticates as neither.
+ *
+ * @return array<string, mixed>|null
+ */
+function envelopeOf(string $ring, string $kid): ?array
+{
+    $row = keyRow($ring, $kid);
+
+    foreach (['sentinel.key/2', 'sentinel.key/1'] as $version) {
+        // No sentinel.key/2 envelope binds a label that is not UTF-8 (JSON cannot hold one).
+        if ($version === 'sentinel.key/2' && is_string($row['label'] ?? null) && ! mb_check_encoding($row['label'], 'UTF-8')) {
+            continue;
+        }
+
+        try {
+            $plaintext = app(StorageCipher::class)->decrypt(StorageCipher::KEY_ENVELOPE, (string) $row['envelope'], keyIdentity($row, $version));
+        } catch (DecryptException) {
+            continue;
+        }
+
+        return ['format' => $version, ...json_decode($plaintext, true, flags: JSON_THROW_ON_ERROR)];
+    }
+
+    return null;
+}
+
+/**
+ * A database key row exactly as Sentinel 1.1 wrote it: a `sentinel.key/1` envelope, the label
+ * in its plain column only — the way an upgraded host's table holds its keys.
+ */
+function legacyKey(string $ring, string $kid, ?string $label = null, string $status = 'active', ?string $material = null): Key
+{
+    $at = Clock::now()->subMinute();
+    $row = [
+        'ring' => $ring, 'kid' => $kid, 'algorithm' => 'hmac-sha256', 'status' => $status,
+        'activates_at' => Clock::database($at), 'label' => $label, 'owner_type' => null, 'owner_id' => null,
+    ];
+    $plaintext = Jcs::encode([
+        'activates_at' => Clock::iso($at), 'alg' => 'hmac-sha256', 'kid' => $kid,
+        'material' => $material ?? KeyMaterial::generate(Algorithm::HmacSha256)->encodedPrivate(), 'owner' => null, 'public' => null,
+        'revoked_at' => null, 'ring' => $ring, 'signs_until' => null, 'status' => $status, 'v' => 'sentinel.key/1', 'verifies_until' => null,
+    ]);
+
+    DB::table('sentinel_keys')->insert([
+        ...$row,
+        'envelope' => app(StorageCipher::class)->encrypt(StorageCipher::KEY_ENVELOPE, $plaintext, keyIdentity($row, 'sentinel.key/1')),
+    ]);
+    app(KeyStoreManager::class)->flush();
+
+    return Key::query()->where('ring', $ring)->where('kid', $kid)->firstOrFail();
+}
+
+/**
+ * The key row Sentinel 1.1.2 itself wrote (tests/Fixtures/legacy-key-v1.json): a verify-only
+ * per-service MAC key `logs:billing-legacy`, labelled "billing service", owned by user 1.
+ *
+ * @return array{written_by: string, app_key: string, secret: string, row: array<string, mixed>}
+ */
+function legacyFixture(): array
+{
+    /** @var array{written_by: string, app_key: string, secret: string, row: array<string, mixed>} */
+    return json_decode((string) file_get_contents(__DIR__.'/Fixtures/legacy-key-v1.json'), true, flags: JSON_THROW_ON_ERROR);
 }
