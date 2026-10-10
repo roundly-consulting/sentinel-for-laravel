@@ -653,3 +653,20 @@ it('refuses to rotate a custom driver\'s key under the fake too (chat review C-1
 
     expect(fn () => Sentinel::keys()->ring()->rotate())->toThrow(KeyDriverException::class, 'custom driver [vault]');
 });
+
+it('baselines no row the fake itself unsealed, as production (chat review C-24)', function (): void {
+    $scenario = static function (): array {
+        $invoice = invoice();
+        Sentinel::unseal($invoice, 'INC-10', seal: 'identity');
+        $report = Sentinel::model(Invoice::class)->sealMissing('baseline', seal: 'identity');
+        DB::table('invoices')->delete();
+
+        return [$report->resealed, $report->skipped, $report->skippedResults[0]->status->value ?? null];
+    };
+
+    $real = $scenario();
+    Sentinel::fake();
+
+    expect($scenario())->toBe($real)
+        ->and($real)->toBe([0, 1, 'unsealed']);
+});

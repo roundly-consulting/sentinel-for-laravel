@@ -338,7 +338,7 @@ final class SentinelFake extends SentinelManager
         if ($removed || ($before->status === VerificationStatus::Missing && $before->reason === 'seal_deleted')) {
             $this->sticky[$this->identity($model, $compiled->name)] = $compiled->strict
                 ? new FakedStatus(VerificationStatus::Missing, null, 'unsealed')
-                : new FakedStatus(VerificationStatus::Unsealed, null);
+                : new FakedStatus(VerificationStatus::Unsealed, null, history: true);
         }
 
         return $this->record('unseal', [$model, $compiled->name, $reason, $request->actor], $removed);
@@ -610,7 +610,8 @@ final class SentinelFake extends SentinelManager
 
     /**
      * Nothing is sealed under the fake, so every row is adopted — except rows faked as
-     * `missing`, which (as in production, where their history shows a seal) are reported.
+     * `missing` and lenient seals the fake unsealed, which (as in production, where their
+     * history shows a seal) are reported.
      */
     public function sealMissing(BaselineOptions $options): ResealReport
     {
@@ -625,8 +626,11 @@ final class SentinelFake extends SentinelManager
         foreach ($rows as $index => $model) {
             foreach ($seals as $seal) {
                 $verdict = $this->faked($model, $seal, VerificationContext::Command);
-                // A row with history (anything but never sealed) is reported, never baselined.
-                $verdict->status === VerificationStatus::Missing && $verdict->reason !== 'never_sealed' ? $skipped[] = $verdict : $resealed++;
+                // A row with history (anything but never sealed, or a lenient seal the fake
+                // unsealed) is reported, never baselined.
+                $history = ($verdict->status === VerificationStatus::Missing && $verdict->reason !== 'never_sealed')
+                    || ($verdict->status === VerificationStatus::Unsealed && ($this->sticky[$this->identity($model, $seal->name)] ?? null)?->history === true);
+                $history ? $skipped[] = $verdict : $resealed++;
             }
 
             $this->progress($options->progress, $index, count($rows), $options->chunk);

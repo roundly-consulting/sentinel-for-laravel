@@ -68,6 +68,8 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - `Sentinel::fake()`: `unseal()` returns false when there was no seal to remove (already
   unsealed, never sealed, or a seal row deleted out of band), as production does; it always
   returned true.
+- `Sentinel::fake()`: `sealMissing()` reports a lenient seal the fake itself unsealed instead of
+  counting it as baselined — production skips any row whose ledger history shows a seal.
 
 ### Security
 
