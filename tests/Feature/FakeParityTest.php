@@ -7,11 +7,13 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
 use RoundlyConsulting\Sentinel\DataTransferObjects\PruneOptions;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ResealOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RevokeKeyRequest;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyDestination;
 use RoundlyConsulting\Sentinel\Enums\LedgerFindingKind;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
+use RoundlyConsulting\Sentinel\Exceptions\AcknowledgementDeniedException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyKeyReusedException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
 use RoundlyConsulting\Sentinel\Exceptions\KeyDriverException;
@@ -489,4 +491,35 @@ it('refuses to import a kid the real key store already holds under the fake (cha
 
     expect(fn () => Sentinel::keys()->ring('http')->import('acme-1', Algorithm::HmacSha256, PARTNER_SECRET))
         ->toThrow(KeyDriverException::class, 'already has a key [acme-1]');
+});
+
+it('filters a re-seal like production under the fake (chat review C-12)', function (): void {
+    invoice();
+    invoice();
+    $filtered = static fn (): array => [
+        Sentinel::reseal(new ResealOptions(Invoice::class, onlyOutdated: true))->resealed,
+        Sentinel::reseal(new ResealOptions(Invoice::class, upgradeFormat: true))->resealed,
+        Sentinel::reseal(new ResealOptions(Invoice::class, fromKeyId: 'nope'))->resealed,
+    ];
+    $real = $filtered();
+    $fake = Sentinel::fake();
+
+    expect($filtered())->toBe($real)->toBe([0, 0, 0]);
+
+    // A row faked outdated is what onlyOutdated re-seals.
+    $fake->fakeStatus(Invoice::query()->firstOrFail(), VerificationStatus::Outdated, 'financial');
+
+    expect(Sentinel::reseal(new ResealOptions(Invoice::class, onlyOutdated: true))->resealed)->toBe(1);
+});
+
+it('requires an actor for an acknowledging re-seal outside the console under the fake too (chat review C-12)', function (): void {
+    app()->instance(Runtime::class, new Runtime(app(), console: false));
+    invoice();
+    $acknowledging = static fn (): mixed => Sentinel::reseal(new ResealOptions(Invoice::class, acknowledgeReason: 'reviewed'));
+
+    expect($acknowledging)->toThrow(AcknowledgementDeniedException::class, 'actor');
+
+    Sentinel::fake();
+
+    expect($acknowledging)->toThrow(AcknowledgementDeniedException::class, 'actor');
 });

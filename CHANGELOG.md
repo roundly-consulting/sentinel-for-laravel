@@ -49,6 +49,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   printed lines took sealing down.
 - `Sentinel::fake()`: `importKey()` refuses a key id that is taken (imported or generated under
   the fake, or held by the real key store) with `KeyDriverException`, as production does.
+- `Sentinel::fake()`: `reseal()` applies `onlyOutdated`, `upgradeFormat` and `fromKeyId` as
+  production does (it used to count every intact row as re-sealed), and an acknowledging run
+  outside the console without an actor is refused (`AcknowledgementDeniedException`).
 
 ### Security
 

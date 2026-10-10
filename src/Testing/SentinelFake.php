@@ -508,13 +508,17 @@ final class SentinelFake extends SentinelManager
 
     /**
      * Intact and outdated rows count as re-sealed (the fake holds no keys, so it cannot tell a
-     * row already on the current key); the others are skipped — or acknowledged.
+     * row already on the current key); the others are skipped — or acknowledged. The filters
+     * apply as in production: `onlyOutdated` re-seals only outdated rows, `upgradeFormat` and a
+     * `fromKeyId` (a faked verdict names no key) none, and an acknowledging run needs an actor
+     * outside the console.
      */
     public function reseal(ResealOptions $options): ResealReport
     {
         $compiled = $this->container->make(DefinitionRegistry::class)->for($options->model);
         $seals = $options->seal === null ? $compiled->all() : [$compiled->get($options->seal)];
         $reason = $options->acknowledgeReason === null ? null : Reasons::normalize($options->acknowledgeReason);
+        $actor = $reason === null ? $options->actor : $this->container->make(Runtime::class)->actor($options->actor);
         $resealed = $acknowledged = 0;
         $skipped = [];
         $rows = $this->rows($options->model::query()->withoutGlobalScopes());
@@ -522,11 +526,12 @@ final class SentinelFake extends SentinelManager
         foreach ($rows as $index => $model) {
             foreach ($seals as $seal) {
                 $verdict = $this->faked($model, $seal, VerificationContext::Command);
+                $rotatable = $verdict->status === VerificationStatus::Intact || $verdict->status === VerificationStatus::Outdated;
 
                 match (true) {
-                    $verdict->status === VerificationStatus::Unsealed => null,
-                    $verdict->status === VerificationStatus::Intact, $verdict->status === VerificationStatus::Outdated => $resealed++,
-                    $reason !== null => $acknowledged += $options->dryRun ? 1 : (int) $this->acknowledge($model, $reason, $options->actor, $seal->name)->acknowledged,
+                    $verdict->status === VerificationStatus::Unsealed, $options->fromKeyId !== null && $verdict->keyId !== $options->fromKeyId => null,
+                    $rotatable => $options->upgradeFormat || ($options->onlyOutdated && $verdict->status !== VerificationStatus::Outdated) ? null : $resealed++,
+                    $reason !== null => $acknowledged += $options->dryRun ? 1 : (int) $this->acknowledge($model, $reason, $actor, $seal->name)->acknowledged,
                     default => $skipped[] = $verdict,
                 };
             }
