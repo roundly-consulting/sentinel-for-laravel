@@ -388,6 +388,11 @@ final class SentinelFake extends SentinelManager
             return $write();
         }
 
+        // As in production: a sealed row keeps its key.
+        if ($operation !== PersistOperation::Delete && $model->getRawOriginal($model->getKeyName()) !== null && $model->isDirty($model->getKeyName())) {
+            throw SealingMisconfiguredException::keyChanged($model::class);
+        }
+
         // As in production: a write of the same row from inside this one joins it.
         if ($operation !== PersistOperation::Delete && $scope->joinPersist($model)) {
             return $write();

@@ -47,6 +47,15 @@ final class SealingMisconfiguredException extends SentinelException
         return new self("[{$class}] was written outside the sealed write path — an override of save() or delete() that skips it, reached with model events muted; call \$this->persistSealed(fn () => parent::save(...)) from the override.");
     }
 
+    /**
+     * A sealed row is verified and sealed under its key: re-keying it would verify the new id
+     * while writing the old one, and orphan its seal and history.
+     */
+    public static function keyChanged(string $class): self
+    {
+        return new self("[{$class}] cannot change the primary key of a sealed row; create a new row instead.");
+    }
+
     public static function middlewareParameter(string $parameter): self
     {
         $shown = preg_match('/^[A-Za-z0-9_]{1,64}$/D', $parameter) === 1 ? $parameter : '(invalid)';

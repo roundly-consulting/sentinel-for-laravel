@@ -16,6 +16,7 @@ use RoundlyConsulting\Sentinel\Events\TamperDetected;
 use RoundlyConsulting\Sentinel\Exceptions\CanonicalizationException;
 use RoundlyConsulting\Sentinel\Exceptions\ConcurrentSealException;
 use RoundlyConsulting\Sentinel\Exceptions\NoSigningKeyException;
+use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
@@ -143,6 +144,28 @@ it('re-seals a seal covering updated_at after incrementEach (Laravel 13+)', func
     expect(Sentinel::verify($model)->status)->toBe(VerificationStatus::Intact)
         ->and($model->update(['status' => 'paid']))->toBeTrue();
 })->skip(fn (): bool => ! method_exists(Model::class, 'incrementEach'), 'incrementEach() needs Laravel 13');
+
+/**
+ * Chat review C-19: the write targets the old key while the precheck read the new one.
+ */
+it('refuses to change a sealed model\'s primary key', function (Closure $model, bool $fake): void {
+    if ($fake) {
+        Sentinel::fake();
+    }
+
+    $sealed = $model();
+    $id = $sealed->getKey();
+    $seals = DB::table('sentinel_seals')->where('sealable_id', $id)->count();
+    $sealed->setAttribute($sealed->getKeyName(), 9999);
+
+    expect(fn () => $sealed->save())->toThrow(SealingMisconfiguredException::class, 'primary key')
+        ->and(DB::table('invoices')->where('id', $id)->exists())->toBeTrue()
+        ->and(DB::table('invoices')->where('id', 9999)->exists())->toBeFalse()
+        ->and(DB::table('sentinel_seals')->where('sealable_id', $id)->count())->toBe($seals);
+})->with([
+    'strict' => [static fn (): Model => invoice()],
+    'lenient' => [static fn (): Model => definedBy(static fn ($seals) => $seals->seal('loose')->attributes('number')->lenient())::query()->create(['number' => 'n'])],
+])->with(['real' => [false], 'fake' => [true]]);
 
 it('seals created models through every create path', function (Closure $create): void {
     $invoice = $create();

@@ -16,6 +16,7 @@ use RoundlyConsulting\Sentinel\Enums\SealEvent;
 use RoundlyConsulting\Sentinel\Enums\TamperedWritePolicy;
 use RoundlyConsulting\Sentinel\Enums\VerificationContext;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
+use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Support\SealingScope;
 use RoundlyConsulting\Sentinel\Support\Settings;
@@ -52,6 +53,13 @@ final readonly class Persister
         // close; an unsaved model deletes nothing (Eloquent returns null), so it seals nothing.
         if (! Settings::autoSeal() || ($delete ? ! $model->exists : $seals->auto() === []) || $this->scope->sealingSuspended()) {
             return $write();
+        }
+
+        // The seal and its history are keyed by the row's id: a write that changes it would
+        // verify the new id while updating the old row, and leave the seal behind.
+        // (A row inserted in this write has no original key yet: its id is new, not changed.)
+        if (! $delete && $model->getRawOriginal($model->getKeyName()) !== null && $model->isDirty($model->getKeyName())) {
+            throw SealingMisconfiguredException::keyChanged($model::class);
         }
 
         // A listener saving the same row again inside its write (`created` → `saveQuietly()`):

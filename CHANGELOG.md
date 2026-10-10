@@ -89,6 +89,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - `sentinel:install` generates the default ring's key with the ring's configured algorithm (it
   always used `hmac-sha256`, overriding an `ed25519` ring) and exits non-zero when generating it
   fails; it reported success while printing the error.
+- Changing the primary key of a sealed row is refused with `SealingMisconfiguredException`
+  (under the fake too). The write verified the new id while updating the old row: a strict seal
+  threw a misleading `TamperedModelException` on an intact row, a lenient one left its seal and
+  history orphaned on the old id.
 
 ### Security
 
