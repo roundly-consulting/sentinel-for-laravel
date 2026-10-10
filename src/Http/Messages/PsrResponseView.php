@@ -9,11 +9,16 @@ use Psr\Http\Message\ResponseInterface;
 /**
  * A received PSR-7 response (`@status` and its fields; no request-derived components).
  *
+ * The body is read once and kept: a streamed (non-seekable) body cannot be read twice, and
+ * verification needs it for the coverage check and the digest.
+ *
  * @internal
  */
-final readonly class PsrResponseView implements MessageView
+final class PsrResponseView implements MessageView
 {
-    public function __construct(private ResponseInterface $response) {}
+    private ?string $body = null;
+
+    public function __construct(private readonly ResponseInterface $response) {}
 
     public function isRequest(): bool
     {
@@ -64,14 +69,18 @@ final readonly class PsrResponseView implements MessageView
 
     public function body(): string
     {
+        if ($this->body !== null) {
+            return $this->body;
+        }
+
         $body = $this->response->getBody();
-        $content = (string) $body;
+        $this->body = (string) $body;
 
         if ($body->isSeekable()) {
             $body->rewind();
         }
 
-        return $content;
+        return $this->body;
     }
 
     public function bodyUnavailable(): bool

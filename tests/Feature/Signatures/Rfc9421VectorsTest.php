@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use GuzzleHttp\Psr7\NoSeekStream;
 use GuzzleHttp\Psr7\Request as PsrRequest;
 use GuzzleHttp\Psr7\Response as PsrResponse;
+use GuzzleHttp\Psr7\Utils;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use RoundlyConsulting\Crypto\Asn1\DerDecoder;
@@ -203,6 +205,22 @@ it('verifies the B.2.4 (ecdsa-p256-sha256) response signature', function (): voi
 
     expect(fn () => Sentinel::signatures()->verifyResponse(rfcResponse(['Signature-Input' => $vector['signature_input'], 'Signature' => $forged]), 'rfc'))
         ->toThrow(HttpSignatureException::class, 'invalid_signature');
+});
+
+/**
+ * Chat review C-20: a streamed (non-seekable) body is read once — a second read gets nothing,
+ * which used to fail the digest.
+ */
+it('verifies a response whose body cannot seek, reading the body once', function (): void {
+    $public = 'base64:'.base64_encode(rfc9421('appendix-b1-keys')['keys']['test-key-ecc-p256']['public']);
+    rfcRing(null, null, null, ["test-key-ecc-p256|ecdsa-p256-sha256|{$public}"]);
+    // The shipped default: a response with a body must cover content-digest (a second read).
+    config()->set('sentinel.signatures.profiles.rfc.require_content_digest', true);
+    $vector = rfcSignature('b24');
+    $response = rfcResponse(['Signature-Input' => $vector['signature_input'], 'Signature' => $vector['signature']]);
+    $streamed = $response->withBody(new NoSeekStream(Utils::streamFor((string) $response->getBody())));
+
+    expect(Sentinel::signatures()->verifyResponse($streamed, 'rfc')->algorithm)->toBe(Algorithm::EcdsaP256Sha256);
 });
 
 it('rejects the rsa-pss-sha512 vectors B.2.1–B.2.3 as unsupported', function (string $label, SignatureRejection $reason): void {

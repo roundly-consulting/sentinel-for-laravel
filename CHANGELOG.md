@@ -93,6 +93,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   (under the fake too). The write verified the new id while updating the old row: a strict seal
   threw a misleading `TamperedModelException` on an intact row, a lenient one left its seal and
   history orphaned on the old id.
+- `verifyResponseSignature()` verifies a response whose body stream cannot seek (a streamed
+  client response). The body was read twice; the second read was empty, so a correct signature
+  failed with `digest_mismatch`. It is now read once. A non-seekable stream cannot be rewound,
+  so buffer the response first if you still need its body afterwards.
 
 ### Security
 
