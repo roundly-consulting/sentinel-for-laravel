@@ -12,6 +12,7 @@ use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Models\Seal;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Invoice;
+use RoundlyConsulting\Testing\Database\DriverMatrix;
 
 /**
  * §10 items 1–5: out-of-band writes are detected on the next verification, with the changed
@@ -140,6 +141,29 @@ it('detects stored values that no longer canonicalize', function (): void {
     expect(Sentinel::verify($model)->status)->toBe(VerificationStatus::Tampered)
         ->and(Sentinel::verify($model)->reason)->toBe('canonicalization');
 });
+
+/**
+ * Chat review C-5: Laravel's boolean cast is `(bool) $value`, so 'false' and 'f' read as true.
+ */
+it('never takes a false-looking string for a sealed false', function (string $written): void {
+    $class = definedBy(static function ($seals): void {
+        $seals->seal('typed')->attributes('number')->boolean('note');
+    });
+    $model = $class::query()->create(['number' => 'n', 'note' => '0']);
+    DB::table('invoices')->where('id', $model->getKey())->update(['note' => $written]);
+
+    expect(Sentinel::verify($model)->status)->toBe(VerificationStatus::Tampered)
+        ->and(Sentinel::verify($model)->reason)->toBe('canonicalization');
+})->with(['false', 'f', 'FALSE', 'F']);
+
+it('detects a sealed boolean flipped to a string the cast reads as true', function (string $written): void {
+    $invoice = invoice(['paid' => false]);
+    DB::table('invoices')->where('id', $invoice->id)->update(['paid' => $written]);
+
+    expect(Invoice::query()->findOrFail($invoice->id)->paid)->toBeTrue()
+        ->and(Sentinel::verify($invoice)->status)->not->toBe(VerificationStatus::Intact);
+})->with(['false', 'f', 'FALSE'])
+    ->skip(fn (): bool => DriverMatrix::driver() !== 'sqlite', 'only SQLite keeps text in a boolean column (pgsql parses it, strict MySQL refuses it)');
 
 it('detects an encrypted column that no longer decrypts', function (): void {
     $invoice = invoice();

@@ -115,12 +115,13 @@ it('normalizes every boolean representation', function (mixed $raw, string $expe
     expect(canonical(SealType::boolean(), $raw))->toBe(['a:col', 'bool', $expected]);
 })->with([
     [true, '1'], [false, '0'], [1, '1'], [0, '0'], ['1', '1'], ['0', '0'],
-    ['t', '1'], ['f', '0'], ['T', '1'], ['TRUE', '1'], ['false', '0'],
+    ['t', '1'], ['T', '1'], ['TRUE', '1'],
 ]);
 
+// Chat review C-5: 'f' and 'false' used to give '0', but Laravel's cast reads them as true.
 it('refuses anything else as a boolean', function (mixed $raw): void {
     expect(fn () => canonical(SealType::boolean(), $raw))->toThrow(CanonicalizationException::class, 'not_boolean');
-})->with([2, 'yes', 'on', 1.0, '']);
+})->with([2, 'yes', 'on', 1.0, '', 'f', 'F', 'false', 'FALSE']);
 
 it('takes zone-less datetimes as written, without a zone, and converts offset-bearing ones to UTC (dual-review O-14)', function (mixed $raw, string $expected): void {
     expect(canonical(SealType::datetime(), $raw))->toBe(['a:col', 'dt', $expected]);

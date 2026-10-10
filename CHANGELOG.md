@@ -29,6 +29,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   (its first publication failed, its cache was flushed). It used to skip every empty anchor,
   so the anchor stayed empty until the next new checkpoint, and a rollback in that window went
   unseen.
+- A sealed boolean stored as the text `'f'`, `'false'` (any case) no longer verifies as a sealed
+  `false`. Laravel's `boolean` cast reads those strings as `true`, so a database writer could
+  flip a sealed `false` (on SQLite, or any text column with a boolean cast) without detection.
+  They are now refused as `not_boolean` (`Tampered(canonicalization)`); `'t'` and `'true'` still
+  mean true, as they do for the cast.
 
 ### Fixed
 

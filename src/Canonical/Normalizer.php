@@ -249,10 +249,12 @@ final class Normalizer
             return (string) $raw;
         }
 
+        // Only strings Laravel's boolean cast (`(bool) $value`) reads the same way: 't' and
+        // 'true' are true there too, but 'f' and 'false' are true, never a sealed false.
         if (is_string($raw)) {
             return match (strtolower($raw)) {
                 '1', 't', 'true' => '1',
-                '0', 'f', 'false' => '0',
+                '0' => '0',
                 default => throw CanonicalizationException::notBoolean(),
             };
         }
