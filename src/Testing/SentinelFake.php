@@ -792,7 +792,7 @@ final class SentinelFake extends SentinelManager
 
     /**
      * The production validation and parsing (pure — nothing stored): an import that would be
-     * refused in production is refused here with the same exception.
+     * refused in production is refused here with the same exception — a taken kid included.
      */
     public function importKey(ImportKeyRequest $request): KeyInfo
     {
@@ -815,6 +815,11 @@ final class SentinelFake extends SentinelManager
         }
 
         $material = ImportedMaterial::parse($request->algorithm, $request->material, $request->signing);
+
+        if ($this->fakedKey($request->ring, $request->keyId) !== null) {
+            throw KeyDriverException::keyIdTaken($request->ring, $request->keyId);
+        }
+
         $signing = $request->signing && $material->canSign();
         $info = new KeyInfo(
             $request->ring, $request->keyId, $request->algorithm, $signing ? KeyStatus::Active : KeyStatus::VerifyOnly, 'database', $signing,

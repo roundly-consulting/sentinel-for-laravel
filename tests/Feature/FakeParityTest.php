@@ -14,6 +14,7 @@ use RoundlyConsulting\Sentinel\Enums\LedgerFindingKind;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyKeyReusedException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
+use RoundlyConsulting\Sentinel\Exceptions\KeyDriverException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\Models\LedgerEntry;
@@ -352,15 +353,23 @@ it('behaves exactly like the real manager', function (Closure $scenario): void {
             Sentinel::nonces()->consume('another-purpose', Sentinel::nonces()->issue('password-reset')->value),
         ];
     }],
-    'import a partner key, verify-only' => [static function (): array {
-        $info = Sentinel::keys()->ring('http')->import('acme', Algorithm::Ed25519, (string) KeyMaterial::generate(Algorithm::Ed25519)->encodedPublic(), label: 'Acme');
+    // Each run its own kid: the real run's key is still stored when the fake runs, and the fake
+    // refuses a kid the real store holds, as production does (chat review C-11).
+    'import a partner key, verify-only' => [static function (ParityRun $run): array {
+        $info = Sentinel::keys()->ring('http')->import($run->fake ? 'acme-fake' : 'acme-real', Algorithm::Ed25519, (string) KeyMaterial::generate(Algorithm::Ed25519)->encodedPublic(), label: 'Acme');
 
-        return [$info->ring, $info->keyId, $info->algorithm->value, $info->status->value, $info->driver, $info->canSign, $info->label];
+        return [$info->ring, str_starts_with($info->keyId, 'acme-'), $info->algorithm->value, $info->status->value, $info->driver, $info->canSign, $info->label];
     }],
-    'import a signing key' => [static function (): array {
-        $info = Sentinel::keys()->ring('http')->import('own', Algorithm::HmacSha256, PARTNER_SECRET, signing: true);
+    'import a signing key' => [static function (ParityRun $run): array {
+        $info = Sentinel::keys()->ring('http')->import($run->fake ? 'own-fake' : 'own-real', Algorithm::HmacSha256, PARTNER_SECRET, signing: true);
 
         return [$info->status->value, $info->canSign];
+    }],
+    'import a kid that is taken (chat review C-11)' => [static function (ParityRun $run): mixed {
+        $kid = $run->fake ? 'imported-twice-fake' : 'imported-twice-real';
+        Sentinel::keys()->ring('http')->import($kid, Algorithm::HmacSha256, PARTNER_SECRET);
+
+        return Sentinel::keys()->ring('http')->import($kid, Algorithm::HmacSha256, PARTNER_SECRET);
     }],
     'import private material without signing' => [static fn (): mixed => Sentinel::keys()->ring('http')->import('own', Algorithm::Ed25519, (string) KeyMaterial::generate(Algorithm::Ed25519)->encodedPrivate())],
     'generate into a config-only ring (dual-review O-34)' => [static fn (): mixed => Sentinel::keys()->ring('default')->generate(Algorithm::HmacSha256)],
@@ -472,4 +481,12 @@ it('hands the fake to code that injected the manager, and records the model-trai
 
     $fake->assertSealed($invoice, 'financial');
     $fake->assertSealed($invoice, 'identity');
+});
+
+it('refuses to import a kid the real key store already holds under the fake (chat review C-11)', function (): void {
+    Sentinel::keys()->ring('http')->import('acme-1', Algorithm::HmacSha256, PARTNER_SECRET);
+    Sentinel::fake();
+
+    expect(fn () => Sentinel::keys()->ring('http')->import('acme-1', Algorithm::HmacSha256, PARTNER_SECRET))
+        ->toThrow(KeyDriverException::class, 'already has a key [acme-1]');
 });

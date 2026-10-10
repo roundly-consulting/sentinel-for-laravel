@@ -47,6 +47,8 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   `SENTINEL_PUBLIC_KEY=` line. Without it the old public key stayed in the environment, and the
   ring refused to load ("an HMAC key is a single secret with no public half"), so applying the
   printed lines took sealing down.
+- `Sentinel::fake()`: `importKey()` refuses a key id that is taken (imported or generated under
+  the fake, or held by the real key store) with `KeyDriverException`, as production does.
 
 ### Security
 
