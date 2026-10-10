@@ -329,13 +329,19 @@ final class SentinelFake extends SentinelManager
             throw AcknowledgementDeniedException::unauthorized($denial);
         }
 
-        // As in production: a strict seal is then missing (and comes back through
-        // acknowledge()), a lenient one unsealed.
-        $this->sticky[$this->identity($model, $compiled->name)] = $compiled->strict
-            ? new FakedStatus(VerificationStatus::Missing, null, 'unsealed')
-            : new FakedStatus(VerificationStatus::Unsealed, null);
+        // As in production: true only when there was a seal to remove. A seal row deleted out of
+        // band still gets its history closed; a row without seal or open history is left alone.
+        $before = $this->faked($model, $compiled, VerificationContext::Api);
+        $removed = $before->status !== VerificationStatus::Unsealed && $before->status !== VerificationStatus::Missing;
 
-        return $this->record('unseal', [$model, $compiled->name, $reason, $request->actor], true);
+        // A strict seal is then missing (and comes back through acknowledge()), a lenient one unsealed.
+        if ($removed || ($before->status === VerificationStatus::Missing && $before->reason === 'seal_deleted')) {
+            $this->sticky[$this->identity($model, $compiled->name)] = $compiled->strict
+                ? new FakedStatus(VerificationStatus::Missing, null, 'unsealed')
+                : new FakedStatus(VerificationStatus::Unsealed, null);
+        }
+
+        return $this->record('unseal', [$model, $compiled->name, $reason, $request->actor], $removed);
     }
 
     /**

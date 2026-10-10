@@ -82,6 +82,24 @@ final class ParityRun
     }
 
     /**
+     * An invoice inserted behind Eloquent's back: no seal, no history (the fake scripts what a
+     * real verification reports for it).
+     */
+    public function neverSealed(): Invoice
+    {
+        $id = DB::table('invoices')->insertGetId(['customer_id' => 1, 'amount' => '1.00', 'status' => 'draft']);
+        $invoice = Invoice::query()->findOrFail($id);
+        $manager = app(SentinelManager::class);
+
+        if ($this->fake && $manager instanceof SentinelFake) {
+            $manager->fakeStatus($invoice, VerificationStatus::Missing, 'financial', reason: 'never_sealed');
+            $manager->fakeStatus($invoice, VerificationStatus::Unsealed, 'identity');
+        }
+
+        return $invoice;
+    }
+
+    /**
      * Change a computed field's source rows (the fake scripts the drift a real verification
      * proves with the attribute MAC).
      */
@@ -226,6 +244,25 @@ it('behaves exactly like the real manager', function (Closure $scenario): void {
         }
 
         return [...$outcomes, Sentinel::unseal($invoice, 'INC-5', User::query()->create(['name' => 'Admin']), 'identity')];
+    }],
+    'unseal twice, a deleted seal and a never-sealed row (chat review C-23)' => [static function (ParityRun $run): array {
+        $twice = invoice();
+        $outcomes = [];
+
+        foreach (['financial', 'financial', 'identity', 'identity'] as $seal) {
+            $outcomes[] = Sentinel::unseal($twice, 'INC-7', seal: $seal);
+        }
+
+        $run->deleteSeal($deleted = invoice());
+        $outcomes[] = Sentinel::unseal($deleted, 'INC-8', seal: 'financial');
+        $never = $run->neverSealed();
+        $outcomes[] = Sentinel::unseal($never, 'INC-9', seal: 'financial');
+        $outcomes[] = Sentinel::unseal($never, 'INC-9', seal: 'identity');
+
+        return [
+            ...$outcomes, Sentinel::verify($twice, 'financial')->reason, Sentinel::verify($twice, 'identity')->status->value,
+            Sentinel::verify($deleted, 'financial')->reason, Sentinel::verify($never, 'financial')->reason, Sentinel::verify($never, 'identity')->status->value,
+        ];
     }],
     'refuse a write on a tampered model' => [static function (ParityRun $run): array {
         $run->tamper($invoice = invoice());

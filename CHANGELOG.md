@@ -65,6 +65,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   algorithm by default), reporting it as `previous`; a config ring gets its environment lines
   (with the verify-only list) and the driver is `config` or `database`, never `chain`; a custom
   driver's key is refused.
+- `Sentinel::fake()`: `unseal()` returns false when there was no seal to remove (already
+  unsealed, never sealed, or a seal row deleted out of band), as production does; it always
+  returned true.
 
 ### Security
 
