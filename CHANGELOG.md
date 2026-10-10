@@ -6,6 +6,15 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+## 1.1.1 - 2026-10-10
+
+### Changed
+
+- On PostgreSQL a database key rotation now runs its transaction at READ COMMITTED, whatever
+  the connection's default isolation level: a REPEATABLE READ snapshot would be taken before
+  the rotation waits for the ring's lock and miss the key another rotation stored. A rotation
+  inside a transaction your code already opened keeps that transaction's level.
+
 ### Fixed
 
 - Concurrent rotations of an empty database key ring (`sentinel:key:rotate`,
@@ -15,7 +24,8 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   key is left signing, at any isolation level. No migration: a ring an earlier race left with
   two signing keys keeps working — the newest signs, both verify — and its next rotation
   demotes both. A rotation that waits for the lock longer than `innodb_lock_wait_timeout`
-  fails with `KeyDriverException`.
+  fails with `KeyDriverException`. `generate()` and `import()` do not take the ring lock; if
+  one races a rotation, the next rotation tidies up after it.
 - Deleting a sealed model whose primary key was changed in memory tombstoned (or, for a soft
   delete, re-sealed) the row under the new id — possibly another sealed row, whose seals it
   removed — and left the deleted row's seals behind. Eloquent deletes the row by its original
