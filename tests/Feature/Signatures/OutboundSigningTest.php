@@ -18,6 +18,7 @@ use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\NoSigningKeyException;
 use RoundlyConsulting\Sentinel\Exceptions\UnknownKeyException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Http\Messages\PsrRequestView;
 use RoundlyConsulting\Sentinel\Http\StructuredFields\Parser;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 
@@ -172,3 +173,22 @@ it('refuses an empty outbound component list in the configuration too (dual-revi
     expect(fn () => Sentinel::signatures()->sign(new PsrRequest('GET', 'https://api.example.com/e'), 'partner'))
         ->toThrow(InvalidSentinelConfigurationException::class, 'signatures.outbound.components');
 });
+
+/**
+ * Chat review C-21: RFC 9421 §2.2.3 — @authority is the request's target authority, which an
+ * explicit Host header carries (the receiver reads it from there).
+ */
+it('signs @authority from the Host header the request is sent with', function (string $host, string $authority): void {
+    partnerRing();
+    $request = new PsrRequest('POST', 'https://10.0.0.5/events', ['Host' => $host, 'Content-Type' => 'application/json'], '{"event":"paid"}');
+
+    $signed = Sentinel::signatures()->sign($request, 'partner', new SigningOptions(components: ['@method', '@authority', '@path', '@target-uri', 'content-digest']));
+
+    expect((new PsrRequestView($signed))->authority())->toBe($authority)
+        ->and(Sentinel::signatures()->verify(received($signed))->keyId)->toBe('partner');
+})->with([
+    'a name' => ['api.example.com', 'api.example.com'],
+    'the default port, any case' => ['API.Example.com:443', 'api.example.com'],
+    'another port' => ['api.example.com:8443', 'api.example.com:8443'],
+    'an IPv6 literal' => ['[2001:db8::1]:443', '[2001:db8::1]'],
+]);

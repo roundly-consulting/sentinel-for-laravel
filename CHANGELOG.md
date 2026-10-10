@@ -97,6 +97,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   client response). The body was read twice; the second read was empty, so a correct signature
   failed with `digest_mismatch`. It is now read once. A non-seekable stream cannot be rewound,
   so buffer the response first if you still need its body afterwards.
+- Outbound signatures take `@authority` (and `@target-uri`) from the request's `Host` header,
+  as RFC 9421 defines it and as the receiver reads it. A request sent to an address with an
+  explicit `Host` (`https://10.0.0.5/…` with `Host: api.example.com`) was signed for the address
+  and rejected by the receiver.
 
 ### Security
 

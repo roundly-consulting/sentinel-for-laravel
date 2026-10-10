@@ -37,8 +37,20 @@ final readonly class PsrRequestView implements MessageView
         return strtolower($this->request->getUri()->getScheme());
     }
 
+    /**
+     * The target authority (RFC 9421 §2.2.3): an explicit `Host` header carries it — and is what
+     * the receiver reads — else the URI's host. Lowercase, the scheme's default port left out.
+     */
     public function authority(): string
     {
+        $header = strtolower(trim($this->request->getHeaderLine('Host')));
+
+        if ($header !== '') {
+            $default = (string) (self::DEFAULT_PORTS[$this->scheme()] ?? '');
+
+            return preg_match('/^(\[[^\]]+\]|[^:\[\]]+):(\d+)$/D', $header, $m) === 1 && ltrim($m[2], '0') === $default ? $m[1] : $header;
+        }
+
         $uri = $this->request->getUri();
         $port = $uri->getPort();
         $host = strtolower($uri->getHost());
