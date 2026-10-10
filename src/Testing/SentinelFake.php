@@ -93,6 +93,7 @@ use RoundlyConsulting\Sentinel\Keys\EnvSnippet;
 use RoundlyConsulting\Sentinel\Keys\ImportedMaterial;
 use RoundlyConsulting\Sentinel\Keys\KeyIds;
 use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
+use RoundlyConsulting\Sentinel\Keys\KeyStatusResolver;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Keys\RingConfig;
 use RoundlyConsulting\Sentinel\SentinelManager;
@@ -783,15 +784,24 @@ final class SentinelFake extends SentinelManager
         }
 
         $material = KeyMaterial::generate($request->algorithm);
-        $config = $request->destination === KeyDestination::Config;
-        $info = new KeyInfo(
-            $request->ring, $keyId, $request->algorithm, KeyStatus::Active, $request->destination->value, true,
-            $config ? null : ($request->activatesAt ?? Clock::now()), label: $config ? null : $request->label,
+
+        // As in production: a config key is printed, never stored — nothing knows it until the
+        // environment holds it.
+        if ($request->destination === KeyDestination::Config) {
+            return $this->record('generateKey', $request, new GeneratedKey(
+                new KeyInfo($request->ring, $keyId, $request->algorithm, KeyStatus::Active, 'config', true),
+                EnvSnippet::forKey($request->ring, $keyId, $material),
+                $material->encodedPublic(),
+            ));
+        }
+
+        $this->keys["{$request->ring}\0{$keyId}"] = new KeyInfo(
+            $request->ring, $keyId, $request->algorithm, KeyStatus::Active, 'database', true, $request->activatesAt ?? Clock::now(),
+            label: $request->label, ownerType: $request->owner?->getMorphClass(), ownerId: self::ownerId($request->owner),
         );
-        $this->keys["{$request->ring}\0{$keyId}"] = $info;
 
         return $this->record('generateKey', $request, new GeneratedKey(
-            $info, $config ? EnvSnippet::forKey($request->ring, $keyId, $material) : null, $material->encodedPublic(),
+            $this->resolved($this->keys["{$request->ring}\0{$keyId}"]), null, $material->encodedPublic(),
         ));
     }
 
@@ -826,13 +836,12 @@ final class SentinelFake extends SentinelManager
         }
 
         $signing = $request->signing && $material->canSign();
-        $info = new KeyInfo(
+        $this->keys["{$request->ring}\0{$request->keyId}"] = new KeyInfo(
             $request->ring, $request->keyId, $request->algorithm, $signing ? KeyStatus::Active : KeyStatus::VerifyOnly, 'database', $signing,
-            $request->activatesAt ?? Clock::now(), label: $request->label, ownerType: $request->owner?->getMorphClass(), ownerId: $request->owner?->getKey(),
+            $request->activatesAt ?? Clock::now(), label: $request->label, ownerType: $request->owner?->getMorphClass(), ownerId: self::ownerId($request->owner),
         );
-        $this->keys["{$request->ring}\0{$request->keyId}"] = $info;
 
-        return $this->record('importKey', $request, $info);
+        return $this->record('importKey', $request, $this->resolved($this->keys["{$request->ring}\0{$request->keyId}"]));
     }
 
     public function rotateKey(RotateKeyRequest $request): RotationResult
@@ -882,13 +891,44 @@ final class SentinelFake extends SentinelManager
     }
 
     /**
+     * As production: the keys the fake generated or imported too (they shadow the real store's).
+     */
+    public function findKey(string $ring, string $keyId): ?KeyInfo
+    {
+        return $this->fakedKey($ring, $keyId);
+    }
+
+    /**
+     * As production: the real stores' keys and the ones the fake generated or imported, each
+     * with its effective status now.
+     *
+     * @return list<KeyInfo>
+     */
+    public function listKeys(?string $ring = null): array
+    {
+        $keys = [];
+
+        foreach (parent::listKeys($ring) as $key) {
+            $keys["{$key->ring}\0{$key->keyId}"] = $key;
+        }
+
+        foreach ($this->keys as $id => $key) {
+            if ($ring === null || $key->ring === $ring) {
+                $keys[$id] = $this->resolved($key);
+            }
+        }
+
+        return array_values($keys);
+    }
+
+    /**
      * A key the fake generated or imported, else one the application's real key store holds
      * (read only — the fake never writes it).
      */
     private function fakedKey(string $ring, string $keyId): ?KeyInfo
     {
         if (isset($this->keys["{$ring}\0{$keyId}"])) {
-            return $this->keys["{$ring}\0{$keyId}"];
+            return $this->resolved($this->keys["{$ring}\0{$keyId}"]);
         }
 
         $key = $this->container->make(KeyStoreManager::class)->find($ring, $keyId);
@@ -904,6 +944,32 @@ final class SentinelFake extends SentinelManager
         $key = $this->fakedKey($ring, $keyId) ?? throw UnknownKeyException::inRing($ring, $keyId);
 
         return $key->driver === 'database' ? $key : throw KeyDriverException::notStoredInDatabase($ring, $keyId);
+    }
+
+    /**
+     * A stored key's effective status now — the dates and the revocation list folded into its
+     * manual status — as the real stores report it.
+     */
+    private function resolved(KeyInfo $key): KeyInfo
+    {
+        $status = KeyStatusResolver::resolve(
+            $key->ring, $key->keyId, Settings::revokedKeys(), Clock::now(), $key->status, $key->activatesAt, $key->signsUntil, $key->verifiesUntil, $key->revokedAt,
+        );
+
+        return new KeyInfo(
+            $key->ring, $key->keyId, $key->algorithm, $status, $key->driver, $status->canSign(), $key->activatesAt,
+            $key->signsUntil, $key->verifiesUntil, $key->revokedAt, $key->label, $key->ownerType, $key->ownerId,
+        );
+    }
+
+    /**
+     * The owner's key as the database store reports it (a string).
+     */
+    private static function ownerId(?Model $owner): ?string
+    {
+        $key = $owner?->getKey();
+
+        return is_int($key) || is_string($key) ? (string) $key : null;
     }
 
     private static function writable(RingConfig $config): bool

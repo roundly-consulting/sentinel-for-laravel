@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
+use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
 use RoundlyConsulting\Sentinel\DataTransferObjects\PruneOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ResealOptions;
@@ -522,4 +524,31 @@ it('requires an actor for an acknowledging re-seal outside the console under the
     Sentinel::fake();
 
     expect($acknowledging)->toThrow(AcknowledgementDeniedException::class, 'actor');
+});
+
+it('knows the keys it generated or imported, with their status and owner (chat review C-25)', function (): void {
+    $owner = User::query()->create(['name' => 'Partner']);
+    $at = CarbonImmutable::now()->addDay();
+    $scenario = static function (string $run) use ($owner, $at): array {
+        $generated = Sentinel::keys()->ring('http')->generate(Algorithm::Ed25519, "g-{$run}", activatesAt: $at, owner: $owner);
+        $imported = Sentinel::keys()->ring('http')->import("i-{$run}", Algorithm::HmacSha256, PARTNER_SECRET, owner: $owner);
+        $listed = array_map(static fn (KeyInfo $key): string => $key->keyId, Sentinel::listKeys('http'));
+        $found = Sentinel::findKey('http', "g-{$run}");
+
+        return [
+            $generated->info->status->value, $generated->info->canSign, $generated->info->ownerType, $generated->info->ownerId,
+            $found?->keyId === "g-{$run}", $found?->status->value, $found?->ownerId,
+            Sentinel::findKey('http', "i-{$run}")?->status->value, $imported->ownerId,
+            in_array("g-{$run}", $listed, true), in_array("i-{$run}", $listed, true),
+            Sentinel::keys()->ring()->generate(Algorithm::HmacSha256, 'env-only', KeyDestination::Config)->info->keyId,
+            Sentinel::findKey('default', 'env-only'),
+        ];
+    };
+
+    $real = $scenario('real');
+    Sentinel::fake();
+
+    expect($scenario('fake'))->toBe($real)
+        ->and($real[0])->toBe('pending')
+        ->and($real[3])->toBe((string) $owner->getKey());
 });

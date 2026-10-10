@@ -57,6 +57,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   concurrent rotations, or a rotation while a scheduled key was pending, left an extra active
   key that was never demoted and could sign again later. `KeyRotated::$previousKeyId` names the
   key that was signing when the rotation committed.
+- `Sentinel::fake()`: the keys it generates or imports are returned by `findKey()` and
+  `listKeys()`, with their effective status (a future `activatesAt` is `pending`) and their
+  owner, as production stores them. A key generated for the environment (`KeyDestination::Config`)
+  is printed only, as in production — no lookup finds it.
 
 ### Security
 
