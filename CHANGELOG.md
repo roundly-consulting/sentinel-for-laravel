@@ -39,6 +39,8 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - A key label must be valid UTF-8, as well as at most 191 characters. `generate()`, `import()`,
   `sentinel:key:generate`, `sentinel:key:import` and `Sentinel::fake()` refuse any other label
   with `KeyDriverException`. PostgreSQL and MySQL refused such labels already.
+- Maintenance: requires `roundly-consulting/package-toolkit-for-laravel` ^1.3 (and
+  `roundly-consulting/testing-for-laravel` ^1.2 for development).
 
 ### Security
 
