@@ -6,18 +6,27 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+## 1.2.0 - 2026-10-10
+
 **Upgrading from 1.1.** No migration, and nothing to do for keys to keep working: after
 `composer update` every database key still verifies. To bind the labels:
 
-1. Deploy 1.2 to every node first. A 1.1 node cannot open a key 1.2 has written (any key
+1. **Upgrade every node to 1.2 first.** A 1.1 node cannot open a key 1.2 has written (any key
    generated, imported, rotated, revoked or retired, or re-sealed): it reads as an integrity
-   failure there. For the same reason you cannot roll back to 1.1.x once 1.2 has written keys.
-2. Run `php artisan sentinel:key:reseal --dry-run`, then `php artisan sentinel:key:reseal`.
-   Check that every printed `ring:kid → label` line shows the label you expect: the label a row
-   holds when it is re-sealed is the one that gets bound.
-3. Set `SENTINEL_REQUIRE_BOUND_LABEL=true`. `sentinel:check` warns until you have re-sealed, and
-   fails if you turn this on while legacy keys remain. If you run `sentinel:check --strict` in a
-   pipeline, the warning fails it too until the keys are re-sealed.
+   failure there.
+2. **Re-seal the keys:** run `php artisan sentinel:key:reseal --dry-run`, then
+   `php artisan sentinel:key:reseal`.
+3. **Check the printed labels.** Every `ring:kid → label` line must show the label you expect:
+   the label a row holds when it is re-sealed is the one that gets bound.
+4. **Set `SENTINEL_REQUIRE_BOUND_LABEL=true`.** From then on a key still in the pre-1.2 envelope
+   format fails its integrity check like a tampered key. `sentinel:check` fails if you turn this
+   on while such keys remain.
+
+**No rollback to 1.1.x** once 1.2 has written keys: 1.1 cannot read the new envelope format.
+
+**`sentinel:check --strict` exits 1 until you re-seal.** `sentinel:check` warns while database
+keys still use the pre-1.2 envelope format, and `--strict` fails on that warning. A pipeline that
+runs it stays red from the upgrade until step 2 is done.
 
 ### Added
 
