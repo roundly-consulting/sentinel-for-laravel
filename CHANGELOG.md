@@ -21,6 +21,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   removed — and left the deleted row's seals behind. Eloquent deletes the row by its original
   key, and the seals now follow it: that row is locked, verified and tombstoned. The delete
   still goes ahead, as deletes always do; the model keeps the key it was given in memory.
+- `Sentinel::fake()`: `currentKey()` (and `Sentinel::keys()->ring($ring)->current()`) now
+  answers from the fake's own keys as production would — a key generated, imported or rotated
+  in under the fake signs, and a key the fake revoked or retired no longer does (the ring falls
+  back to its next key, as in production). `rotateKey()` and `mac()` under the fake pass over
+  such a key too.
 
 ## 1.1.0 - 2026-10-10
 

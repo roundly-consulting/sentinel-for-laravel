@@ -993,12 +993,7 @@ final class SentinelFake extends SentinelManager
      */
     private function signingNow(RingConfig $config): SealingKey|KeyInfo|null
     {
-        try {
-            $real = $this->container->make(KeyStoreManager::class)->signingKey($config->name);
-        } catch (NoSigningKeyException) {
-            $real = null;
-        }
-
+        $real = $this->realSigner($config);
         $faked = null;
 
         foreach ($this->keys as $key) {
@@ -1020,6 +1015,53 @@ final class SentinelFake extends SentinelManager
         $order = array_flip($config->driver === 'chain' ? $config->drivers : [$config->driver]);
 
         return ($order[$real->driver] ?? PHP_INT_MAX) < ($order['database'] ?? PHP_INT_MAX) ? $real : $faked;
+    }
+
+    /**
+     * The key the real stores sign with — unless the fake revoked, retired or demoted it (it
+     * only ever changes database keys): then the one production would fall back to, the newest
+     * other key that can sign in the first of the ring's stores that has one.
+     */
+    private function realSigner(RingConfig $config): SealingKey|KeyInfo|null
+    {
+        $stores = $this->container->make(KeyStoreManager::class);
+
+        try {
+            $real = $stores->signingKey($config->name);
+        } catch (NoSigningKeyException) {
+            return null;
+        }
+
+        if (! isset($this->keys["{$config->name}\0{$real->keyId}"])) {
+            return $real;
+        }
+
+        $order = array_flip($config->driver === 'chain' ? $config->drivers : [$config->driver]);
+        $rank = static fn (KeyInfo $key): int => $order[$key->driver] ?? PHP_INT_MAX;
+        $next = null;
+
+        // The keys the fake changed are its own: signingNow() weighs them as it holds them.
+        foreach ($stores->all($config->name) as $key) {
+            if ($key->canSign && ! isset($this->keys["{$config->name}\0{$key->keyId}"])
+                && ($next === null || $rank($key) < $rank($next) || ($rank($key) === $rank($next) && $key->activatesAt >= $next->activatesAt))) {
+                $next = $key;
+            }
+        }
+
+        return $next === null ? null : $stores->find($config->name, $next->keyId) ?? $next;
+    }
+
+    /**
+     * As production, from the fake's keys too: the key the ring signs with now — one the fake
+     * generated, imported or rotated in, else the real stores' (passing over one the fake
+     * revoked, retired or demoted) — with the dates the fake gave it.
+     */
+    public function currentKey(?string $ring = null): KeyInfo
+    {
+        $ring ??= Settings::defaultRing();
+        $key = $this->signingNow(Settings::ring($ring)) ?? throw NoSigningKeyException::forRing($ring);
+
+        return $key instanceof KeyInfo ? $key : $this->fakedKey($ring, $key->keyId) ?? KeyInfo::fromKey($key);
     }
 
     public function revokeKey(RevokeKeyRequest $request): KeyInfo

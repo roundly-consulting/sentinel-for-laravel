@@ -22,6 +22,7 @@ use RoundlyConsulting\Sentinel\Exceptions\AcknowledgementDeniedException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyKeyReusedException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
 use RoundlyConsulting\Sentinel\Exceptions\KeyDriverException;
+use RoundlyConsulting\Sentinel\Exceptions\NoSigningKeyException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
@@ -696,4 +697,94 @@ it('reports a truncated scan and checks the schema under the fake too (chat revi
 
     expect($scenario(new ParityRun(true)))->toBe($real)
         ->and($real)->toBe([2, 1, true, SealingMisconfiguredException::class]);
+});
+
+/**
+ * The ring's current key, or null when nothing signs.
+ */
+function currentKid(string $ring = 'http'): ?string
+{
+    try {
+        return Sentinel::keys()->ring($ring)->current()->keyId;
+    } catch (NoSigningKeyException) {
+        return null;
+    }
+}
+
+/**
+ * Follow-up #104: under the fake, `currentKey()` answers from the fake's own keys too — one it
+ * generated, imported or rotated in signs, one it revoked, retired or demoted does not — the way
+ * production answers from the store those calls write.
+ */
+it('reports the current key from the fake\'s own keys, as production does', function (): void {
+    $scenario = static function (string $run): array {
+        $ring = Sentinel::keys()->ring('http');
+        $steps = ['empty' => currentKid()];
+
+        $ring->generate(Algorithm::HmacSha256, "first-{$run}");
+        $steps['generated'] = currentKid() === "first-{$run}";
+
+        $rotated = $ring->rotate()->current->keyId;
+        $steps['rotated'] = currentKid() === $rotated;
+        $steps['facade'] = Sentinel::currentKey('http')->keyId === $rotated;
+
+        $ring->revoke($rotated, 'leaked');
+        $steps['revoked'] = currentKid();
+
+        $ring->import("own-{$run}", Algorithm::HmacSha256, PARTNER_SECRET, signing: true);
+        $steps['imported'] = currentKid() === "own-{$run}";
+
+        $ring->retire("own-{$run}");
+        $steps['retired'] = currentKid();
+
+        return $steps;
+    };
+
+    $real = $scenario('real');
+    DB::table('sentinel_keys')->delete();
+    app(KeyStoreManager::class)->flush();
+    Sentinel::fake();
+
+    expect($scenario('fake'))->toBe($real)
+        ->and($real)->toBe(['empty' => null, 'generated' => true, 'rotated' => true, 'facade' => true, 'revoked' => null, 'imported' => true, 'retired' => null]);
+});
+
+/**
+ * Follow-up #104: a real key the fake revokes or retires stops signing under the fake, and the
+ * ring falls back as production would — to an older database key, or the next store of a chain.
+ */
+it('falls back from a real key the fake revoked or retired, as production does', function (): void {
+    $arrange = static function (string $run): void {
+        Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, "old-{$run}");
+        Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, "new-{$run}");
+        config()->set('sentinel.keys.rings.default.driver', 'chain');
+        config()->set('sentinel.keys.rings.default.drivers', ['database', 'config']);
+        app(KeyStoreManager::class)->flush();
+        Sentinel::keys()->ring()->generate(Algorithm::HmacSha256, "db-{$run}");
+    };
+    $scenario = static function (string $run): array {
+        $steps = ['newest' => currentKid() === "new-{$run}"];
+
+        Sentinel::keys()->ring('http')->revoke("new-{$run}", 'leaked');
+        $steps['older'] = currentKid() === "old-{$run}";
+
+        Sentinel::keys()->ring('http')->retire("old-{$run}");
+        $steps['none'] = currentKid();
+
+        $steps['database'] = currentKid('default') === "db-{$run}";
+        Sentinel::keys()->ring()->revoke("db-{$run}", 'leaked');
+        $steps['config'] = currentKid('default');
+        $steps['mac'] = Sentinel::keys()->ring()->find((string) $steps['config'])?->driver;
+
+        return $steps;
+    };
+
+    $arrange('real');
+    $real = $scenario('real');
+    DB::table('sentinel_keys')->delete();
+    $arrange('fake');
+    Sentinel::fake();
+
+    expect($scenario('fake'))->toBe($real)
+        ->and($real)->toBe(['newest' => true, 'older' => true, 'none' => null, 'database' => true, 'config' => 'test-default', 'mac' => 'config']);
 });
