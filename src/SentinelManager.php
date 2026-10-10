@@ -327,9 +327,17 @@ class SentinelManager
         $manifest = $row->manifest;
         $sealedById = $row->getRawOriginal('sealed_by_id');
 
+        // Unverified, as stored: a corrupt timestamp is shown as unknown, never an abort (it is
+        // what `sentinel:inspect` exists to show; verification reports it as malformed).
+        try {
+            $sealedAt = (new UtcDateTime)->get($row, 'sealed_at', $row->getRawOriginal('sealed_at'), []);
+        } catch (CorruptRecordException) {
+            $sealedAt = null;
+        }
+
         return new SealRecord(
             $row->sealable_type, $row->sealable_id, $row->seal, $row->version, $row->ring, $row->key_id, $row->algorithm,
-            $manifest ?? [], $row->sealed_at, SealEvent::tryFrom((string) $row->getRawOriginal('event')),
+            $manifest ?? [], $sealedAt, SealEvent::tryFrom((string) $row->getRawOriginal('event')),
             $row->reason, $row->sealed_by_type, is_int($sealedById) || is_string($sealedById) ? $sealedById : null,
         );
     }

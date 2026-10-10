@@ -174,3 +174,19 @@ it('inspects one row with values redacted unless asked', function (): void {
         ->and(runArtisan('sentinel:inspect', ['model' => Invoice::class, 'id' => '999999'])[0])->toBe(1)
         ->and(runArtisan('sentinel:inspect', ['model' => Invoice::class, 'id' => '1', '--seal' => 'nope'])[0])->toBe(2);
 });
+
+/**
+ * Chat review C-28: a corrupt seal row is what inspect exists to show.
+ */
+it('inspects a seal row whose sealed_at is corrupt', function (): void {
+    $invoice = invoice();
+    DB::table('sentinel_seals')->where('sealable_id', $invoice->id)->where('seal', 'financial')->update(['sealed_at' => 'garbage']);
+
+    $record = Sentinel::currentSeal($invoice, 'financial');
+    [$status, $output] = runArtisan('sentinel:inspect', ['model' => Invoice::class, 'id' => (string) $invoice->id, '--seal' => 'financial']);
+
+    expect($record?->sealedAt)->toBeNull()
+        ->and($record?->version)->toBe(1)
+        ->and($status)->toBe(1)
+        ->and($output)->toContain('malformed (sealed_at)')->toContain('Stored seal')->toContain('v1  sealed');
+});
