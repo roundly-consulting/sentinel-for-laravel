@@ -2,12 +2,14 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Event;
 use RoundlyConsulting\Sentinel\Contracts\KeyStore;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotationResult;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
+use RoundlyConsulting\Sentinel\Events\KeyRotated;
 use RoundlyConsulting\Sentinel\Exceptions\KeyDriverException;
 use RoundlyConsulting\Sentinel\Exceptions\UnknownKeyException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
@@ -106,3 +108,60 @@ it('reports an owner lookup that blows up as not found', function (): void {
         ->expectsOutputToContain('model was not found')
         ->assertFailed();
 });
+
+/**
+ * A custom `vault` key store holding one HMAC signing key for the default ring.
+ */
+function vaultStore(KeyMaterial $material): void
+{
+    Sentinel::extend('vault', static fn (): KeyStore => new class($material) implements KeyStore
+    {
+        public function __construct(private readonly KeyMaterial $material) {}
+
+        public function signingKey(): SealingKey
+        {
+            return new SealingKey('default', 'vault-1', $this->material, KeyStatus::Active, 'vault');
+        }
+
+        public function find(string $keyId): ?SealingKey
+        {
+            return $keyId === 'vault-1' ? $this->signingKey() : null;
+        }
+
+        public function all(): array
+        {
+            return [KeyInfo::fromKey($this->signingKey())];
+        }
+
+        public function supportsWrites(): bool
+        {
+            return false;
+        }
+    });
+}
+
+/**
+ * Chat review C-17: only a config key is rotated by printing environment lines.
+ */
+it('refuses to rotate a ring whose signing key comes from a custom driver', function (array $ring): void {
+    Event::fake([KeyRotated::class]);
+    $material = KeyMaterial::generate(Algorithm::HmacSha256);
+    vaultStore($material);
+    config()->set('sentinel.keys.rings.default', [...config('sentinel.keys.rings.default'), ...$ring]);
+    app(KeyStoreManager::class)->flush();
+
+    expect(fn () => Sentinel::keys()->ring()->rotate())->toThrow(KeyDriverException::class, 'custom driver [vault]');
+
+    $this->artisan('sentinel:key:rotate')
+        ->doesntExpectOutputToContain($material->encodedPrivate())
+        ->doesntExpectOutputToContain('SENTINEL_')
+        ->assertFailed();
+
+    Event::assertNotDispatched(KeyRotated::class);
+
+    expect(Sentinel::keys()->ring()->current()->keyId)->toBe('vault-1')
+        ->and(Key::query()->count())->toBe(0);
+})->with([
+    'alone' => [['driver' => 'vault']],
+    'chained before the database' => [['driver' => 'chain', 'drivers' => ['vault', 'database']]],
+]);

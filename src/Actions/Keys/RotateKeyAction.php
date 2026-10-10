@@ -12,6 +12,7 @@ use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
 use RoundlyConsulting\Sentinel\Events\KeyRotated;
 use RoundlyConsulting\Sentinel\Exceptions\AlgorithmNotAllowedException;
+use RoundlyConsulting\Sentinel\Exceptions\KeyDriverException;
 use RoundlyConsulting\Sentinel\Exceptions\NoSigningKeyException;
 use RoundlyConsulting\Sentinel\Keys\EnvelopeData;
 use RoundlyConsulting\Sentinel\Keys\EnvSnippet;
@@ -30,6 +31,7 @@ use RoundlyConsulting\Sentinel\Support\Settings;
  *  - Database: a new active key; the previous one stops signing when the new one activates
  *    (`signs_until`) and stays verify-only, so existing seals keep verifying.
  *  - Config: the environment lines for the new key plus the updated verify-only list.
+ *  - A custom driver's key is refused (`KeyDriverException`): its own store rotates it.
  */
 final readonly class RotateKeyAction
 {
@@ -46,6 +48,12 @@ final readonly class RotateKeyAction
 
         if (! $config->allows($algorithm)) {
             throw AlgorithmNotAllowedException::forRing($request->ring, $algorithm);
+        }
+
+        // Only a config key is rotated by printing environment lines: a custom driver's key
+        // would be printed as a "previous" entry (its secret) for a rotation that never happens.
+        if ($current !== null && ! in_array($current->driver, ['database', 'config'], true)) {
+            throw KeyDriverException::customDriver($request->ring, $current->driver);
         }
 
         $inDatabase = $current === null

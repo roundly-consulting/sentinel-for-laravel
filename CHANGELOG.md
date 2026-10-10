@@ -73,6 +73,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   flip a sealed `false` (on SQLite, or any text column with a boolean cast) without detection.
   They are now refused as `not_boolean` (`Tampered(canonicalization)`); `'t'` and `'true'` still
   mean true, as they do for the cast.
+- Rotating a ring whose signing key comes from a custom driver (`Sentinel::extend()`) is refused
+  with `KeyDriverException`. It used to take the config path: `sentinel:key:rotate` printed the
+  custom store's HMAC secret as a `PREVIOUS_KEYS` entry and dispatched `KeyRotated` for a
+  rotation that never happened. That key store rotates its own keys.
 
 ## 1.0.2 - 2026-10-07
 

@@ -21,6 +21,17 @@ final class KeyDriverException extends SentinelException
         return new self("Key ring [{$ring}] has no database driver to write keys to; its keys are managed in the environment. Generate one with `sentinel:key:generate`, list verify-only keys in sentinel.keys.rings.{$ring}.previous as kid|algorithm|base64:…{$env}, or set the ring's driver to database or chain.");
     }
 
+    /**
+     * The ring signs with a key a custom driver holds: Sentinel can neither write it nor print
+     * its replacement, so the key store that owns it rotates it.
+     */
+    public static function customDriver(string $ring, string $driver): self
+    {
+        $shown = preg_match('/^[A-Za-z0-9._-]{1,64}$/D', $driver) === 1 ? $driver : '(invalid)';
+
+        return new self("Key ring [{$ring}] signs with a key from the custom driver [{$shown}]; Sentinel cannot rotate it — rotate it in that key store.");
+    }
+
     public static function notStoredInDatabase(string $ring, string $keyId): self
     {
         return new self("The key [{$ring}:{$keyId}] comes from configuration, not the database; change it in the environment instead.");
