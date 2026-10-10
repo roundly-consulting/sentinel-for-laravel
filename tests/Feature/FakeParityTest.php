@@ -6,6 +6,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
+use RoundlyConsulting\Sentinel\Contracts\KeyStore;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
 use RoundlyConsulting\Sentinel\DataTransferObjects\PruneOptions;
@@ -13,6 +14,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\ResealOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RevokeKeyRequest;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyDestination;
+use RoundlyConsulting\Sentinel\Enums\KeyStatus;
 use RoundlyConsulting\Sentinel\Enums\LedgerFindingKind;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Exceptions\AcknowledgementDeniedException;
@@ -21,6 +23,8 @@ use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
 use RoundlyConsulting\Sentinel\Exceptions\KeyDriverException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
+use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
+use RoundlyConsulting\Sentinel\Keys\SealingKey;
 use RoundlyConsulting\Sentinel\Models\LedgerEntry;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\Clock;
@@ -30,6 +34,7 @@ use RoundlyConsulting\Sentinel\Tests\Fixtures\Jobs\ChargeJob;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\Invoice;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\InvoiceLine;
 use RoundlyConsulting\Sentinel\Tests\Fixtures\Models\User;
+use RoundlyConsulting\Sentinel\Tests\TestCase;
 
 /**
  * Fake parity (plan §12.4, fleet theme 7): every scenario runs once against the real manager
@@ -551,4 +556,63 @@ it('knows the keys it generated or imported, with their status and owner (chat r
     expect($scenario('fake'))->toBe($real)
         ->and($real[0])->toBe('pending')
         ->and($real[3])->toBe((string) $owner->getKey());
+});
+
+it('rotates like production under the fake (chat review C-13)', function (): void {
+    $scenario = static function (string $run): array {
+        $config = Sentinel::keys()->ring()->rotate();
+        Sentinel::keys()->ring('http')->import("own-ed-{$run}", Algorithm::Ed25519, (string) KeyMaterial::generate(Algorithm::Ed25519)->encodedPrivate(), signing: true);
+        $database = Sentinel::keys()->ring('http')->rotate();
+        config()->set('sentinel.keys.rings.default.driver', 'chain');
+        config()->set('sentinel.keys.rings.default.drivers', ['database', 'config']);
+        app(KeyStoreManager::class)->flush();
+        $chain = Sentinel::keys()->ring()->rotate();
+        config()->set('sentinel.keys.rings.default.driver', 'config');
+        app(KeyStoreManager::class)->flush();
+
+        return [
+            $config->current->driver, $config->current->algorithm->value, $config->previous?->keyId, $config->previous?->status->value,
+            str_contains((string) $config->envSnippet, 'SENTINEL_PREVIOUS_KEYS="test-default|hmac-sha256|'),
+            $database->current->driver, $database->current->algorithm->value, $database->previous?->keyId === "own-ed-{$run}",
+            $database->previous?->status->value, $database->envSnippet, Sentinel::findKey('http', "own-ed-{$run}")?->status->value,
+            $chain->current->driver, $chain->previous?->keyId, $chain->envSnippet !== null,
+        ];
+    };
+
+    $real = $scenario('real');
+    Sentinel::fake();
+
+    expect($scenario('fake'))->toBe($real)
+        ->and($real[0])->toBe('config')
+        ->and($real[6])->toBe('ed25519')
+        ->and($real[11])->toBe('config');
+});
+
+it('refuses to rotate a custom driver\'s key under the fake too (chat review C-13)', function (): void {
+    Sentinel::extend('vault', static fn (): KeyStore => new class implements KeyStore
+    {
+        public function signingKey(): SealingKey
+        {
+            return new SealingKey('default', 'vault-1', KeyMaterial::fromEncoded(Algorithm::HmacSha256, TestCase::ROOT_KEY), KeyStatus::Active, 'vault');
+        }
+
+        public function find(string $keyId): ?SealingKey
+        {
+            return null;
+        }
+
+        public function all(): array
+        {
+            return [];
+        }
+
+        public function supportsWrites(): bool
+        {
+            return false;
+        }
+    });
+    config()->set('sentinel.keys.rings.default.driver', 'vault');
+    Sentinel::fake();
+
+    expect(fn () => Sentinel::keys()->ring()->rotate())->toThrow(KeyDriverException::class, 'custom driver [vault]');
 });

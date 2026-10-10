@@ -61,6 +61,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   `listKeys()`, with their effective status (a future `activatesAt` is `pending`) and their
   owner, as production stores them. A key generated for the environment (`KeyDestination::Config`)
   is printed only, as in production — no lookup finds it.
+- `Sentinel::fake()`: `rotateKey()` rotates as production does — from the key signing now (its
+  algorithm by default), reporting it as `previous`; a config ring gets its environment lines
+  (with the verify-only list) and the driver is `config` or `database`, never `chain`; a custom
+  driver's key is refused.
 
 ### Security
 

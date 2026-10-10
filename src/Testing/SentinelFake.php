@@ -83,6 +83,7 @@ use RoundlyConsulting\Sentinel\Exceptions\AlgorithmNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\HttpSignatureException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\KeyDriverException;
+use RoundlyConsulting\Sentinel\Exceptions\NoSigningKeyException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingFailedException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
@@ -96,6 +97,7 @@ use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\Keys\KeyStatusResolver;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Keys\RingConfig;
+use RoundlyConsulting\Sentinel\Keys\SealingKey;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\BulkQuery;
 use RoundlyConsulting\Sentinel\Support\Clock;
@@ -844,21 +846,109 @@ final class SentinelFake extends SentinelManager
         return $this->record('importKey', $request, $this->resolved($this->keys["{$request->ring}\0{$request->keyId}"]));
     }
 
+    /**
+     * As production, from the key that signs now (one the fake stored, else the real one): a
+     * database key is stored and every faked key that could still sign stops when it activates;
+     * a config key comes with its environment lines (nothing stored); a custom driver's key is
+     * refused.
+     */
     public function rotateKey(RotateKeyRequest $request): RotationResult
     {
         $config = Settings::ring($request->ring);
-        $algorithm = $request->algorithm ?? $config->algorithm;
+        $current = $this->signingNow($config);
+        $algorithm = $request->algorithm ?? ($current instanceof SealingKey ? $current->algorithm() : $current?->algorithm) ?? $config->algorithm;
 
         if (! $config->allows($algorithm)) {
             throw AlgorithmNotAllowedException::forRing($request->ring, $algorithm);
         }
 
-        $result = new RotationResult(new KeyInfo(
-            $request->ring, KeyIds::generate($request->ring), $algorithm, KeyStatus::Active, $config->driver, true, $request->activatesAt,
-        ));
-        $this->keys["{$request->ring}\0{$result->current->keyId}"] = $result->current;
+        if ($current !== null && ! in_array($current->driver, ['database', 'config'], true)) {
+            throw KeyDriverException::customDriver($request->ring, $current->driver);
+        }
 
-        return $this->record('rotateKey', $request, $result);
+        $keyId = KeyIds::generate($request->ring);
+
+        if ($current === null ? self::writable($config) : $current->driver === 'database') {
+            return $this->record('rotateKey', $request, $this->rotateFaked($request->ring, $keyId, $algorithm, $request->activatesAt ?? Clock::now(), $current));
+        }
+
+        $material = KeyMaterial::generate($algorithm);
+        $entries = Identifiers::csv($config->previous);
+
+        if ($current instanceof SealingKey) {
+            $entries[] = EnvSnippet::entry($current->keyId, $current->material());
+        }
+
+        return $this->record('rotateKey', $request, new RotationResult(
+            new KeyInfo($request->ring, $keyId, $algorithm, KeyStatus::Active, 'config', true),
+            $current === null ? null : new KeyInfo($request->ring, $current->keyId, $current instanceof SealingKey ? $current->algorithm() : $current->algorithm, KeyStatus::VerifyOnly, 'config', false),
+            EnvSnippet::forKey($request->ring, $keyId, $material, clearPublic: $current instanceof SealingKey && $current->material()->encodedPublic() !== null)
+                ."\n".EnvSnippet::previous($request->ring, $entries),
+        ));
+    }
+
+    /**
+     * The database half of a rotation: the new key, and every key of the ring the fake holds
+     * that could still sign once it activates (the current one, a pending one) signs until then.
+     */
+    private function rotateFaked(string $ring, string $keyId, Algorithm $algorithm, CarbonImmutable $activatesAt, SealingKey|KeyInfo|null $current): RotationResult
+    {
+        // A real current key is shadowed, never written, so it can be demoted like the others.
+        if ($current instanceof SealingKey) {
+            $this->keys["{$ring}\0{$current->keyId}"] ??= KeyInfo::fromKey($current);
+        }
+
+        foreach ($this->keys as $id => $key) {
+            if ($key->ring === $ring && $key->status === KeyStatus::Active && ($key->signsUntil === null || $key->signsUntil->greaterThan($activatesAt))) {
+                $this->keys[$id] = new KeyInfo(
+                    $key->ring, $key->keyId, $key->algorithm, $key->status, $key->driver, $key->canSign, $key->activatesAt,
+                    $activatesAt, $key->verifiesUntil, $key->revokedAt, $key->label, $key->ownerType, $key->ownerId,
+                );
+            }
+        }
+
+        $this->keys["{$ring}\0{$keyId}"] = new KeyInfo($ring, $keyId, $algorithm, KeyStatus::Active, 'database', true, $activatesAt);
+
+        return new RotationResult(
+            $this->resolved($this->keys["{$ring}\0{$keyId}"]),
+            $current === null ? null : $this->resolved($this->keys["{$ring}\0{$current->keyId}"]),
+        );
+    }
+
+    /**
+     * The key a ring signs with now, as production picks it: the newest signing key the fake
+     * stored in the ring's database store — unless a store the ring reads first has one —
+     * else the real stores' signing key.
+     */
+    private function signingNow(RingConfig $config): SealingKey|KeyInfo|null
+    {
+        try {
+            $real = $this->container->make(KeyStoreManager::class)->signingKey($config->name);
+        } catch (NoSigningKeyException) {
+            $real = null;
+        }
+
+        $faked = null;
+
+        foreach ($this->keys as $key) {
+            $key = $this->resolved($key);
+
+            if ($key->ring === $config->name && $key->driver === 'database' && $key->canSign && ($faked === null || $key->activatesAt >= $faked->activatesAt)) {
+                $faked = $key;
+            }
+        }
+
+        if ($faked === null || ($real !== null && $real->keyId === $faked->keyId)) {
+            return $real ?? $faked;
+        }
+
+        if ($real === null || $real->driver === 'database') {
+            return $faked;
+        }
+
+        $order = array_flip($config->driver === 'chain' ? $config->drivers : [$config->driver]);
+
+        return ($order[$real->driver] ?? PHP_INT_MAX) < ($order['database'] ?? PHP_INT_MAX) ? $real : $faked;
     }
 
     public function revokeKey(RevokeKeyRequest $request): KeyInfo
