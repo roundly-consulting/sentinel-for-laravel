@@ -2,24 +2,36 @@
 
 declare(strict_types=1);
 
+use Carbon\CarbonImmutable;
+use Illuminate\Encryption\MissingAppKeyException;
 use Illuminate\Http\Request;
+use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
 use PHPUnit\Framework\ExpectationFailedException;
 use RoundlyConsulting\Sentinel\Accessors\IdempotencyAccessor;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\RunIdempotentAction;
+use RoundlyConsulting\Sentinel\Contracts\IdempotencyStore;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotencyDecision;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentCall;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentRequest;
+use RoundlyConsulting\Sentinel\Enums\IdempotencyOutcome;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyKeyReusedException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotentResponseUnavailableException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotentResultException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidIdempotencyKeyException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Idempotency\ResponseSnapshot;
 use RoundlyConsulting\Sentinel\Jobs\Middleware\Idempotent;
 use RoundlyConsulting\Sentinel\Models\IdempotencyKey;
 use RoundlyConsulting\Sentinel\SentinelManager;
+use RoundlyConsulting\Sentinel\Support\Settings;
+use RoundlyConsulting\Sentinel\Tests\Fixtures\Jobs\ChargeJob;
 
 /**
  * §10 item 44: programmatic idempotency for jobs, commands and webhooks.
@@ -208,6 +220,82 @@ it('never runs a completed callback again when its result cannot be stored', fun
         }
     }],
 ]);
+
+/**
+ * Chat review C-8: the callback ran, so a failure to store its result must not free the key
+ * for a re-run once the lease is over.
+ */
+it('never runs the callback again when the store fails to complete its key', function (): void {
+    $runs = 0;
+    $charge = static function () use (&$runs): array {
+        $runs++;
+        // The result cannot be encrypted at rest: the side effect has happened all the same.
+        config()->set('app.key', '');
+
+        return ['charge' => 'ch_9'];
+    };
+    $key = config('app.key');
+
+    expect(fn () => Sentinel::idempotency()->run('charge:99', 'billing', $charge))->toThrow(MissingAppKeyException::class);
+
+    config()->set('app.key', $key);
+    $this->travel(Settings::idempotencyLockSeconds() + 60)->seconds();
+
+    expect(IdempotencyKey::query()->value('status'))->toBe('completed')
+        ->and(IdempotencyKey::query()->value('replayable'))->toBeFalsy()
+        ->and(fn () => Sentinel::idempotency()->run('charge:99', 'billing', $charge))->toThrow(IdempotentResponseUnavailableException::class)
+        ->and($runs)->toBe(1);
+});
+
+it('rethrows the first failure and reports a store that cannot complete the key at all', function (): void {
+    Exceptions::fake();
+    $store = new class implements IdempotencyStore
+    {
+        public function begin(IdempotentRequest $request): IdempotencyDecision
+        {
+            return new IdempotencyDecision(IdempotencyOutcome::Proceed, ownerToken: 'owner');
+        }
+
+        public function complete(IdempotentRequest $request, ResponseSnapshot $snapshot): bool
+        {
+            throw new RuntimeException($snapshot->replayable ? 'store down' : 'still down');
+        }
+
+        public function release(IdempotentRequest $request): void {}
+
+        public function forget(string $keyDigest): bool
+        {
+            return false;
+        }
+
+        public function prune(CarbonImmutable $now): int
+        {
+            return 0;
+        }
+    };
+
+    expect(fn () => app(RunIdempotentAction::class, ['store' => $store])->execute(new IdempotentCall('charge:100', 'billing', static fn (): int => 1)))
+        ->toThrow(RuntimeException::class, 'store down');
+
+    Exceptions::assertReported(static fn (RuntimeException $exception): bool => $exception->getMessage() === 'still down');
+});
+
+it('never runs a redelivered job again when the store fails to complete its key', function (): void {
+    ChargeJob::$runs = 0;
+    ChargeJob::$behaviour = [];
+    $key = config('app.key');
+    Event::listen(JobProcessing::class, static fn () => config()->set('app.key', ''));
+
+    expect(fn () => ChargeJob::dispatch('evt_c8'))->toThrow(MissingAppKeyException::class);
+
+    Event::forget(JobProcessing::class);
+    config()->set('app.key', $key);
+    // Past the job's lease (the sync queue: lock_seconds), well inside the key's TTL.
+    $this->travel(Settings::idempotencyLockSeconds() + 60)->seconds();
+
+    expect(fn () => ChargeJob::dispatch('evt_c8'))->toThrow(IdempotentResponseUnavailableException::class)
+        ->and(ChargeJob::$runs)->toBe(1);
+});
 
 /**
  * I-8: the first run and every replay return the same shape — the JSON round-trip.

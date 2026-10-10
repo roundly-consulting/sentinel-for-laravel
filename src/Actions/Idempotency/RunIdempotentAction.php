@@ -27,9 +27,10 @@ use Throwable;
  * replayed, so the value has one shape on both paths; a repeat with another fingerprint, or
  * while the first still runs, throws the same exceptions the HTTP middleware renders. A
  * failing callback releases the key, so it may be retried. A callback that ran but returned
- * something that cannot be stored (not JSON-encodable) never runs again: its key is
- * completed as unreplayable and `IdempotentResultException` is thrown, so a repeat is refused
- * with `IdempotentResponseUnavailableException` (409). The key and the scope are 1–255
+ * something that cannot be stored (not JSON-encodable, or a store that fails to keep it)
+ * never runs again: its key is completed as unreplayable and the exception is thrown
+ * (`IdempotentResultException` for an unencodable result), so a repeat is refused with
+ * `IdempotentResponseUnavailableException` (409). The key and the scope are 1–255
  * bytes, a TTL is 60–2 592 000 seconds and a lease 1–86 400 seconds — what the `Idempotent`
  * job middleware takes (`InvalidIdempotencyKeyException` otherwise, before the store is
  * touched). A duplicate is refused while the running call's lease holds the key: give a call
@@ -92,7 +93,20 @@ final readonly class RunIdempotentAction
             throw IdempotentResultException::notEncodable($exception);
         }
 
-        $this->store->complete($owned, $snapshot);
+        try {
+            $this->store->complete($owned, $snapshot);
+        } catch (Throwable $exception) {
+            // The callback ran but its result could not be stored (no APP_KEY to encrypt it, a
+            // store error): complete the key as unreplayable, as the HTTP path does, so a retry
+            // after the lease is refused (409) instead of repeating the side effect.
+            try {
+                $this->store->complete($owned, ResponseSnapshot::unreplayable());
+            } catch (Throwable $secondary) {
+                report($secondary);
+            }
+
+            throw $exception;
+        }
 
         // The JSON round-trip — exactly what a replay returns — so the value has one shape.
         return new IdempotentResult($snapshot->value(), false, $firstSeenAt);

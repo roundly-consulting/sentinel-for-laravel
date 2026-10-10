@@ -54,6 +54,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   covers `updated_at`. Eloquent writes that timestamp in the SQL only, so the seal was left
   stale: the next verification said `Tampered (a:updated_at)` and the next `update()` was
   refused. The fake records the re-seal too.
+- `Sentinel::idempotency()->run()` and the `Idempotent` job middleware no longer run a callback
+  twice when its result cannot be stored after it ran (no `APP_KEY` to encrypt it, a store
+  error). The key stayed `processing`, so a retry after the lease repeated the side effect; it is
+  now completed as unreplayable (a repeat gets `IdempotentResponseUnavailableException`) and the
+  error is rethrown.
 
 ## 1.0.2 - 2026-10-07
 
