@@ -262,14 +262,15 @@ final readonly class LedgerVerifier
         }
 
         $tailSeq = $tail === null ? 0 : (int) $tail->getRawOriginal('seq');
+        // Looked up now, not taken from the walk: a checkpoint committed while the walk ran (the
+        // every-minute schedule on a large ledger) is in the database, not a rollback.
+        $local = Tables::checkpoints($connection)->where('seq', $payload->seq)->first();
 
-        if ($payload->seq > $tailSeq) {
+        if ($local === null && $payload->seq > $tailSeq) {
             $run->add(LedgerFindingKind::AnchorAhead, "anchor [{$name}] holds seq {$payload->seq}, the database {$tailSeq}", $payload->seq);
 
             return;
         }
-
-        $local = Tables::checkpoints($connection)->where('seq', $payload->seq)->first();
 
         if ($local === null || (string) $local->getRawOriginal('root') !== $payload->root) {
             $run->add(LedgerFindingKind::AnchorMismatch, "anchor [{$name}]: the checkpoint root differs", $payload->seq);

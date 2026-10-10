@@ -8,12 +8,14 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use RoundlyConsulting\Sentinel\Contracts\Anchor;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPayload;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPublication;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerVerifyOptions;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Events\AnchorPublishFailed;
+use RoundlyConsulting\Sentinel\Events\LedgerIntegrityViolated;
 use RoundlyConsulting\Sentinel\Exceptions\AnchorPublishException;
 use RoundlyConsulting\Sentinel\Exceptions\CorruptRecordException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
@@ -208,6 +210,53 @@ it('writes each numbered filesystem anchor file once', function (): void {
     Storage::disk('local')->makeDirectory('sentinel/anchors/main/latest.json');
 
     expect(fn () => $anchor->publish($payload))->toThrow(AnchorPublishException::class, 'did not write [sentinel/anchors/main/latest.json]');
+});
+
+/**
+ * Chat review C-2: a checkpoint committed while the verifier walks the ledger is not a rollback.
+ */
+it('does not report an anchor ahead because a checkpoint landed during the walk', function (): void {
+    Event::fake([LedgerIntegrityViolated::class]);
+    $anchor = new class implements Anchor
+    {
+        /** @var array<string, string> */
+        public array $stored = [];
+
+        public bool $raced = false;
+
+        public function name(): string
+        {
+            return 'race';
+        }
+
+        public function publish(AnchorPayload $payload): void
+        {
+            $this->stored[$payload->connection] = AnchorCodec::encode($payload);
+        }
+
+        public function latest(string $connection): ?AnchorPayload
+        {
+            // The scheduled checkpoint commits between the verifier's walk and this read.
+            if (! $this->raced) {
+                $this->raced = true;
+                invoice();
+                Sentinel::checkpoint();
+            }
+
+            return isset($this->stored[$connection]) ? AnchorCodec::decode($this->stored[$connection]) : null;
+        }
+    };
+    Sentinel::extendAnchor('race', static fn (): Anchor => $anchor);
+    config()->set('sentinel.ledger.anchors', 'race');
+    invoice();
+    $anchor->raced = true;
+    Sentinel::checkpoint();
+    $anchor->raced = false;
+
+    expect(anchorFindings())->toBe([])
+        ->and(AnchorCodec::decode($anchor->stored[DB::getDefaultConnection()])->seq)->toBe(2);
+
+    Event::assertNotDispatched(LedgerIntegrityViolated::class);
 });
 
 it('reports a rewritten, forged or unreachable anchor', function (Closure $tamper, string $expected): void {

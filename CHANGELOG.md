@@ -30,6 +30,12 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   so the anchor stayed empty until the next new checkpoint, and a rollback in that window went
   unseen.
 
+### Fixed
+
+- `sentinel:verify --ledger` no longer reports `anchor_ahead` (and fires
+  `LedgerIntegrityViolated`) when a checkpoint is committed while it walks a large ledger: the
+  anchored seq is looked up in the database before it is called missing.
+
 ## 1.0.2 - 2026-10-07
 
 ### Fixed
