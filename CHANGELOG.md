@@ -29,6 +29,7 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   stores one): it lists it and exits 1.
 - `sentinel.keys.require_bound_label` (`SENTINEL_REQUIRE_BOUND_LABEL`, off by default). When on,
   a key in the pre-1.2 envelope format fails its integrity check like any tampered key.
+- `sentinel:key:list` has a Label column, shown quoted and escaped.
 
 ### Changed
 

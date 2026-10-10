@@ -7,6 +7,7 @@ namespace RoundlyConsulting\Sentinel\Commands;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use RoundlyConsulting\Sentinel\Commands\Concerns\ReadsOptions;
+use RoundlyConsulting\Sentinel\Commands\Concerns\ShowsKeyLabels;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
 use RoundlyConsulting\Sentinel\Exceptions\SentinelException;
 use RoundlyConsulting\Sentinel\SentinelManager;
@@ -15,11 +16,13 @@ use RoundlyConsulting\Sentinel\Support\SealUsage;
 
 /**
  * The key inventory (OWASP ASVS 11.1.1): ring, kid, algorithm, effective status, driver,
- * the seals it made (on every ledger connection) and usage periods. Never prints material.
+ * the seals it made (on every ledger connection), usage periods and label (quoted, escaped).
+ * Never prints material.
  */
 final class KeyListCommand extends Command
 {
     use ReadsOptions;
+    use ShowsKeyLabels;
 
     protected $signature = 'sentinel:key:list {--ring= : Only this ring}';
 
@@ -44,11 +47,12 @@ final class KeyListCommand extends Command
         }
 
         $this->table(
-            ['Ring', 'Key id', 'Algorithm', 'Status', 'Driver', 'Can sign', 'Seals', 'Activates', 'Signs until', 'Verifies until', 'Revoked'],
+            ['Ring', 'Key id', 'Algorithm', 'Status', 'Driver', 'Can sign', 'Seals', 'Activates', 'Signs until', 'Verifies until', 'Revoked', 'Label'],
             array_map(static fn (KeyInfo $key): array => [
                 $key->ring, $key->keyId, $key->algorithm->value, $key->status->value, $key->driver, $key->canSign ? 'yes' : 'no',
                 (string) ($usage[$key->ring."\0".$key->keyId] ?? 0),
                 self::date($key->activatesAt), self::date($key->signsUntil), self::date($key->verifiesUntil), self::date($key->revokedAt),
+                self::shownLabel($key->label, '—'),
             ], $keys),
         );
 

@@ -121,6 +121,22 @@ it('lists keys without ever printing material, and warns on duplicate kids', fun
     $this->artisan('sentinel:key:list', ['--ring' => 'nope'])->expectsOutputToContain('not configured')->assertFailed();
 });
 
+it('lists every key\'s label, escaped (label binding)', function (): void {
+    Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, keyId: 'labelled', label: 'Partner A');
+    Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, keyId: 'hostile', label: "Evil\e[2J\u{202E}");
+    Sentinel::keys()->ring('http')->generate(Algorithm::HmacSha256, keyId: 'unlabelled');
+
+    expect(Artisan::call('sentinel:key:list', ['--ring' => 'http']))->toBe(0);
+
+    $output = Artisan::output();
+
+    expect($output)->toMatch('/\|\s*Revoked\s*\|\s*Label\s*\|/')
+        ->toMatch('/\|\s*http\s*\|\s*labelled\s*\|.*\|\s*"Partner A"\s*\|/')
+        ->toMatch('/\|\s*http\s*\|\s*unlabelled\s*\|.*\|\s*—\s*\|\n/')
+        ->toContain('"Evil\u001b[2J\u202e"')
+        ->not->toContain("\e")->not->toContain("\u{202E}");
+});
+
 it('refuses to retire a key that seals still use, unless forced', function (): void {
     config()->set('sentinel.keys.rings.default.driver', 'chain');
     config()->set('sentinel.keys.rings.default.drivers', ['database', 'config']);
