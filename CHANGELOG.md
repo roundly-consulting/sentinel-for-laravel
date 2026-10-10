@@ -39,6 +39,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   documented. An anchor used to receive it right away, so a rollback left it holding a
   checkpoint the database never had (`anchor_ahead`). `CheckpointResult::$anchors` is empty in
   that case.
+- A checkpoint batch larger than the engine's bind-parameter limit (SQLite 32 766, PostgreSQL
+  and MySQL 65 535) no longer fails with "too many SQL variables" on every run. `batch_size`
+  allows up to 100 000, and a large `sealMissing()` baseline creates exactly such a backlog.
 
 ## 1.0.2 - 2026-10-07
 

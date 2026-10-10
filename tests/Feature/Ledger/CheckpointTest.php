@@ -23,6 +23,7 @@ use RoundlyConsulting\Sentinel\Models\Key;
 use RoundlyConsulting\Sentinel\Models\LedgerEntry;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\Settings;
+use RoundlyConsulting\Sentinel\Tests\TestCase;
 use RoundlyConsulting\Testing\Database\DriverMatrix;
 use RoundlyConsulting\Testing\Fixtures\LockRecorder;
 use RoundlyConsulting\Testing\Fixtures\LockRecordingGrammar;
@@ -89,6 +90,27 @@ it('splits the backlog into batches and chains every batch', function (): void {
     expect($seqs)->toBe([[1, 4], [2, 2]])
         ->and(Sentinel::verifyLedger()->clean())->toBeTrue()
         ->and(fn () => Sentinel::checkpoint(new CheckpointOptions(batchSize: 0)))->toThrow(InvalidSentinelConfigurationException::class);
+});
+
+/**
+ * Chat review C-4: a batch above the engine's bind-parameter limit (SQLite 32 766) still claims.
+ */
+it('claims a batch larger than the bind-parameter limit', function (): void {
+    $row = [
+        'sealable_type' => 'bulk', 'seal' => 'financial', 'event' => 'sealed', 'version' => 1, 'ring' => 'default',
+        'key_id' => TestCase::ROOT_KEY_ID, 'algorithm' => 'hmac-sha256', 'seal_mac' => 'mac', 'entry_mac' => 'entry',
+        'occurred_at' => '2026-10-10 10:00:00.000000',
+    ];
+
+    foreach (array_chunk(range(1, 33000), 500) as $ids) {
+        DB::table('sentinel_ledger')->insert(array_map(static fn (int $id): array => ['sealable_id' => $id, ...$row], $ids));
+    }
+
+    $result = Sentinel::checkpoint(new CheckpointOptions(batchSize: 33000));
+
+    expect($result?->seq)->toBe(1)
+        ->and($result?->entries)->toBe(33000)
+        ->and(LedgerEntry::query()->whereNull('checkpoint_id')->count())->toBe(0);
 });
 
 it('commits to exactly the chain of entry documents and MACs', function (): void {

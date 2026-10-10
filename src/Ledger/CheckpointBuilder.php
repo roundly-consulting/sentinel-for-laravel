@@ -114,8 +114,9 @@ final readonly class CheckpointBuilder
         ]);
         $checkpoint->save();
 
-        // The only mutation of a ledger entry; a short count means another run claimed some.
-        $claimed = Tables::ledgerOn($connection)->whereIn('id', $ids)->whereNull('checkpoint_id')->toBase()->update(['checkpoint_id' => $checkpoint->getKey()]);
+        // The only mutation of a ledger entry; a short count means another run claimed some. The
+        // ids are inlined integers, not bindings: a batch may exceed the engine's bind limit.
+        $claimed = Tables::ledgerOn($connection)->whereIntegerInRaw('id', $ids)->whereNull('checkpoint_id')->toBase()->update(['checkpoint_id' => $checkpoint->getKey()]);
 
         if ($claimed !== count($ids)) {
             throw ConcurrentSealException::checkpointConflict(Tables::connectionName($connection));
