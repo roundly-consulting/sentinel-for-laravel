@@ -43,6 +43,7 @@ If your sealed models or users have UUID/ULID keys, set `sentinel.key_type` /
 Declare a seal on the model — every Eloquent write now seals the row:
 
 ```php
+use Illuminate\Database\Eloquent\Model;
 use RoundlyConsulting\Sentinel\Concerns\HasSeals;
 use RoundlyConsulting\Sentinel\Contracts\Sealable;
 use RoundlyConsulting\Sentinel\Definition\SealBuilder;

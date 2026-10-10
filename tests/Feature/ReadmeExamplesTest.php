@@ -817,6 +817,29 @@ it('imports only classes that exist', function (): void {
     }
 });
 
+/**
+ * Chat review C-30: a block pasted into a namespaced file must not lose its parent class.
+ */
+it('imports every class a block extends or implements', function (): void {
+    preg_match_all('/```php\n(.*?)```/s', readme(), $blocks);
+    $checked = 0;
+
+    foreach ($blocks[1] as $block) {
+        preg_match_all('/\b(?:extends|implements)\s+([\w\x5C]+(?:\s*,\s*[\w\x5C]+)*)/', $block, $declared);
+
+        foreach ($declared[1] as $list) {
+            foreach (array_map(trim(...), explode(',', $list)) as $name) {
+                $checked++;
+
+                expect(str_starts_with($name, '\\') || preg_match('/^use [\w\x5C]+\x5C'.preg_quote($name, '/').';$/m', $block) === 1)
+                    ->toBeTrue("the README uses {$name} without importing it");
+            }
+        }
+    }
+
+    expect($checked)->toBeGreaterThanOrEqual(2);
+});
+
 it('names only commands that exist', function (): void {
     preg_match_all('/\b(sentinel:[a-z][a-z:-]*[a-z])/', readme(), $matches);
 

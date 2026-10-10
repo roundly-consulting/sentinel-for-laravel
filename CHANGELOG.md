@@ -18,6 +18,8 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 - Documentation: `sentinel.ledger.ring` does not follow `keys.default_ring`; a host that renames
   its default ring (`SENTINEL_DEFAULT_RING`) sets `SENTINEL_LEDGER_RING` too (config comment).
+- Documentation: the README's model example imports `Illuminate\Database\Eloquent\Model`, so it
+  runs when pasted into a namespaced file.
 
 ### Fixed
 
