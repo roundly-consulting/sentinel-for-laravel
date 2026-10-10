@@ -29,6 +29,7 @@ use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Events\TamperDetected;
 use RoundlyConsulting\Sentinel\Exceptions\CanonicalizationException;
 use RoundlyConsulting\Sentinel\Exceptions\CorruptRecordException;
+use RoundlyConsulting\Sentinel\Exceptions\SealingFailedException;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Keys\Purpose;
 use RoundlyConsulting\Sentinel\Keys\SealingKey;
@@ -85,6 +86,11 @@ final readonly class Verifier
      */
     public function verify(Model $model, CompiledSeal $seal, VerificationContext $context, bool $checkLedger, bool $lock = false, bool $report = true): VerificationResult
     {
+        // An unsaved model has no row and no key: nothing to verify.
+        if (! $model->exists) {
+            throw SealingFailedException::notPersisted($model->getMorphClass(), 'verified');
+        }
+
         $result = $this->evaluate($model, $seal, $context, $checkLedger && Settings::ledgerEnabled(), $lock);
 
         if ($report && $result->failed()) {

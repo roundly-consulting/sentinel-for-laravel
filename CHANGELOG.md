@@ -73,6 +73,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - `Sentinel::fake()`: `scan()` sets `truncated` when findings exceed `maxFindings`, and
   `checkSchema` refuses a sealed column the table lacks (`SealingMisconfiguredException`), as
   production does.
+- `verify()`, `verifyAll()`, `isIntact()` (and the `HasSeals` helpers) on an unsaved model throw
+  `SealingFailedException` ("must be persisted before it can be verified"), under the fake too,
+  instead of a `TypeError`.
 
 ### Security
 

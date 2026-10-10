@@ -256,14 +256,17 @@ final class SentinelFake extends SentinelManager
 
     public function verify(Model $model, ?string $seal = null): VerificationResult
     {
-        $compiled = $this->compiled($model, $seal);
-
-        return $this->record('verify', [$model, $compiled->name], $this->faked($model, $compiled, VerificationContext::Api));
+        return $this->verifyIn(VerificationContext::Api, $model, $seal);
     }
 
     public function verifyIn(VerificationContext $context, Model $model, ?string $seal = null): VerificationResult
     {
         $compiled = $this->compiled($model, $seal);
+
+        // As in production: an unsaved model has nothing to verify.
+        if (! $model->exists) {
+            throw SealingFailedException::notPersisted($model->getMorphClass(), 'verified');
+        }
 
         return $this->record('verify', [$model, $compiled->name], $this->faked($model, $compiled, $context));
     }

@@ -9,6 +9,7 @@ use RoundlyConsulting\Sentinel\Contracts\NonceStore;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ConsumeNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedNonce;
 use RoundlyConsulting\Sentinel\Enums\TypeKind;
+use RoundlyConsulting\Sentinel\Exceptions\SealingFailedException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Http\Messages\PsrRequestView;
 use RoundlyConsulting\Sentinel\Models\Nonce;
@@ -96,3 +97,22 @@ it('accepts a lock-capable cache store for nonces at boot', function (): void {
     expect(Sentinel::nonces()->consume('download', $nonce->value))->toBeTrue()
         ->and(Sentinel::nonces()->consume('download', $nonce->value))->toBeFalse();
 });
+
+/**
+ * Chat review C-27: an unsaved model has nothing to verify — a typed refusal, not a TypeError.
+ */
+it('refuses to verify an unsaved model, with the real manager and the fake alike', function (bool $fake): void {
+    if ($fake) {
+        Sentinel::fake();
+    }
+
+    foreach ([
+        static fn (): mixed => Sentinel::verify(new Invoice),
+        static fn (): mixed => Sentinel::verifyAll(new Invoice),
+        static fn (): mixed => Sentinel::isIntact(new Invoice),
+        static fn (): mixed => (new Invoice)->isIntact(),
+        static fn (): mixed => Sentinel::for(new Invoice)->verify(),
+    ] as $verify) {
+        expect($verify)->toThrow(SealingFailedException::class, 'must be persisted before it can be verified');
+    }
+})->with(['real' => [false], 'fake' => [true]]);
