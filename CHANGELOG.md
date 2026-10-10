@@ -25,6 +25,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   signing key and returns an `IssuedMac` (kid, algorithm, MAC).
 - MAC keys live in a ring of their own: `verifyMac()` and `mac()` refuse a ring that seals, the
   ledger or HTTP message signatures use (`SealingMisconfiguredException`).
+- `Sentinel::fake()` records `verifyMac()` and `mac()`, keeps production's ring, key and
+  encoding checks, and adds `fakeVerifiedMac()`, `rejectMacs()`, `assertMacVerified()`,
+  `assertMacNotVerified()`, `assertMacComputed()` and `assertNoMacsComputed()`.
 
 ### Changed
 

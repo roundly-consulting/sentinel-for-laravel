@@ -54,6 +54,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\UpdateAndResealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerifiedSignature;
+use RoundlyConsulting\Sentinel\Enums\MacRejection;
 use RoundlyConsulting\Sentinel\Enums\SignatureRejection;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\ModelSeals;
@@ -124,6 +125,8 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static SentinelFake rejectSignatures(SignatureRejection $reason)
  * @method static SentinelFake fakeStatusOnce(Model $model, VerificationStatus $status, string|null $seal = null, list<string>|null $changed = null, string|null $reason = null)
  * @method static SentinelFake fakeLedgerFindings(LedgerFinding ...$findings)
+ * @method static SentinelFake fakeVerifiedMac(KeyInfo|null $key = null)
+ * @method static SentinelFake rejectMacs(MacRejection $reason)
  * @method static void assertSealed(Model $model, string|null $seal = null, Closure|null $callback = null)
  * @method static void assertNotSealed(Model $model, string|null $seal = null)
  * @method static void assertNothingSealed()
@@ -160,6 +163,10 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static void assertRequestSigned(string|null $keyId = null)
  * @method static void assertNothingSigned()
  * @method static void assertSignatureVerified(string|null $profile = null)
+ * @method static void assertMacVerified(string|null $ring = null, string|null $keyId = null)
+ * @method static void assertMacNotVerified(string|null $ring = null, string|null $keyId = null)
+ * @method static void assertMacComputed(string|null $ring = null)
+ * @method static void assertNoMacsComputed()
  * @method static list<RecordedCall> recorded(string|null $method = null)
  *
  * @see SentinelManager

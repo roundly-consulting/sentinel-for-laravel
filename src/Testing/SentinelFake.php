@@ -15,6 +15,7 @@ use Illuminate\Http\Request;
 use PHPUnit\Framework\Assert as PHPUnit;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
+use RoundlyConsulting\Crypto\Hash\Digest;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\CompleteIdempotentRequestAction;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\ForgetIdempotencyKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Idempotency\RunIdempotentAction;
@@ -38,6 +39,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentCall;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ImportKeyRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedMac;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssuedNonce;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IssueNonceRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
@@ -71,6 +73,7 @@ use RoundlyConsulting\Sentinel\Engine\Persister;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyDestination;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
+use RoundlyConsulting\Sentinel\Enums\MacRejection;
 use RoundlyConsulting\Sentinel\Enums\PersistOperation;
 use RoundlyConsulting\Sentinel\Enums\Reaction;
 use RoundlyConsulting\Sentinel\Enums\SealEvent;
@@ -83,6 +86,7 @@ use RoundlyConsulting\Sentinel\Exceptions\AlgorithmNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\HttpSignatureException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\KeyDriverException;
+use RoundlyConsulting\Sentinel\Exceptions\MacVerificationException;
 use RoundlyConsulting\Sentinel\Exceptions\NoSigningKeyException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingFailedException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
@@ -96,6 +100,7 @@ use RoundlyConsulting\Sentinel\Keys\KeyIds;
 use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\Keys\KeyStatusResolver;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
+use RoundlyConsulting\Sentinel\Keys\MacRules;
 use RoundlyConsulting\Sentinel\Keys\RingConfig;
 use RoundlyConsulting\Sentinel\Keys\SealingKey;
 use RoundlyConsulting\Sentinel\SentinelManager;
@@ -141,6 +146,13 @@ final class SentinelFake extends SentinelManager
     private ?VerifiedSignature $signature = null;
 
     private ?SignatureRejection $rejection = null;
+
+    private ?MacRejection $macRejection = null;
+
+    /** fakeVerifiedMac() was called: every MAC verifies, returning {@see $macKey} */
+    private bool $macsVerify = false;
+
+    private ?KeyInfo $macKey = null;
 
     /** @var array<string, KeyInfo> keys the fake generated or imported, by "ring\0kid" */
     private array $keys = [];
@@ -217,6 +229,31 @@ final class SentinelFake extends SentinelManager
     public function rejectSignatures(SignatureRejection $reason): static
     {
         $this->rejection = $reason;
+
+        return $this;
+    }
+
+    /**
+     * Every MAC verification on a MAC ring succeeds and returns this key (null = a synthetic
+     * `hmac-sha256` key of the asked ring and kid) — the kid, the key and the encoding go
+     * unchecked. Lifts a `rejectMacs()`.
+     */
+    public function fakeVerifiedMac(?KeyInfo $key = null): static
+    {
+        $this->macsVerify = true;
+        $this->macKey = $key;
+        $this->macRejection = null;
+
+        return $this;
+    }
+
+    /**
+     * Every MAC verification on a MAC ring is refused for this reason (`MacVerificationException`,
+     * as in production).
+     */
+    public function rejectMacs(MacRejection $reason): static
+    {
+        $this->macRejection = $reason;
 
         return $this;
     }
@@ -1015,6 +1052,70 @@ final class SentinelFake extends SentinelManager
     }
 
     /**
+     * Production's checks — the ring, the kid inside it, the key's status and algorithm, the
+     * MAC's encoding and length — but not the MAC itself (the fake holds no key material): a
+     * well-formed MAC for a key that verifies is accepted. Keys the fake generated or imported
+     * count, as for `findKey()`. Script the outcome with `fakeVerifiedMac()` / `rejectMacs()`.
+     */
+    public function verifyMac(string $ring, string $keyId, string $message, #[SensitiveParameter] string $mac): KeyInfo
+    {
+        $config = MacRules::ring($ring);
+        $arguments = [$ring, $keyId, $message, $mac];
+
+        if ($this->macRejection !== null) {
+            $this->record('verifyMac', $arguments, $this->macRejection);
+
+            throw MacVerificationException::rejected($this->macRejection, $ring, $keyId);
+        }
+
+        if ($this->macsVerify) {
+            return $this->record('verifyMac', $arguments, $this->macKey ?? new KeyInfo($ring, $keyId, Algorithm::HmacSha256, KeyStatus::Active, 'fake', false));
+        }
+
+        $key = Identifiers::isKeyId($keyId) ? $this->fakedKey($ring, $keyId) : null;
+        $refusal = MacRejection::UnknownKey;
+
+        if ($key !== null) {
+            $provided = MacRules::decode($mac);
+            $refusal = MacRules::refusal($config, $key->status, $key->algorithm)
+                ?? ($provided === null || strlen($provided) !== $key->algorithm->hashLength() ? MacRejection::Malformed : null);
+        }
+
+        if ($key === null || $refusal !== null) {
+            $this->record('verifyMac', $arguments, $refusal);
+
+            throw MacVerificationException::rejected($refusal, $ring, $keyId);
+        }
+
+        return $this->record('verifyMac', $arguments, $key);
+    }
+
+    /**
+     * Production's checks — the ring, a signing key, an `hmac-*` algorithm the ring allows —
+     * on the key that signs now (one the fake stored, else the real one). The MAC is a
+     * placeholder: an unkeyed digest of the message as long as the key's hash, well-formed and
+     * stable but never the real MAC (the fake holds no key material).
+     */
+    public function mac(string $ring, string $message): IssuedMac
+    {
+        $config = MacRules::ring($ring);
+        $key = $this->signingNow($config) ?? throw NoSigningKeyException::forRing($ring);
+        $algorithm = $key instanceof SealingKey ? $key->algorithm() : $key->algorithm;
+
+        if (! $algorithm->isHmac()) {
+            throw AlgorithmNotAllowedException::notHmac($ring, $key->keyId, $algorithm);
+        }
+
+        if (! $config->allows($algorithm)) {
+            throw AlgorithmNotAllowedException::forRing($ring, $algorithm);
+        }
+
+        return $this->record('mac', [$ring, $message], new IssuedMac(
+            $ring, $key->keyId, $algorithm, MacRules::encode((new Digest($algorithm->hashAlgorithm()))->raw($message)),
+        ));
+    }
+
+    /**
      * As production: the keys the fake generated or imported too (they shadow the real store's).
      */
     public function findKey(string $ring, string $keyId): ?KeyInfo
@@ -1450,6 +1551,45 @@ final class SentinelFake extends SentinelManager
     }
 
     /**
+     * A MAC verified — in this ring, with this kid, when given. Refusals, real or scripted, do
+     * not count.
+     */
+    public function assertMacVerified(?string $ring = null, ?string $keyId = null): void
+    {
+        PHPUnit::assertNotEmpty($this->macVerifications($ring, $keyId), 'Expected a MAC to be verified'.self::macScope($ring, $keyId).', but none was.');
+    }
+
+    /**
+     * No MAC verified — in this ring, with this kid, when given.
+     */
+    public function assertMacNotVerified(?string $ring = null, ?string $keyId = null): void
+    {
+        $count = count($this->macVerifications($ring, $keyId));
+
+        PHPUnit::assertSame(0, $count, 'Expected no MAC to be verified'.self::macScope($ring, $keyId).", but {$count} ".($count === 1 ? 'was.' : 'were.'));
+    }
+
+    /**
+     * `mac()` ran — in this ring, when given.
+     */
+    public function assertMacComputed(?string $ring = null): void
+    {
+        $matching = array_filter(
+            $this->recorded('mac'),
+            static fn (RecordedCall $call): bool => $ring === null || (is_array($call->arguments) && ($call->arguments[0] ?? null) === $ring),
+        );
+
+        PHPUnit::assertNotEmpty($matching, $ring === null ? 'Expected a MAC to be computed, but none was.' : "Expected a MAC to be computed in ring [{$ring}], but none was.");
+    }
+
+    public function assertNoMacsComputed(): void
+    {
+        $count = count($this->recorded('mac'));
+
+        PHPUnit::assertSame(0, $count, "Expected no MAC to be computed, but {$count} ".($count === 1 ? 'was.' : 'were.'));
+    }
+
+    /**
      * The recorded calls, optionally of one manager method.
      *
      * @return list<RecordedCall>
@@ -1610,6 +1750,26 @@ final class SentinelFake extends SentinelManager
             static fn (RecordedCall $call): bool => $ring === null
                 || (($call->arguments instanceof GenerateKeyRequest || $call->arguments instanceof RotateKeyRequest) && $call->arguments->ring === $ring),
         ));
+    }
+
+    /**
+     * The successful MAC verifications of a ring / kid (as passed in).
+     *
+     * @return list<RecordedCall>
+     */
+    private function macVerifications(?string $ring, ?string $keyId): array
+    {
+        return array_values(array_filter(
+            $this->recorded('verifyMac'),
+            static fn (RecordedCall $call): bool => $call->result instanceof KeyInfo && is_array($call->arguments)
+                && ($ring === null || ($call->arguments[0] ?? null) === $ring)
+                && ($keyId === null || ($call->arguments[1] ?? null) === $keyId),
+        ));
+    }
+
+    private static function macScope(?string $ring, ?string $keyId): string
+    {
+        return ($keyId === null ? '' : " with key [{$keyId}]").($ring === null ? '' : " in ring [{$ring}]");
     }
 
     private function identity(Model $model, ?string $seal): string
