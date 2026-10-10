@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Facade;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
+use RoundlyConsulting\PackageToolkit\Concerns\RedactsSensitiveArguments;
 use RoundlyConsulting\Sentinel\Accessors\IdempotencyAccessor;
 use RoundlyConsulting\Sentinel\Accessors\KeysAccessor;
 use RoundlyConsulting\Sentinel\Accessors\LedgerAccessor;
@@ -173,6 +174,9 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  */
 final class Sentinel extends Facade
 {
+    // A flat call's `__callStatic` frame hides what the manager marks #[SensitiveParameter].
+    use RedactsSensitiveArguments;
+
     /**
      * Swap the manager for a recording fake — behind the facade and in the container, so an
      * injected SentinelManager is faked too.

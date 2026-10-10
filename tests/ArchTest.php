@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use GuzzleHttp\Psr7\HttpFactory;
+use RoundlyConsulting\PackageToolkit\Concerns\RedactsSensitiveArguments;
 use RoundlyConsulting\Sentinel\Canonical\FieldTagger;
 use RoundlyConsulting\Sentinel\Http\Signatures\MessageSigner;
 use RoundlyConsulting\Sentinel\Keys\Hkdf;
@@ -82,22 +83,36 @@ it('(b) reads the time only through Support\Clock', function (): void {
     expect($clockReads)->toBe(1)->and($offenders)->toBe([]);
 });
 
+/*
+ * One exemption, pinned: the toolkit's RedactsSensitiveArguments (on the facade) memoizes, per
+ * facade method, where the root's #[SensitiveParameter] arguments sit. That is reflection over
+ * code — the same in every request, never request state — so it is Octane-safe.
+ */
 it('(c) declares no static properties anywhere (Octane-safe)', function (): void {
     $offenders = [];
+    $exempt = [];
 
-    $scanned = eachSourceClass(function (string $class) use (&$offenders): void {
+    $scanned = eachSourceClass(function (string $class) use (&$offenders, &$exempt): void {
         if (! class_exists($class) && ! trait_exists($class) && ! interface_exists($class) && ! enum_exists($class)) {
             return;
         }
 
         foreach ((new ReflectionClass($class))->getProperties(ReflectionProperty::IS_STATIC) as $property) {
-            if ($property->getDeclaringClass()->getName() === $class) {
+            if ($property->getDeclaringClass()->getName() !== $class) {
+                continue;
+            }
+
+            if ($property->getName() === 'sensitiveArguments' && in_array(RedactsSensitiveArguments::class, class_uses($class), true)) {
+                $exempt[] = $class.'::$'.$property->getName();
+            } else {
                 $offenders[] = $class.'::$'.$property->getName();
             }
         }
     });
 
-    expect($scanned)->toBeGreaterThan(20)->and($offenders)->toBe([]);
+    expect($scanned)->toBeGreaterThan(20)
+        ->and($offenders)->toBe([])
+        ->and($exempt)->toBe(['RoundlyConsulting\\Sentinel\\Facades\\Sentinel::$sensitiveArguments']);
 });
 
 it('(d) imports neither the DB facade nor Illuminate\Foundation', function (): void {

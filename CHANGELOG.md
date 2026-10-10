@@ -55,6 +55,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   restored from a backup is still accepted with whatever label its column holds. This is the
   same class as the accepted "restore an older key envelope" threat. `SENTINEL_REVOKED_KEYS`
   still beats it.
+- Flat facade calls no longer expose secret arguments in stack traces. A call such as
+  `Sentinel::verifyMac()` passes through Laravel's `Facade::__callStatic()`, whose frame held
+  the MAC raw even though the manager marks it `#[SensitiveParameter]` (as it does the nonce of
+  the internal `rememberNonce()`). The facade now hides exactly those arguments in that frame.
 
 ## 1.1.2 - 2026-10-10
 

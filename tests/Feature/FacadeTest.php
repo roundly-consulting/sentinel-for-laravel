@@ -32,6 +32,15 @@ it('pins the facade contract', function (): void {
         ->toReachEveryAction(__DIR__.'/../../src/Actions');
 });
 
+/*
+ * A flat call (`Sentinel::verifyMac(…)`) passes Laravel's `Facade::__callStatic`, whose frame
+ * holds the raw arguments: the facade must hide there exactly what the manager marks
+ * `#[SensitiveParameter]` — `rememberNonce()`'s `$nonce` and `verifyMac()`'s `$mac`.
+ */
+it('hides secret arguments in the facade frame of a flat call', function (): void {
+    expect(Sentinel::class)->toRedactSensitiveArguments(methods: 2);
+});
+
 it('declares no global alias, so a host using cartalyst/sentinel keeps its own Sentinel', function (): void {
     // cartalyst/sentinel registers the global alias `Sentinel`; a package-discovered alias of
     // ours would silently replace it. laravel/sentinel ships Laravel\Sentinel\Sentinel (no
