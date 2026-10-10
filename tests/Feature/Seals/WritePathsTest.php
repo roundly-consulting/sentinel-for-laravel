@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use RoundlyConsulting\Sentinel\Engine\LedgerWriter;
@@ -93,6 +94,55 @@ it('documents why incrementEach is Laravel 13+ only: on 12 it updates the whole 
     expect(DB::table('invoices')->orderBy('id')->pluck('customer_id')->map(static fn (mixed $id): int => (int) $id)->all())->toBe([7, 9])
         ->and(Sentinel::verify($other)->status)->toBe(VerificationStatus::Tampered);
 })->skip(fn (): bool => method_exists(Model::class, 'incrementEach'), 'pins the Laravel 12 behaviour the README warns about');
+
+/**
+ * Chat review C-7: increment() writes updated_at in SQL only, so wasChanged() never sees it.
+ *
+ * @return class-string<Model>
+ */
+function stampedModel(): string
+{
+    return definedBy(static function ($seals): void {
+        $seals->seal('stamped')->attributes('status')->datetime('updated_at');
+    });
+}
+
+it('re-seals a seal covering updated_at after an increment or decrement', function (Closure $write): void {
+    $class = stampedModel();
+    Carbon::setTestNow('2026-10-10 10:00:00');
+    $model = $class::query()->create(['number' => 'n', 'customer_id' => 5]);
+    Carbon::setTestNow('2026-10-10 10:05:00');
+
+    $write($model);
+
+    expect(Sentinel::verify($model)->status)->toBe(VerificationStatus::Intact)
+        ->and($model->update(['status' => 'paid']))->toBeTrue()
+        ->and(Sentinel::verify($model)->status)->toBe(VerificationStatus::Intact);
+})->with([
+    'increment' => [static fn (Model $model) => $model->increment('customer_id')],
+    'decrement' => [static fn (Model $model) => $model->decrement('customer_id')],
+]);
+
+it('records that re-seal under the fake too', function (): void {
+    $fake = Sentinel::fake();
+    $model = stampedModel()::query()->create(['number' => 'n', 'customer_id' => 5]);
+
+    $model->increment('customer_id');
+
+    expect(array_map(static fn ($call): string => $call->result->event->value, $fake->recorded('seal')))->toBe(['sealed', 'resealed']);
+});
+
+it('re-seals a seal covering updated_at after incrementEach (Laravel 13+)', function (): void {
+    $class = stampedModel();
+    Carbon::setTestNow('2026-10-10 10:00:00');
+    $model = $class::query()->create(['number' => 'n', 'customer_id' => 5]);
+    Carbon::setTestNow('2026-10-10 10:05:00');
+
+    $model->incrementEach(['customer_id' => 2]);
+
+    expect(Sentinel::verify($model)->status)->toBe(VerificationStatus::Intact)
+        ->and($model->update(['status' => 'paid']))->toBeTrue();
+})->skip(fn (): bool => ! method_exists(Model::class, 'incrementEach'), 'incrementEach() needs Laravel 13');
 
 it('seals created models through every create path', function (Closure $create): void {
     $invoice = $create();

@@ -50,6 +50,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - `resealWhere()` and `updateAndReseal()` cover every selected row when the query has its own
   `orderBy`. They page by key, but the caller's order stayed the primary sort, so rows were
   skipped (left tampered or not updated) or handled twice.
+- `increment()`, `decrement()`, `incrementEach()` and `decrementEach()` re-seal a seal that
+  covers `updated_at`. Eloquent writes that timestamp in the SQL only, so the seal was left
+  stale: the next verification said `Tampered (a:updated_at)` and the next `update()` was
+  refused. The fake records the re-seal too.
 
 ## 1.0.2 - 2026-10-07
 

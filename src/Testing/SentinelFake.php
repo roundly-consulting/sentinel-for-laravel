@@ -412,10 +412,14 @@ final class SentinelFake extends SentinelManager
             return $result;
         }
 
+        // As in production: increment() writes updated_at in the SQL only.
+        $touched = $operation === PersistOperation::Increment && $model->usesTimestamps() ? array_filter([$model->getUpdatedAtColumn()]) : [];
+
         foreach ($seals->auto() as $seal) {
             if (! $existing) {
                 $this->recordSeal($model, $seal, SealEvent::Sealed);
-            } elseif (! isset($skip[$seal->name]) && ($nested || $seal->hasComputed() || isset($previous[$seal->name]) || $model->wasChanged($seal->columns()))) {
+            } elseif (! isset($skip[$seal->name]) && ($nested || $seal->hasComputed() || isset($previous[$seal->name]) || $model->wasChanged($seal->columns())
+                || array_intersect($touched, $seal->columns()) !== [])) {
                 $this->recordSeal($model, $seal, SealEvent::Resealed);
             }
         }

@@ -84,7 +84,7 @@ final readonly class Persister
             match (true) {
                 $delete => $this->afterDelete($model, $seals, $previous, $skip, $nested),
                 ! $existing => $this->afterCreate($model, $seals),
-                default => $this->afterUpdate($model, $seals, $previous, $skip, $nested),
+                default => $this->afterUpdate($model, $seals, $previous, $skip, $nested, $operation),
             };
 
             return $result;
@@ -139,15 +139,19 @@ final readonly class Persister
      * @param  array<string, VerificationStatus|true>  $previous
      * @param  array<string, true>  $skip
      */
-    private function afterUpdate(Model $model, CompiledSeals $seals, array $previous, array $skip, bool $nested): void
+    private function afterUpdate(Model $model, CompiledSeals $seals, array $previous, array $skip, bool $nested, PersistOperation $operation): void
     {
+        // increment()/decrement() write updated_at in the SQL only: the model never sees it change.
+        $touched = $operation === PersistOperation::Increment && $model->usesTimestamps() ? array_filter([$model->getUpdatedAtColumn()]) : [];
+
         foreach ($seals->auto() as $seal) {
             if (isset($skip[$seal->name])) {
                 continue;
             }
 
             // A nested write may have changed sealed columns this instance never saw.
-            if ($nested || $seal->hasComputed() || isset($previous[$seal->name]) || $model->wasChanged($seal->columns())) {
+            if ($nested || $seal->hasComputed() || isset($previous[$seal->name]) || $model->wasChanged($seal->columns())
+                || array_intersect($touched, $seal->columns()) !== []) {
                 $status = $previous[$seal->name] ?? null;
 
                 $this->sealer->seal($model, $seal, SealEvent::Resealed, previousStatus: $status instanceof VerificationStatus ? $status : null);
