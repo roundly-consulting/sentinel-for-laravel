@@ -10,7 +10,8 @@ namespace RoundlyConsulting\Sentinel\DataTransferObjects;
 final readonly class CheckpointResult
 {
     /**
-     * @param  list<AnchorPublication>  $anchors
+     * @param  list<AnchorPublication>  $anchors  empty when the checkpoint was made inside a
+     *                                            transaction (anchors get it after the commit)
      */
     public function __construct(
         public string $connection,

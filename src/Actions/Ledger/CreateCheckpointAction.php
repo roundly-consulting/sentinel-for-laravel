@@ -19,6 +19,9 @@ use RoundlyConsulting\Sentinel\Support\Tables;
  * Fold the next batch of pending ledger entries into a keyed, chained checkpoint and publish
  * it to the configured anchors (after commit, best effort). With nothing pending, anchors
  * that report an older checkpoint (an earlier failure) get the newest one again.
+ *
+ * Inside an open transaction the anchors are published once it commits (never when it rolls
+ * back), so the result's `anchors` is empty then.
  */
 final readonly class CreateCheckpointAction
 {
@@ -40,6 +43,7 @@ final readonly class CreateCheckpointAction
         $this->anchors->anchors();
 
         $connection = Tables::connectionName($options->connection);
+        $database = Tables::checkpoint($options->connection)->getConnection();
         $checkpoint = $this->builder->build($options->connection, $batchSize);
 
         if ($checkpoint === null) {
@@ -47,7 +51,7 @@ final readonly class CreateCheckpointAction
             $payload = $tail === null ? null : AnchorCodec::fromCheckpoint($tail, $connection);
 
             if ($payload !== null) {
-                $this->anchors->publish($payload, onlyLagging: true);
+                $database->afterCommit(fn (): array => $this->anchors->publish($payload, onlyLagging: true));
             }
 
             return null;
@@ -60,7 +64,16 @@ final readonly class CreateCheckpointAction
         $this->events->dispatch(new LedgerCheckpointed($connection, $seq, $entries, $root));
 
         $payload = AnchorCodec::fromCheckpoint($checkpoint, $connection);
+        $publications = [];
 
-        return new CheckpointResult($connection, $seq, $entries, $root, $payload === null ? [] : $this->anchors->publish($payload));
+        // Inside a host transaction the builder's commit is only a savepoint: an anchor must
+        // never hold a checkpoint a rollback takes back. Outside one this runs right away.
+        if ($payload !== null) {
+            $database->afterCommit(function () use ($payload, &$publications): void {
+                $publications = $this->anchors->publish($payload);
+            });
+        }
+
+        return new CheckpointResult($connection, $seq, $entries, $root, $publications);
     }
 }

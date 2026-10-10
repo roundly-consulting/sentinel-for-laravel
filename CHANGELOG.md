@@ -35,6 +35,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - `sentinel:verify --ledger` no longer reports `anchor_ahead` (and fires
   `LedgerIntegrityViolated`) when a checkpoint is committed while it walks a large ledger: the
   anchored seq is looked up in the database before it is called missing.
+- A checkpoint made inside a transaction is published to the anchors only after the commit, as
+  documented. An anchor used to receive it right away, so a rollback left it holding a
+  checkpoint the database never had (`anchor_ahead`). `CheckpointResult::$anchors` is empty in
+  that case.
 
 ## 1.0.2 - 2026-10-07
 

@@ -259,6 +259,49 @@ it('does not report an anchor ahead because a checkpoint landed during the walk'
     Event::assertNotDispatched(LedgerIntegrityViolated::class);
 });
 
+/**
+ * Chat review C-14: the anchor gets a checkpoint only once the checkpoint is committed.
+ */
+it('publishes a checkpoint made inside a transaction only after the commit', function (): void {
+    $anchor = memoryAnchor();
+    $connection = DB::getDefaultConnection();
+    invoice();
+
+    try {
+        DB::transaction(static function (): void {
+            Sentinel::checkpoint();
+
+            throw new RuntimeException('rolled back');
+        });
+    } catch (RuntimeException) {
+    }
+
+    expect(Checkpoint::query()->count())->toBe(0)
+        ->and($anchor->stored)->toBe([])
+        ->and(anchorFindings())->toBe([]);
+
+    $result = DB::transaction(static function () use ($anchor): ?CheckpointResult {
+        $result = Sentinel::checkpoint();
+
+        expect($anchor->stored)->toBe([]);
+
+        return $result;
+    });
+
+    expect($result?->seq)->toBe(1)
+        ->and(AnchorCodec::decode($anchor->stored[$connection])->seq)->toBe(1)
+        ->and(anchorFindings())->toBe([]);
+
+    // A lagging anchor waits for the commit too.
+    $anchor->stored = [];
+    DB::transaction(static function () use ($anchor): void {
+        expect(Sentinel::checkpoint())->toBeNull()
+            ->and($anchor->stored)->toBe([]);
+    });
+
+    expect(AnchorCodec::decode($anchor->stored[$connection])->seq)->toBe(1);
+});
+
 it('reports a rewritten, forged or unreachable anchor', function (Closure $tamper, string $expected): void {
     $anchor = memoryAnchor();
     invoice();
