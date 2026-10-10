@@ -70,6 +70,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   returned true.
 - `Sentinel::fake()`: `sealMissing()` reports a lenient seal the fake itself unsealed instead of
   counting it as baselined — production skips any row whose ledger history shows a seal.
+- `Sentinel::fake()`: `scan()` sets `truncated` when findings exceed `maxFindings`, and
+  `checkSchema` refuses a sealed column the table lacks (`SealingMisconfiguredException`), as
+  production does.
 
 ### Security
 

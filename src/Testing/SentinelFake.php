@@ -465,7 +465,8 @@ final class SentinelFake extends SentinelManager
 
     /**
      * Faked statuses over every row of the models — or the rows a `where` selects (the rows are
-     * read; nothing is written). Progress is reported per chunk, as in production.
+     * read; nothing is written). Progress, `checkSchema` and findings past `maxFindings`
+     * (`truncated`) behave as in production.
      */
     public function scan(ScanOptions $options): ScanReport
     {
@@ -477,10 +478,25 @@ final class SentinelFake extends SentinelManager
         $findings = [];
         $scanned = 0;
         $processed = 0;
+        $truncated = false;
 
         foreach ($options->models as $class) {
             $compiled = $this->container->make(DefinitionRegistry::class)->for($class);
             $seals = $options->seal === null ? $compiled->all() : [$compiled->get($options->seal)];
+
+            // As in production: a sealed column the table lacks fails the scan up front.
+            if ($options->checkSchema) {
+                $model = new $class;
+
+                foreach ($seals as $seal) {
+                    foreach ($seal->columns() as $column) {
+                        if (! $model->getConnection()->getSchemaBuilder()->hasColumn($model->getTable(), $column)) {
+                            throw SealingMisconfiguredException::missingColumn($class, $seal->name, $column);
+                        }
+                    }
+                }
+            }
+
             $base = $class::query()->withoutGlobalScopes();
             $query = $options->where === null ? $base : BulkQuery::resolve($class, $options->where, $base);
             $rows = $this->rows($query->reorder(), $options->limit === null ? null : max(0, $options->limit - $processed));
@@ -493,8 +509,8 @@ final class SentinelFake extends SentinelManager
                     $scanned++;
                     $counts[$result->status->value] = ($counts[$result->status->value] ?? 0) + 1;
 
-                    if ($result->failed() && count($findings) < $options->maxFindings) {
-                        $findings[] = $result;
+                    if ($result->failed()) {
+                        count($findings) < max(0, $options->maxFindings) ? $findings[] = $result : $truncated = true;
                     }
                 }
 
@@ -512,7 +528,7 @@ final class SentinelFake extends SentinelManager
             }
         }
 
-        return $this->record('scan', $options, new ScanReport($scanned, $list, $findings, false, Settings::outdatedIsIntact()));
+        return $this->record('scan', $options, new ScanReport($scanned, $list, $findings, $truncated, Settings::outdatedIsIntact()));
     }
 
     /**

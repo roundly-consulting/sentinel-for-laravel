@@ -12,6 +12,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerFinding;
 use RoundlyConsulting\Sentinel\DataTransferObjects\PruneOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ResealOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RevokeKeyRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\ScanOptions;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyDestination;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
@@ -21,6 +22,7 @@ use RoundlyConsulting\Sentinel\Exceptions\AcknowledgementDeniedException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyKeyReusedException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
 use RoundlyConsulting\Sentinel\Exceptions\KeyDriverException;
+use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
@@ -669,4 +671,29 @@ it('baselines no row the fake itself unsealed, as production (chat review C-24)'
 
     expect($scenario())->toBe($real)
         ->and($real)->toBe([0, 1, 'unsealed']);
+});
+
+it('reports a truncated scan and checks the schema under the fake too (chat review C-26)', function (): void {
+    $ghost = definedBy(static fn ($seals) => $seals->seal('ghost')->attributes('number', 'no_such_column'));
+    $scenario = static function (ParityRun $run) use ($ghost): array {
+        $tenant = $run->fake ? 27 : 26;
+        $run->tamper(invoice(['tenant_id' => $tenant]));
+        $run->tamper(invoice(['tenant_id' => $tenant]));
+        $report = Sentinel::scan(new ScanOptions([Invoice::class], 'financial', maxFindings: 1, where: static fn ($query) => $query->where('tenant_id', $tenant)));
+
+        try {
+            Sentinel::scan(new ScanOptions([$ghost], checkSchema: true));
+            $schema = 'scanned';
+        } catch (Throwable $exception) {
+            $schema = $exception::class;
+        }
+
+        return [$report->scanned, count($report->findings), $report->truncated, $schema];
+    };
+
+    $real = $scenario(new ParityRun(false));
+    Sentinel::fake();
+
+    expect($scenario(new ParityRun(true)))->toBe($real)
+        ->and($real)->toBe([2, 1, true, SealingMisconfiguredException::class]);
 });
