@@ -163,7 +163,23 @@ it('validates SigningOptions like their configuration counterparts (dual-review 
     'components empty, tag empty' => [new SigningOptions(components: [], tag: ''), 'components'],
     'components uppercase' => [new SigningOptions(components: ['@method', 'Content-Type']), 'components'],
     'components unsupported' => [new SigningOptions(components: ['@request-target']), 'components'],
+    'components with @status (chat review C-22)' => [new SigningOptions(components: ['@method', '@status']), 'components'],
     'ring unknown' => [new SigningOptions(ring: 'nowhere'), 'ring'],
+]);
+
+/**
+ * Chat review C-22: RFC 9421 §2.2.9 — `@status` MUST NOT be used in a request. Refused where it
+ * is configured, never as a dead signature or a request every verification rejects.
+ */
+it('refuses @status in the outbound components and in a profile', function (string $key, Closure $use): void {
+    partnerRing();
+    $signed = signedPartnerRequest();
+    config()->set("sentinel.{$key}", ['@method', '@authority', '@status']);
+
+    expect(fn () => $use($signed))->toThrow(InvalidSentinelConfigurationException::class, $key);
+})->with([
+    'outbound' => ['signatures.outbound.components', static fn (): mixed => Sentinel::signatures()->sign(new PsrRequest('GET', 'https://api.example.com/e'), 'partner')],
+    'profile' => ['signatures.profiles.default.components', static fn (RequestInterface $signed): mixed => Sentinel::signatures()->verify(received($signed))],
 ]);
 
 it('refuses an empty outbound component list in the configuration too (dual-review O-24)', function (): void {

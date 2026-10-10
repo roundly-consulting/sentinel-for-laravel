@@ -101,6 +101,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   as RFC 9421 defines it and as the receiver reads it. A request sent to an address with an
   explicit `Host` (`https://10.0.0.5/…` with `Host: api.example.com`) was signed for the address
   and rejected by the receiver.
+- `@status` in `SigningOptions::$components`, `signatures.outbound.components` or a profile's
+  `components` is refused with `InvalidSentinelConfigurationException` (RFC 9421 §2.2.9: a
+  request has no status). It passed validation, then every `sign()` failed with
+  `unsupported_component` and every request to such a profile was rejected; a response
+  signature always covers `@status` anyway.
 
 ### Security
 

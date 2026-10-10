@@ -82,6 +82,11 @@ final class ProfileResolver
                 throw InvalidSentinelConfigurationException::invalidValue($key, 'must be a list of lowercase, supported component names');
             }
 
+            // RFC 9421 §2.2.9: never part of a request; a response's signature always covers it.
+            if ($component === '@status') {
+                throw InvalidSentinelConfigurationException::invalidValue($key, 'must not list @status (a request has no status; response signatures always cover it)');
+            }
+
             $names[] = $component;
         }
 
