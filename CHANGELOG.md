@@ -14,26 +14,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   `log` anchor implements it). Implement it on a custom write-only anchor so the checkpoint run
   does not re-send it the newest checkpoint every minute.
 
-### Security
+### Changed
 
-- A checkpoint no longer overwrites an anchor that disagrees with the database. After a
-  database restore, the next `sentinel:checkpoint` replaced the anchored newer checkpoint, so
-  `sentinel:verify --ledger` called the rolled-back ledger intact. Now the publication is
-  refused (`published: false`, `AnchorPublishFailed`, a log warning) and the anchor keeps its
-  copy until someone investigates. Filesystem anchors write each `{seq}.json` only once.
-- An anchor write that its store refused is reported as a failed publication. A disk with
-  `throw` off (Laravel's default) or a cache store such as `null` returns false instead of
-  throwing, and the checkpoint used to count that as published, with no event and no log line,
-  so rollback detection looked armed while the anchor stayed empty.
-- A run with nothing pending republishes the newest checkpoint to an anchor that holds nothing
-  (its first publication failed, its cache was flushed). It used to skip every empty anchor,
-  so the anchor stayed empty until the next new checkpoint, and a rollback in that window went
-  unseen.
-- A sealed boolean stored as the text `'f'`, `'false'` (any case) no longer verifies as a sealed
-  `false`. Laravel's `boolean` cast reads those strings as `true`, so a database writer could
-  flip a sealed `false` (on SQLite, or any text column with a boolean cast) without detection.
-  They are now refused as `not_boolean` (`Tampered(canonicalization)`); `'t'` and `'true'` still
-  mean true, as they do for the cast.
+- Documentation: `sentinel.ledger.ring` does not follow `keys.default_ring`; a host that renames
+  its default ring (`SENTINEL_DEFAULT_RING`) sets `SENTINEL_LEDGER_RING` too (config comment).
 
 ### Fixed
 
@@ -63,6 +47,27 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   `SENTINEL_PUBLIC_KEY=` line. Without it the old public key stayed in the environment, and the
   ring refused to load ("an HMAC key is a single secret with no public half"), so applying the
   printed lines took sealing down.
+
+### Security
+
+- A checkpoint no longer overwrites an anchor that disagrees with the database. After a
+  database restore, the next `sentinel:checkpoint` replaced the anchored newer checkpoint, so
+  `sentinel:verify --ledger` called the rolled-back ledger intact. Now the publication is
+  refused (`published: false`, `AnchorPublishFailed`, a log warning) and the anchor keeps its
+  copy until someone investigates. Filesystem anchors write each `{seq}.json` only once.
+- An anchor write that its store refused is reported as a failed publication. A disk with
+  `throw` off (Laravel's default) or a cache store such as `null` returns false instead of
+  throwing, and the checkpoint used to count that as published, with no event and no log line,
+  so rollback detection looked armed while the anchor stayed empty.
+- A run with nothing pending republishes the newest checkpoint to an anchor that holds nothing
+  (its first publication failed, its cache was flushed). It used to skip every empty anchor,
+  so the anchor stayed empty until the next new checkpoint, and a rollback in that window went
+  unseen.
+- A sealed boolean stored as the text `'f'`, `'false'` (any case) no longer verifies as a sealed
+  `false`. Laravel's `boolean` cast reads those strings as `true`, so a database writer could
+  flip a sealed `false` (on SQLite, or any text column with a boolean cast) without detection.
+  They are now refused as `not_boolean` (`Tampered(canonicalization)`); `'t'` and `'true'` still
+  mean true, as they do for the cast.
 
 ## 1.0.2 - 2026-10-07
 

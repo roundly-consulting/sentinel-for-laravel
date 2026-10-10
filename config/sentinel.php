@@ -197,7 +197,9 @@ return [
     'ledger' => [
         'enabled' => env('SENTINEL_LEDGER', true),
 
-        // The ring whose current key signs checkpoints.
+        // The ring whose current key signs checkpoints. It does not follow
+        // keys.default_ring: a host that renames its default ring
+        // (SENTINEL_DEFAULT_RING) sets SENTINEL_LEDGER_RING too.
         'ring' => env('SENTINEL_LEDGER_RING', 'default'),
 
         // Connections holding seals and the ledger (null = the default one). Hosts
