@@ -13,9 +13,10 @@ use Throwable;
 
 /**
  * Guided installation: publishes the config and the migrations, points at the key types to
- * settle before migrating, generates the default ring's key when it has none (printing the
- * environment lines — `.env` is never written) and prints the remaining steps. Running it
- * again is harmless: published files are kept unless `--force`.
+ * settle before migrating, generates the default ring's key when it has none (with the ring's
+ * algorithm, printing the environment lines — `.env` is never written; a failed generation
+ * fails the install) and prints the remaining steps. Running it again is harmless: published
+ * files are kept unless `--force`.
  */
 final class InstallCommand extends Command
 {
@@ -55,7 +56,7 @@ final class InstallCommand extends Command
         $this->components->twoColumnDetail('actor_key_type (actors, key owners)', self::string(config('sentinel.actor_key_type')));
         $this->components->warn('Set both in config/sentinel.php (bigint, uuid or ulid) before running the migrations — they cannot change afterwards.');
 
-        $this->key($keys);
+        $generated = $this->key($keys);
 
         $this->newLine();
         $this->components->info('Next steps');
@@ -71,48 +72,50 @@ final class InstallCommand extends Command
         $this->line('  3. php artisan sentinel:seal-missing "App\\Models\\Invoice" --reason="Initial baseline"');
         $this->line('  4. php artisan sentinel:check');
 
-        return self::SUCCESS;
+        return $generated;
     }
 
     /**
-     * Generate the default ring's key when it has none: environment lines for a config ring,
-     * a hint for a database ring (its table does not exist before the migrations run).
+     * Generate the default ring's key when it has none — with the ring's own algorithm:
+     * environment lines for a config ring, a hint for a database ring (its table does not exist
+     * before the migrations run). Returns the exit code: a failed generation fails the install.
      */
-    private function key(KeyStoreManager $keys): void
+    private function key(KeyStoreManager $keys): int
     {
         $this->newLine();
 
         try {
             $ring = Settings::defaultRing();
-            $driver = Settings::ring($ring)->driver;
+            $config = Settings::ring($ring);
         } catch (SentinelException $exception) {
             $this->components->warn('The key configuration is not valid yet: '.$exception->getMessage());
 
-            return;
+            return self::SUCCESS;
         }
 
-        if ($driver === 'database') {
+        if ($config->driver === 'database') {
             $this->components->warn("After migrating, generate the default ring's key: php artisan sentinel:key:generate --database");
 
-            return;
+            return self::SUCCESS;
         }
 
         try {
             $keys->signingKey($ring);
             $this->components->info("The default ring [{$ring}] already has a signing key.");
 
-            return;
+            return self::SUCCESS;
         } catch (NoSigningKeyException) {
             // Generate one below.
         } catch (Throwable) {
             // A chain ring whose database half is not migrated yet.
             $this->components->warn("After migrating, generate the default ring's key: php artisan sentinel:key:generate");
 
-            return;
+            return self::SUCCESS;
         }
 
         $this->components->info("A key for the default ring [{$ring}] — add these lines to your environment:");
-        $this->call('sentinel:key:generate', ['--ring' => $ring]);
+
+        return $this->call('sentinel:key:generate', ['--ring' => $ring, '--algorithm' => $config->algorithm->value]) === self::SUCCESS ? self::SUCCESS : self::FAILURE;
     }
 
     private static function string(mixed $value): string

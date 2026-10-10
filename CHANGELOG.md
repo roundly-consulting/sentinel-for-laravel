@@ -86,6 +86,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - A `chain` ring falls back to its next store when a custom driver's signing key is on the
   revocation list (`SENTINEL_REVOKED_KEYS`), as it does for the built-in drivers. It returned
   the revoked key, and signing failed with `NoSigningKeyException`.
+- `sentinel:install` generates the default ring's key with the ring's configured algorithm (it
+  always used `hmac-sha256`, overriding an `ed25519` ring) and exits non-zero when generating it
+  fails; it reported success while printing the error.
 
 ### Security
 

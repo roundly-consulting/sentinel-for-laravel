@@ -74,3 +74,22 @@ it('reports an invalid key configuration instead of failing', function (): void 
     expect(Artisan::call('sentinel:install'))->toBe(0)
         ->and(Artisan::output())->toContain('The key configuration is not valid yet');
 });
+
+/**
+ * Chat review C-18: the generated key is the ring's own algorithm, and a failure fails install.
+ */
+it('generates the key with the ring\'s algorithm, and fails when the ring refuses it', function (): void {
+    config()->set('sentinel.keys.rings.default.key', null);
+    config()->set('sentinel.keys.rings.default.algorithm', 'ed25519');
+    config()->set('sentinel.keys.rings.default.algorithms', ['ed25519']);
+    app(KeyStoreManager::class)->flush();
+
+    expect(Artisan::call('sentinel:install'))->toBe(0)
+        ->and(Artisan::output())->toContain('SENTINEL_ALGORITHM=ed25519')->toContain('SENTINEL_PUBLIC_KEY="base64:');
+
+    config()->set('sentinel.keys.rings.default.algorithms', ['hmac-sha256']);
+    app(KeyStoreManager::class)->flush();
+
+    expect(Artisan::call('sentinel:install'))->toBe(1)
+        ->and(Artisan::output())->toContain('not allowed')->toContain('php artisan migrate');
+});
