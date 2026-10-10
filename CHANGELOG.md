@@ -52,6 +52,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - `Sentinel::fake()`: `reseal()` applies `onlyOutdated`, `upgradeFormat` and `fromKeyId` as
   production does (it used to count every intact row as re-sealed), and an acknowledging run
   outside the console without an actor is refused (`AcknowledgementDeniedException`).
+- Rotating a database ring demotes every key of the ring that could still sign — a pending key
+  from an earlier scheduled rotation too — under row locks, so one key signs at a time. Two
+  concurrent rotations, or a rotation while a scheduled key was pending, left an extra active
+  key that was never demoted and could sign again later. `KeyRotated::$previousKeyId` names the
+  key that was signing when the rotation committed.
 
 ### Security
 

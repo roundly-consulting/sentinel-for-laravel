@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Sentinel\Actions\Keys;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Database\Eloquent\Builder;
 use RoundlyConsulting\Sentinel\DataTransferObjects\KeyInfo;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\RotationResult;
@@ -28,13 +30,17 @@ use RoundlyConsulting\Sentinel\Support\Settings;
 /**
  * Rotate a ring's signing key, in the store the current key lives in.
  *
- *  - Database: a new active key; the previous one stops signing when the new one activates
- *    (`signs_until`) and stays verify-only, so existing seals keep verifying.
+ *  - Database: a new active key; every older key of the ring that could still sign (the
+ *    previous one, a pending one) stops signing when the new one activates (`signs_until`)
+ *    and stays verify-only, so existing seals keep verifying.
  *  - Config: the environment lines for the new key plus the updated verify-only list.
  *  - A custom driver's key is refused (`KeyDriverException`): its own store rotates it.
  */
 final readonly class RotateKeyAction
 {
+    /** Concurrent rotations of one ring can deadlock on MySQL's gap locks; the loser retries. */
+    private const int ATTEMPTS = 10;
+
     public function __construct(
         private KeyStoreManager $keys,
         private Dispatcher $events,
@@ -61,28 +67,64 @@ final readonly class RotateKeyAction
             : $current->driver === 'database';
 
         $result = $inDatabase
-            ? $this->rotateDatabase($request, $algorithm, $current)
+            ? $this->rotateDatabase($request, $algorithm)
             : $this->rotateConfig($request->ring, $config->previous, $algorithm, $current);
 
-        $this->events->dispatch(new KeyRotated($request->ring, $result->current->keyId, $algorithm, $current?->keyId));
+        $this->events->dispatch(new KeyRotated($request->ring, $result->current->keyId, $algorithm, $result->previous?->keyId));
 
         return $result;
     }
 
-    private function rotateDatabase(RotateKeyRequest $request, Algorithm $algorithm, ?SealingKey $current): RotationResult
+    /**
+     * Under the row locks of every key of the ring that could still sign after the new one
+     * activates — the current key, and a pending one an earlier scheduled rotation left — the
+     * new key is stored and each of them stops signing when it activates. A concurrent rotation
+     * waits for those locks and then demotes this one's key too, so one key signs at a time.
+     */
+    private function rotateDatabase(RotateKeyRequest $request, Algorithm $algorithm): RotationResult
     {
         $store = $this->keys->writableStore($request->ring);
         $activatesAt = $request->activatesAt ?? Clock::now();
 
-        return (new Key)->getConnection()->transaction(static function () use ($store, $request, $algorithm, $activatesAt, $current): RotationResult {
+        return (new Key)->getConnection()->transaction(function () use ($store, $request, $algorithm, $activatesAt): RotationResult {
+            $signers = self::lockSigners($request->ring, $activatesAt);
+            $current = $this->current($request->ring);
             $new = $store->insert(KeyIds::generate($request->ring), KeyMaterial::generate($algorithm), $activatesAt, null, null);
 
-            $previous = $current === null
-                ? null
-                : $store->update($current->keyId, static fn (EnvelopeData $data): EnvelopeData => $data->with(signsUntil: $activatesAt));
+            foreach ($signers as $keyId) {
+                $store->update($keyId, static fn (EnvelopeData $data): EnvelopeData => $data->with(signsUntil: $activatesAt));
+            }
+
+            $previous = $current === null ? null : $store->find($current->keyId);
 
             return new RotationResult(KeyInfo::fromKey($new), $previous === null ? null : KeyInfo::fromKey($previous));
-        });
+        }, self::ATTEMPTS);
+    }
+
+    /**
+     * Lock the ring's keys that may sign past `$at`. Waiting for a lock can end after another
+     * rotation committed a key this read could not see yet: lock again until two reads agree.
+     *
+     * @return list<string>
+     */
+    private static function lockSigners(string $ring, CarbonImmutable $at): array
+    {
+        $locked = null;
+
+        do {
+            $previous = $locked;
+            $locked = array_values(Key::query()
+                ->where('ring', $ring)
+                ->where('status', KeyStatus::Active->value)
+                ->where(static fn (Builder $query) => $query->whereNull('signs_until')->orWhere('signs_until', '>', Clock::database($at)))
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->pluck('kid')
+                ->map(static fn (mixed $kid): string => (string) $kid)
+                ->all());
+        } while ($locked !== $previous);
+
+        return $locked;
     }
 
     private function rotateConfig(string $ring, string $previous, Algorithm $algorithm, ?SealingKey $current): RotationResult

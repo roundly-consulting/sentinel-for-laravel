@@ -121,6 +121,35 @@ it('rotates into a scheduled key: the old key signs until then', function (): vo
         ->and(http()->find('first')?->signsUntil?->equalTo($result->current->activatesAt))->toBeTrue();
 });
 
+/**
+ * Chat review C-15: a rotation demotes every key of the ring that could still sign — a pending
+ * one from an earlier scheduled rotation too — so only one key ever signs.
+ */
+it('demotes every older active or pending key when it rotates', function (): void {
+    http()->generate(Algorithm::HmacSha256, 'k-a');
+    $scheduled = http()->rotate(Algorithm::HmacSha256, CarbonImmutable::now()->addDay());
+
+    $result = http()->rotate(Algorithm::HmacSha256);
+    $at = $result->current->activatesAt;
+
+    expect($result->previous?->keyId)->toBe('k-a')
+        ->and(http()->find('k-a')?->signsUntil?->lessThanOrEqualTo($at))->toBeTrue()
+        ->and(http()->find($scheduled->current->keyId)?->signsUntil?->lessThanOrEqualTo($at))->toBeTrue()
+        ->and(Key::query()->where('ring', 'http')->whereNull('signs_until')->pluck('kid')->all())->toBe([$result->current->keyId]);
+
+    // The scheduled key never takes over, and a later revocation brings no old key back.
+    Carbon::setTestNow(CarbonImmutable::now()->addDays(2));
+
+    expect(http()->current()->keyId)->toBe($result->current->keyId)
+        ->and(http()->find($scheduled->current->keyId)?->status)->toBe(KeyStatus::VerifyOnly);
+
+    http()->revoke($result->current->keyId, 'compromised');
+    app(KeyStoreManager::class)->flush();
+
+    expect(fn () => http()->current())->toThrow(NoSigningKeyException::class);
+    Carbon::setTestNow();
+});
+
 it('rotates an empty database ring into its first key', function (): void {
     $result = http()->rotate(Algorithm::EcdsaP384Sha384);
 
