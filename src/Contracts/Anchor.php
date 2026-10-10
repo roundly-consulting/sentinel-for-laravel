@@ -22,7 +22,7 @@ interface Anchor
 
     /**
      * The newest payload published for the connection; null when there is none — or always,
-     * for a write-only anchor (a log).
+     * for a write-only anchor (a log, which implements {@see WriteOnlyAnchor}).
      */
     public function latest(string $connection): ?AnchorPayload;
 }

@@ -10,6 +10,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 - `AnchorPublishException`: the error a refused anchor publication reports (in
   `AnchorPublishFailed::$error`, the log line and `CheckpointResult::$anchors`).
+- `Contracts\WriteOnlyAnchor`: a marker for anchors nothing can be read back from (the built-in
+  `log` anchor implements it). Implement it on a custom write-only anchor so the checkpoint run
+  does not re-send it the newest checkpoint every minute.
 
 ### Security
 
@@ -22,6 +25,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   `throw` off (Laravel's default) or a cache store such as `null` returns false instead of
   throwing, and the checkpoint used to count that as published, with no event and no log line,
   so rollback detection looked armed while the anchor stayed empty.
+- A run with nothing pending republishes the newest checkpoint to an anchor that holds nothing
+  (its first publication failed, its cache was flushed). It used to skip every empty anchor,
+  so the anchor stayed empty until the next new checkpoint, and a rollback in that window went
+  unseen.
 
 ## 1.0.2 - 2026-10-07
 

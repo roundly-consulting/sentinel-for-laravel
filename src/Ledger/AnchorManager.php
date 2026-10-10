@@ -9,6 +9,7 @@ use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Log\LogManager;
 use RoundlyConsulting\Sentinel\Contracts\Anchor;
+use RoundlyConsulting\Sentinel\Contracts\WriteOnlyAnchor;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPayload;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPublication;
 use RoundlyConsulting\Sentinel\Events\AnchorPublishFailed;
@@ -110,7 +111,9 @@ final class AnchorManager
                     $this->guard($name, $latest, $payload);
                 }
 
-                if ($onlyLagging && ($latest === null || $latest->seq >= $payload->seq)) {
+                // Nothing held is lagging too (a failed first publication, a flushed cache); only
+                // a write-only anchor, which never holds anything, is not re-sent every run.
+                if ($onlyLagging && ($latest === null ? $anchor instanceof WriteOnlyAnchor : $latest->seq >= $payload->seq)) {
                     continue;
                 }
 

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Sentinel\Ledger\Anchors;
 
 use Psr\Log\LoggerInterface;
-use RoundlyConsulting\Sentinel\Contracts\Anchor;
+use RoundlyConsulting\Sentinel\Contracts\WriteOnlyAnchor;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPayload;
 use RoundlyConsulting\Sentinel\Ledger\AnchorCodec;
 
@@ -15,7 +15,7 @@ use RoundlyConsulting\Sentinel\Ledger\AnchorCodec;
  *
  * @internal
  */
-final readonly class LogAnchor implements Anchor
+final readonly class LogAnchor implements WriteOnlyAnchor
 {
     public function __construct(private LoggerInterface $logger) {}
 

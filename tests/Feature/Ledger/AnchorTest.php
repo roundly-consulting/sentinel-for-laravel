@@ -250,6 +250,29 @@ it('reports a failed publication and republishes on the next run', function (): 
         ->and(AnchorCodec::decode($anchor->stored[DB::getDefaultConnection()])->seq)->toBe(2);
 });
 
+/**
+ * Chat review V-1: an anchor that missed the first checkpoint holds nothing, not "older".
+ */
+it('republishes to an anchor that holds nothing, but never re-sends to a write-only one', function (): void {
+    $log = Log::spy();
+    $log->shouldReceive('channel')->andReturn($log);
+    $anchor = memoryAnchor();
+    config()->set('sentinel.ledger.anchors', 'memory,log');
+    $anchor->broken = true;
+    invoice();
+
+    $first = Sentinel::checkpoint();
+    $anchor->broken = false;
+
+    expect($first?->anchors[0]->published)->toBeFalse()
+        ->and($anchor->stored)->toBe([])
+        ->and(Sentinel::checkpoint())->toBeNull()
+        ->and(AnchorCodec::decode($anchor->stored[DB::getDefaultConnection()])->seq)->toBe(1)
+        ->and(Sentinel::checkpoint())->toBeNull();
+
+    $log->shouldHaveReceived('info')->once();
+});
+
 it('compares a payload copied out of a write-only anchor', function (): void {
     invoice();
     Sentinel::checkpoint();
