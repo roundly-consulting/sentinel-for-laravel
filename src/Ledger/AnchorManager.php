@@ -87,8 +87,9 @@ final class AnchorManager
     }
 
     /**
-     * Publish a payload to every anchor — or, with `onlyLagging`, only to those that report
-     * an older checkpoint (a failure of an earlier run).
+     * Publish a payload to every anchor — or, with `onlyLagging`, only to those that lag: one
+     * that reports an older checkpoint, or holds none at all (a failed first publication, a
+     * flushed cache). A write-only anchor, which never holds anything, is not re-sent then.
      *
      * An anchor is never overwritten with a checkpoint that does not extend what it holds:
      * when the database lacks the anchored checkpoint (a restore) or holds it with another
