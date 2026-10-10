@@ -6,6 +6,17 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+### Fixed
+
+- Concurrent rotations of an empty database key ring (`sentinel:key:rotate`,
+  `Sentinel::keys()->ring($ring)->rotate()`) could each store a key that signs: there was no key
+  row to lock yet. A rotation now holds a per-ring lock on the keys' database (a PostgreSQL
+  advisory lock, a MySQL/MariaDB named lock; SQLite allows one writer anyway), so exactly one
+  key is left signing, at any isolation level. No migration: a ring an earlier race left with
+  two signing keys keeps working — the newest signs, both verify — and its next rotation
+  demotes both. A rotation that waits for the lock longer than `innodb_lock_wait_timeout`
+  fails with `KeyDriverException`.
+
 ## 1.1.0 - 2026-10-10
 
 ### Added

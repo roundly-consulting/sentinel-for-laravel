@@ -37,6 +37,14 @@ final class KeyDriverException extends SentinelException
         return new self("The key [{$ring}:{$keyId}] comes from configuration, not the database; change it in the environment instead.");
     }
 
+    /**
+     * Another rotation of the ring held its lock past the database's lock wait timeout.
+     */
+    public static function ringBusy(string $ring): self
+    {
+        return new self("Another rotation of key ring [{$ring}] is still running; retry once it has finished.");
+    }
+
     public static function keyIdTaken(string $ring, string $keyId): self
     {
         return new self("Key ring [{$ring}] already has a key [{$keyId}].");

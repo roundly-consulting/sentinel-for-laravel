@@ -21,6 +21,7 @@ use RoundlyConsulting\Sentinel\Keys\EnvSnippet;
 use RoundlyConsulting\Sentinel\Keys\KeyIds;
 use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
+use RoundlyConsulting\Sentinel\Keys\RingLock;
 use RoundlyConsulting\Sentinel\Keys\SealingKey;
 use RoundlyConsulting\Sentinel\Models\Key;
 use RoundlyConsulting\Sentinel\Support\Clock;
@@ -32,13 +33,14 @@ use RoundlyConsulting\Sentinel\Support\Settings;
  *
  *  - Database: a new active key; every older key of the ring that could still sign (the
  *    previous one, a pending one) stops signing when the new one activates (`signs_until`)
- *    and stays verify-only, so existing seals keep verifying.
+ *    and stays verify-only, so existing seals keep verifying. One rotation of a ring runs at
+ *    a time ({@see RingLock}) — an empty ring's first ones included.
  *  - Config: the environment lines for the new key plus the updated verify-only list.
  *  - A custom driver's key is refused (`KeyDriverException`): its own store rotates it.
  */
 final readonly class RotateKeyAction
 {
-    /** Concurrent rotations of one ring can deadlock on MySQL's gap locks; the loser retries. */
+    /** A rotation racing another key write of its ring can deadlock on MySQL's gap locks; the loser retries. */
     private const int ATTEMPTS = 10;
 
     public function __construct(
@@ -76,17 +78,18 @@ final readonly class RotateKeyAction
     }
 
     /**
-     * Under the row locks of every key of the ring that could still sign after the new one
-     * activates — the current key, and a pending one an earlier scheduled rotation left — the
-     * new key is stored and each of them stops signing when it activates. A concurrent rotation
-     * waits for those locks and then demotes this one's key too, so one key signs at a time.
+     * Under the ring's lock and the row locks of every key of the ring that could still sign
+     * after the new one activates — the current key, and a pending one an earlier scheduled
+     * rotation left — the new key is stored and each of them stops signing when it activates.
+     * A concurrent rotation waits for the ring's lock and then demotes this one's key too, so
+     * one key signs at a time — also when the ring had no key to lock yet.
      */
     private function rotateDatabase(RotateKeyRequest $request, Algorithm $algorithm): RotationResult
     {
         $store = $this->keys->writableStore($request->ring);
         $activatesAt = $request->activatesAt ?? Clock::now();
 
-        return (new Key)->getConnection()->transaction(function () use ($store, $request, $algorithm, $activatesAt): RotationResult {
+        return RingLock::transaction((new Key)->getConnection(), $request->ring, function () use ($store, $request, $algorithm, $activatesAt): RotationResult {
             $signers = self::lockSigners($request->ring, $activatesAt);
             $current = $this->current($request->ring);
             $new = $store->insert(KeyIds::generate($request->ring), KeyMaterial::generate($algorithm), $activatesAt, null, null);
@@ -103,7 +106,8 @@ final readonly class RotateKeyAction
 
     /**
      * Lock the ring's keys that may sign past `$at`. Waiting for a lock can end after another
-     * rotation committed a key this read could not see yet: lock again until two reads agree.
+     * key write (a generated key) committed a key this read could not see yet: lock again until
+     * two reads agree.
      *
      * @return list<string>
      */

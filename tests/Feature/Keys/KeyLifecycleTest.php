@@ -150,6 +150,25 @@ it('demotes every older active or pending key when it rotates', function (): voi
     Carbon::setTestNow();
 });
 
+/**
+ * Follow-up #104: a ring an earlier release's race left with two signing keys needs no repair
+ * step. The newest one signs, both verify, and the next rotation demotes both.
+ */
+it('heals a ring left with two signing keys at its next rotation', function (): void {
+    http()->generate(Algorithm::HmacSha256, 'twin-a');
+    http()->generate(Algorithm::HmacSha256, 'twin-b');
+
+    expect(Key::query()->where('ring', 'http')->whereNull('signs_until')->count())->toBe(2)
+        ->and(http()->current()->keyId)->toBe('twin-b');
+
+    $result = http()->rotate();
+
+    expect($result->previous?->keyId)->toBe('twin-b')
+        ->and(Key::query()->where('ring', 'http')->whereNull('signs_until')->pluck('kid')->all())->toBe([$result->current->keyId])
+        ->and(http()->find('twin-a')?->status)->toBe(KeyStatus::VerifyOnly)
+        ->and(http()->find('twin-b')?->status)->toBe(KeyStatus::VerifyOnly);
+});
+
 it('rotates an empty database ring into its first key', function (): void {
     $result = http()->rotate(Algorithm::EcdsaP384Sha384);
 

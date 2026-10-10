@@ -23,9 +23,10 @@ final class Forks
 
     /**
      * @param  Closure(int $racer): string  $work
+     * @param  array<string, mixed>  $connection  overrides of each racer's connection config
      * @return list<string>
      */
-    public static function run(int $racers, Closure $work): array
+    public static function run(int $racers, Closure $work, array $connection = []): array
     {
         $files = [];
         $pids = [];
@@ -38,7 +39,7 @@ final class Forks
                 $outcome = 'error';
 
                 try {
-                    config()->set('database.connections.racer', DriverMatrix::connectionConfig(DriverMatrix::driver()));
+                    config()->set('database.connections.racer', [...DriverMatrix::connectionConfig(DriverMatrix::driver()), ...$connection]);
                     DB::setDefaultConnection('racer');
                     app()->forgetScopedInstances();
 
