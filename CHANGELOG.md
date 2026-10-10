@@ -6,6 +6,19 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+### Added
+
+- `AnchorPublishException`: the error a refused anchor publication reports (in
+  `AnchorPublishFailed::$error`, the log line and `CheckpointResult::$anchors`).
+
+### Security
+
+- A checkpoint no longer overwrites an anchor that disagrees with the database. After a
+  database restore, the next `sentinel:checkpoint` replaced the anchored newer checkpoint, so
+  `sentinel:verify --ledger` called the rolled-back ledger intact. Now the publication is
+  refused (`published: false`, `AnchorPublishFailed`, a log warning) and the anchor keeps its
+  copy until someone investigates. Filesystem anchors write each `{seq}.json` only once.
+
 ## 1.0.2 - 2026-10-07
 
 ### Fixed

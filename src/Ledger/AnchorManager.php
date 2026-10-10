@@ -12,11 +12,13 @@ use RoundlyConsulting\Sentinel\Contracts\Anchor;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPayload;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPublication;
 use RoundlyConsulting\Sentinel\Events\AnchorPublishFailed;
+use RoundlyConsulting\Sentinel\Exceptions\AnchorPublishException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Ledger\Anchors\CacheAnchor;
 use RoundlyConsulting\Sentinel\Ledger\Anchors\FilesystemAnchor;
 use RoundlyConsulting\Sentinel\Ledger\Anchors\LogAnchor;
 use RoundlyConsulting\Sentinel\Support\Settings;
+use RoundlyConsulting\Sentinel\Support\Tables;
 use Throwable;
 
 /**
@@ -87,6 +89,12 @@ final class AnchorManager
      * Publish a payload to every anchor — or, with `onlyLagging`, only to those that report
      * an older checkpoint (a failure of an earlier run).
      *
+     * An anchor is never overwritten with a checkpoint that does not extend what it holds:
+     * when the database lacks the anchored checkpoint (a restore) or holds it with another
+     * root, the publication is refused and reported, so the evidence survives until someone
+     * looks. An anchor that already holds this checkpoint or a newer one of the same chain
+     * (a concurrent run) counts as published.
+     *
      * @return list<AnchorPublication>
      */
     public function publish(AnchorPayload $payload, bool $onlyLagging = false): array
@@ -96,16 +104,20 @@ final class AnchorManager
         foreach ($this->names() as $name) {
             try {
                 $anchor = $this->build($name);
+                $latest = $anchor->latest($payload->connection);
 
-                if ($onlyLagging) {
-                    $latest = $anchor->latest($payload->connection);
-
-                    if ($latest === null || $latest->seq >= $payload->seq) {
-                        continue;
-                    }
+                if ($latest !== null) {
+                    $this->guard($name, $latest, $payload);
                 }
 
-                $anchor->publish($payload);
+                if ($onlyLagging && ($latest === null || $latest->seq >= $payload->seq)) {
+                    continue;
+                }
+
+                if ($latest === null || $latest->seq < $payload->seq) {
+                    $anchor->publish($payload);
+                }
+
                 $publications[] = new AnchorPublication($name, true);
             } catch (InvalidSentinelConfigurationException $exception) {
                 throw $exception;
@@ -125,6 +137,25 @@ final class AnchorManager
         }
 
         return $publications;
+    }
+
+    /**
+     * Refuse to replace what an anchor holds unless the database still has that checkpoint,
+     * with the same root.
+     */
+    private function guard(string $name, AnchorPayload $held, AnchorPayload $payload): void
+    {
+        $local = Tables::checkpoints($payload->connection)->where('seq', $held->seq)->first();
+
+        if ($local === null) {
+            $tail = (int) Tables::checkpoints($payload->connection)->max('seq');
+
+            throw AnchorPublishException::diverged("anchor [{$name}] holds seq {$held->seq}, the database {$tail}");
+        }
+
+        if ((string) $local->getRawOriginal('root') !== $held->root) {
+            throw AnchorPublishException::diverged("anchor [{$name}] holds seq {$held->seq} with another root than the database");
+        }
     }
 
     /**

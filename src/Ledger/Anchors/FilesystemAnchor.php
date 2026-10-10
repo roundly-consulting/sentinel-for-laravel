@@ -8,11 +8,13 @@ use Illuminate\Contracts\Filesystem\Filesystem;
 use RoundlyConsulting\Crypto\Hash\Digest;
 use RoundlyConsulting\Sentinel\Contracts\Anchor;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPayload;
+use RoundlyConsulting\Sentinel\Exceptions\AnchorPublishException;
 use RoundlyConsulting\Sentinel\Ledger\AnchorCodec;
 
 /**
- * Every checkpoint as `{path}/{connection}/{seq}.json` plus `{path}/{connection}/latest.json`
- * on a disk. Object storage with object lock or versioning keeps them tamper-proof.
+ * Every checkpoint as `{path}/{connection}/{seq}.json` (written once) plus
+ * `{path}/{connection}/latest.json` on a disk. Object storage with object lock or versioning
+ * keeps them tamper-proof.
  *
  * @internal
  */
@@ -33,7 +35,17 @@ final readonly class FilesystemAnchor implements Anchor
         $json = AnchorCodec::encode($payload);
         $directory = $this->directory($payload->connection);
 
-        $this->disk->put("{$directory}/{$payload->seq}.json", $json);
+        $numbered = "{$directory}/{$payload->seq}.json";
+
+        // Write-once: a numbered file that holds another checkpoint is evidence, never replaced.
+        if ($this->disk->exists($numbered)) {
+            if ($this->disk->get($numbered) !== $json) {
+                throw AnchorPublishException::diverged("anchor [filesystem] already holds another seq {$payload->seq}");
+            }
+        } else {
+            $this->disk->put($numbered, $json);
+        }
+
         $this->disk->put("{$directory}/latest.json", $json);
     }
 

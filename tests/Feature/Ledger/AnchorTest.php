@@ -8,9 +8,12 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPayload;
+use RoundlyConsulting\Sentinel\DataTransferObjects\AnchorPublication;
+use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\LedgerVerifyOptions;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Events\AnchorPublishFailed;
+use RoundlyConsulting\Sentinel\Exceptions\AnchorPublishException;
 use RoundlyConsulting\Sentinel\Exceptions\CorruptRecordException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
@@ -74,6 +77,96 @@ it('detects a rollback of the whole database past the anchored checkpoint (§3.2
     DB::table('sentinel_checkpoints')->where('id', $last)->delete();
 
     expect(anchorFindings())->toContain('anchor_ahead:anchor [memory] holds seq 2, the database 1');
+});
+
+/**
+ * Chat review C-1: after a restore, the next checkpoint must not overwrite the evidence.
+ */
+it('never overwrites an anchor that is ahead of a restored database', function (): void {
+    Storage::fake('local');
+    Event::fake([AnchorPublishFailed::class]);
+    config()->set('sentinel.ledger.anchors', 'cache,filesystem');
+    $connection = DB::getDefaultConnection();
+    $disk = Storage::disk('local');
+
+    foreach (range(1, 3) as $ignored) {
+        invoice();
+        Sentinel::checkpoint();
+    }
+
+    $two = (string) $disk->get("sentinel/anchors/{$connection}/2.json");
+    $outcomes = static fn (?CheckpointResult $result): array => array_map(
+        static fn ($publication): string => $publication->anchor.':'.($publication->published ? 'ok' : 'refused'),
+        $result?->anchors ?? [],
+    );
+
+    // Restore a snapshot taken at seq 1: the newer checkpoints and their entries vanish together.
+    DB::table('sentinel_seals')->update(['ledger_entry_id' => null]);
+    $newer = Checkpoint::query()->where('seq', '>', 1)->pluck('id');
+    DB::table('sentinel_ledger')->whereIn('checkpoint_id', $newer)->delete();
+    DB::table('sentinel_checkpoints')->whereIn('id', $newer)->delete();
+
+    invoice();
+    $second = Sentinel::checkpoint();
+
+    expect($second?->seq)->toBe(2)
+        ->and($outcomes($second))->toBe(['cache:refused', 'filesystem:refused'])
+        ->and($second?->anchors[0]->error)->toContain('anchor [cache] holds seq 3, the database 2')
+        ->and(AnchorCodec::decode((string) Cache::get("sentinel:ledger:anchor:{$connection}"))->seq)->toBe(3)
+        ->and(AnchorCodec::decode((string) $disk->get("sentinel/anchors/{$connection}/latest.json"))->seq)->toBe(3)
+        ->and($disk->get("sentinel/anchors/{$connection}/2.json"))->toBe($two)
+        ->and(anchorFindings())->toContain('anchor_ahead:anchor [cache] holds seq 3, the database 2', 'anchor_ahead:anchor [filesystem] holds seq 3, the database 2');
+
+    // The database catches up with another history: the anchored seq 3 differs, so neither the
+    // new seq 3 nor anything after it replaces it.
+    invoice();
+    $third = Sentinel::checkpoint();
+    invoice();
+    $fourth = Sentinel::checkpoint();
+
+    expect($outcomes($third))->toBe(['cache:refused', 'filesystem:refused'])
+        ->and($outcomes($fourth))->toBe(['cache:refused', 'filesystem:refused'])
+        ->and(AnchorCodec::decode((string) $disk->get("sentinel/anchors/{$connection}/latest.json"))->seq)->toBe(3)
+        ->and($disk->exists("sentinel/anchors/{$connection}/4.json"))->toBeFalse()
+        ->and(anchorFindings())->toContain('anchor_mismatch:anchor [cache]: the checkpoint root differs');
+
+    Event::assertDispatchedTimes(AnchorPublishFailed::class, 6);
+});
+
+it('treats an anchor already holding this checkpoint or a newer one of the same chain as published', function (): void {
+    $anchor = memoryAnchor();
+    invoice();
+    Sentinel::checkpoint();
+    invoice();
+    Sentinel::checkpoint();
+    $connection = DB::getDefaultConnection();
+    $held = $anchor->stored[$connection];
+    $payload = static fn (int $seq): AnchorPayload => AnchorCodec::fromCheckpoint(Checkpoint::query()->where('seq', $seq)->firstOrFail(), $connection)
+        ?? throw new RuntimeException('no payload');
+
+    Event::fake([AnchorPublishFailed::class]);
+
+    expect(app(AnchorManager::class)->publish($payload(1)))->toEqual([new AnchorPublication('memory', true)])
+        ->and(app(AnchorManager::class)->publish($payload(2)))->toEqual([new AnchorPublication('memory', true)])
+        ->and(app(AnchorManager::class)->publish($payload(1), onlyLagging: true))->toBe([])
+        ->and($anchor->stored[$connection])->toBe($held);
+
+    Event::assertNotDispatched(AnchorPublishFailed::class);
+});
+
+it('writes each numbered filesystem anchor file once', function (): void {
+    Storage::fake('local');
+    $anchor = app(AnchorManager::class)->build('filesystem');
+    $payload = new AnchorPayload('main', 1, 'root', Clock::now(), 'default', 'kid', Algorithm::HmacSha256, 'mac');
+
+    $anchor->publish($payload);
+    Storage::disk('local')->delete('sentinel/anchors/main/latest.json');
+    $anchor->publish($payload);
+
+    expect(fn () => $anchor->publish(new AnchorPayload('main', 1, 'other-root', Clock::now(), 'default', 'kid', Algorithm::HmacSha256, 'mac')))
+        ->toThrow(AnchorPublishException::class, 'already holds another seq 1')
+        ->and(AnchorCodec::decode((string) Storage::disk('local')->get('sentinel/anchors/main/1.json'))->root)->toBe('root')
+        ->and(AnchorCodec::decode((string) Storage::disk('local')->get('sentinel/anchors/main/latest.json'))->root)->toBe('root');
 });
 
 it('reports a rewritten, forged or unreachable anchor', function (Closure $tamper, string $expected): void {
