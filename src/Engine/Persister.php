@@ -58,7 +58,9 @@ final readonly class Persister
         // The seal and its history are keyed by the row's id: a write that changes it would
         // verify the new id while updating the old row, and leave the seal behind.
         // (A row inserted in this write has no original key yet: its id is new, not changed.)
-        if (! $delete && $model->getRawOriginal($model->getKeyName()) !== null && $model->isDirty($model->getKeyName())) {
+        $keyChanged = $model->getRawOriginal($model->getKeyName()) !== null && $model->isDirty($model->getKeyName());
+
+        if (! $delete && $keyChanged) {
             throw SealingMisconfiguredException::keyChanged($model::class);
         }
 
@@ -68,18 +70,22 @@ final readonly class Persister
             return $write();
         }
 
+        // Deletes are never refused: Eloquent deletes the row the model was read as — its
+        // original key — whatever the key holds in memory, so that row is the one locked,
+        // verified and tombstoned (or re-sealed), never the id it was changed to.
+        $row = $delete && $keyChanged ? self::stored($model) : $model;
         $existing = $model->exists;
 
-        return $model->getConnection()->transaction(fn (): mixed => $this->scope->persisting($model, function (bool &$nested) use ($model, $write, $operation, $seals, $existing, $delete): mixed {
+        return $model->getConnection()->transaction(fn (): mixed => $this->scope->persisting($row, function (bool &$nested) use ($model, $row, $write, $operation, $seals, $existing, $delete): mixed {
             $previous = [];
             $skip = [];
 
             if ($existing) {
                 // Lock order: the model row first, then its seal rows (in the verifier).
-                $this->readBack->row($model, [], lock: true);
+                $this->readBack->row($row, [], lock: true);
 
                 foreach ($delete ? $seals->all() : $seals->auto() as $seal) {
-                    $this->precheck($model, $seal, $operation, $previous, $skip);
+                    $this->precheck($row, $seal, $operation, $previous, $skip);
                 }
             }
 
@@ -90,13 +96,25 @@ final readonly class Persister
             }
 
             match (true) {
-                $delete => $this->afterDelete($model, $seals, $previous, $skip, $nested),
+                $delete => $this->afterDelete($model, $row, $seals, $previous, $skip, $nested),
                 ! $existing => $this->afterCreate($model, $seals),
                 default => $this->afterUpdate($model, $seals, $previous, $skip, $nested, $operation),
             };
 
             return $result;
         }));
+    }
+
+    /**
+     * The model as its row is stored — its original attributes, the original key among them —
+     * as a separate instance, so the caller's model stays as Eloquent leaves it.
+     */
+    private static function stored(Model $model): Model
+    {
+        $stored = $model->newInstance([], true);
+        $stored->setRawAttributes($model->getRawOriginal(), true);
+
+        return $stored;
     }
 
     /**
@@ -196,18 +214,27 @@ final readonly class Persister
     }
 
     /**
+     * The model is the one the host deleted (it knows whether the delete was forced); the row is
+     * the one that delete removed — the model itself, unless its key was changed in memory.
+     *
      * @param  array<string, VerificationStatus|true>  $previous
      * @param  array<string, true>  $skip
      */
-    private function afterDelete(Model $model, CompiledSeals $seals, array $previous, array $skip, bool $nested): void
+    private function afterDelete(Model $model, Model $row, CompiledSeals $seals, array $previous, array $skip, bool $nested): void
     {
         $softDeleted = in_array(SoftDeletes::class, class_uses_recursive($model), true)
             && ! (method_exists($model, 'isForceDeleting') && $model->isForceDeleting());
 
+        // The sealer drops the eager-loaded seal rows of the instance it writes; the host's
+        // model holds a stale copy too when that instance is a separate one.
+        if ($row !== $model) {
+            $model->unsetRelation('sentinelSeals');
+        }
+
         if (! $softDeleted) {
             foreach ($seals->all() as $seal) {
                 $status = $previous[$seal->name] ?? null;
-                $this->sealer->tombstone($model, $seal, SealEvent::Deleted, $status instanceof VerificationStatus ? $status : null);
+                $this->sealer->tombstone($row, $seal, SealEvent::Deleted, $status instanceof VerificationStatus ? $status : null);
             }
 
             return;
@@ -222,7 +249,7 @@ final readonly class Persister
         foreach ($seals->auto() as $seal) {
             if (! isset($skip[$seal->name]) && ($nested || array_intersect($touched, $seal->columns()) !== [] || $seal->hasComputed())) {
                 $status = $previous[$seal->name] ?? null;
-                $this->sealer->seal($model, $seal, SealEvent::Resealed, previousStatus: $status instanceof VerificationStatus && $status !== VerificationStatus::Intact ? $status : null);
+                $this->sealer->seal($row, $seal, SealEvent::Resealed, previousStatus: $status instanceof VerificationStatus && $status !== VerificationStatus::Intact ? $status : null);
             }
         }
     }

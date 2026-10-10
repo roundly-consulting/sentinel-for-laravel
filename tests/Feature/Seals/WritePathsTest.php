@@ -167,6 +167,50 @@ it('refuses to change a sealed model\'s primary key', function (Closure $model, 
     'lenient' => [static fn (): Model => definedBy(static fn ($seals) => $seals->seal('loose')->attributes('number')->lenient())::query()->create(['number' => 'n'])],
 ])->with(['real' => [false], 'fake' => [true]]);
 
+/**
+ * Follow-up #104 (C-19 for deletes): Eloquent deletes the row a model was read as — its original
+ * key — whatever the key holds in memory. Its seals are verified and tombstoned (or re-sealed,
+ * for a soft delete) under that key too: never under the id it was changed to, which may be
+ * another sealed row. Deletes are never refused, so the delete itself goes ahead.
+ */
+it('seals the row a delete removes when its key was changed in memory', function (string $delete, Closure $target): void {
+    $other = invoice();
+    $sealed = invoice();
+    $id = $sealed->getKey();
+    $changedTo = $target($other);
+    $otherEntries = LedgerEntry::query()->where('sealable_id', $other->getKey())->count();
+    $sealed->setAttribute('id', $changedTo);
+
+    $sealed->{$delete}();
+
+    $entries = static fn (int $id, string $event): int => LedgerEntry::query()->where('sealable_id', $id)->where('event', $event)->count();
+
+    expect($sealed->getKey())->toBe($changedTo)
+        ->and(LedgerEntry::query()->where('sealable_id', $other->getKey())->count())->toBe($otherEntries)
+        ->and(Seal::query()->where('sealable_id', $other->getKey())->count())->toBe(2)
+        ->and(Sentinel::verifyAll($other->fresh())->allIntact())->toBeTrue()
+        ->and(LedgerEntry::query()->where('sealable_id', 9999)->count())->toBe(0)
+        ->and(DB::table('invoices')->where('id', $other->getKey())->value('deleted_at'))->toBeNull();
+
+    if ($delete === 'forceDelete') {
+        expect(DB::table('invoices')->where('id', $id)->exists())->toBeFalse()
+            ->and(Seal::query()->where('sealable_id', $id)->count())->toBe(0)
+            ->and($entries($id, 'deleted'))->toBe(2);
+
+        return;
+    }
+
+    expect(DB::table('invoices')->where('id', $id)->value('deleted_at'))->not->toBeNull()
+        ->and($entries($id, 'resealed'))->toBe(1)
+        ->and(Sentinel::verifyAll(Invoice::withTrashed()->findOrFail($id))->allIntact())->toBeTrue();
+})->with([
+    'force delete' => ['forceDelete'],
+    'soft delete' => ['delete'],
+])->with([
+    'to another sealed row' => [static fn (Invoice $other): int => $other->getKey()],
+    'to an unused id' => [static fn (): int => 9999],
+]);
+
 it('seals created models through every create path', function (Closure $create): void {
     $invoice = $create();
 

@@ -16,6 +16,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   two signing keys keeps working — the newest signs, both verify — and its next rotation
   demotes both. A rotation that waits for the lock longer than `innodb_lock_wait_timeout`
   fails with `KeyDriverException`.
+- Deleting a sealed model whose primary key was changed in memory tombstoned (or, for a soft
+  delete, re-sealed) the row under the new id — possibly another sealed row, whose seals it
+  removed — and left the deleted row's seals behind. Eloquent deletes the row by its original
+  key, and the seals now follow it: that row is locked, verified and tombstoned. The delete
+  still goes ahead, as deletes always do; the model keeps the key it was given in memory.
 
 ## 1.1.0 - 2026-10-10
 
