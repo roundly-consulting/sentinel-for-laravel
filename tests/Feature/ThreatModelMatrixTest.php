@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use GuzzleHttp\Psr7\Request as PsrRequest;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Psr\Http\Message\RequestInterface;
@@ -70,6 +71,27 @@ function matrixDatabaseKey(?string $label = null): void
     config()->set('sentinel.keys.rings.default.driver', 'database');
     app(KeyStoreManager::class)->flush();
     Sentinel::keys()->ring()->generate(Algorithm::HmacSha256, 'db-key', label: $label);
+}
+
+/**
+ * #15 for a key an upgraded host re-sealed: its pre-1.2 envelope (label unbound) restored from
+ * a backup with a rewritten label — undetected while `require_bound_label` is off.
+ *
+ * @return list<Model>
+ */
+function matrixRestoredLegacyKey(bool $requireBoundLabel): array
+{
+    config()->set('sentinel.keys.rings.default.driver', 'database');
+    app(KeyStoreManager::class)->flush();
+    legacyKey('default', 'db-key', 'ACME billing');
+    $a = invoice();
+    $before = DB::table('sentinel_keys')->first();
+    Artisan::call('sentinel:key:reseal');
+    DB::table('sentinel_keys')->update([...(array) $before, 'label' => 'Evil Corp']);
+    config()->set('sentinel.keys.require_bound_label', $requireBoundLabel);
+    app(KeyStoreManager::class)->flush();
+
+    return [$a];
 }
 
 /**
@@ -250,6 +272,8 @@ it('detects exactly what the threat model promises', function (Closure $attack, 
 
         return [$a];
     }, false, false],
+    '#15 restore a pre-1.2 key envelope and rewrite its label' => [static fn (): array => matrixRestoredLegacyKey(false), false, false],
+    '#15 … with sentinel.keys.require_bound_label on' => [static fn (): array => matrixRestoredLegacyKey(true), true, true],
     '#16 change and roll back inside the window' => [static function (): array {
         $a = invoice(['amount' => '1.00']);
         DB::table('invoices')->where('id', $a->id)->update(['amount' => '0.00']);

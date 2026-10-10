@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use RoundlyConsulting\Sentinel\Canonical\Jcs;
@@ -105,6 +106,24 @@ it('never opens a sentinel.key/2 row through the legacy path, require_bound_labe
 
     expect(freshLookup('http', 'bound'))->toEqual(new KeyLookup(null, KeyLookup::INTEGRITY))
         ->and(envelopeOf('http', 'bound'))->toBeNull();
+});
+
+it('refuses a restored legacy envelope with a rewritten label once require_bound_label is on', function (): void {
+    legacyKey('http', 'partner', 'ACME');
+    $backup = keyRow('http', 'partner');
+
+    expect(Artisan::call('sentinel:key:reseal'))->toBe(0)
+        ->and(envelopeOf('http', 'partner')['format'] ?? null)->toBe('sentinel.key/2');
+
+    // A database writer restores the 1.1 row from a backup and rewrites its label.
+    DB::table('sentinel_keys')->where('kid', 'partner')->update([...array_diff_key($backup, ['id' => true]), 'label' => 'Evil Corp']);
+
+    // While legacy envelopes are accepted this goes unnoticed — threat model #15's class.
+    expect(freshLookup('http', 'partner')->key?->label)->toBe('Evil Corp');
+
+    requireBoundLabel();
+
+    expect(freshLookup('http', 'partner'))->toEqual(new KeyLookup(null, KeyLookup::INTEGRITY));
 });
 
 it('re-seals a legacy key as sentinel.key/2 when it is revoked, keeping its label', function (): void {

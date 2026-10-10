@@ -6,8 +6,27 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+**Upgrading from 1.1.** No migration, and nothing to do for keys to keep working: after
+`composer update` every database key still verifies. To bind the labels:
+
+1. Deploy 1.2 to every node first. A 1.1 node cannot open a key 1.2 has written (any key
+   generated, imported, rotated, revoked or retired, or re-sealed): it reads as an integrity
+   failure there. For the same reason you cannot roll back to 1.1.x once 1.2 has written keys.
+2. Run `php artisan sentinel:key:reseal --dry-run`, then `php artisan sentinel:key:reseal`.
+   Check that every printed `ring:kid → label` line shows the label you expect: the label a row
+   holds when it is re-sealed is the one that gets bound.
+3. Set `SENTINEL_REQUIRE_BOUND_LABEL=true`. `sentinel:check` warns until you have re-sealed, and
+   fails if you turn this on while legacy keys remain. If you run `sentinel:check --strict` in a
+   pipeline, the warning fails it too until the keys are re-sealed.
+
 ### Added
 
+- `php artisan sentinel:key:reseal {--ring=} {--dry-run}` re-seals every database key in the
+  new envelope format, ring by ring and row by row under the row's lock. It prints
+  `ring:kid → label` for each key before binding it, with control and invisible characters
+  escaped, so you can check the labels. It is idempotent. It never re-seals a key that fails
+  its integrity check, or one whose label is not valid UTF-8 and cannot be bound (only SQLite
+  stores one): it lists it and exits 1.
 - `sentinel.keys.require_bound_label` (`SENTINEL_REQUIRE_BOUND_LABEL`, off by default). When on,
   a key in the pre-1.2 envelope format fails its integrity check like any tampered key.
 
@@ -25,10 +44,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   back precisely so a receiver can bind the sender to it. Now an edited, removed or added label
   makes the key fail its integrity check: `KeyIntegrityViolated` fires and the key is unknown
   (`UnknownKey` for a MAC, `unknown_key` for a seal). Every key write now re-seals a pre-1.2 key
-  in the new format and binds the label it holds: revocation, retirement and rotation do this.
-  Until `require_bound_label` is on, a pre-1.2 envelope restored from a backup is still
-  accepted with whatever label its column holds. This is the same class as the accepted
-  "restore an older key envelope" threat. `SENTINEL_REVOKED_KEYS` still beats it.
+  in the new format and binds the label it holds: revocation, retirement and rotation do this,
+  and so does `sentinel:key:reseal`. Until `require_bound_label` is on, a pre-1.2 envelope
+  restored from a backup is still accepted with whatever label its column holds. This is the
+  same class as the accepted "restore an older key envelope" threat. `SENTINEL_REVOKED_KEYS`
+  still beats it.
 
 ## 1.1.2 - 2026-10-10
 

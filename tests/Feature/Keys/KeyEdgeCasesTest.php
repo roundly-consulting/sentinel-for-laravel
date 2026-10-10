@@ -50,6 +50,11 @@ it('refuses to update a key row that vanished', function (): void {
         ->toThrow(UnknownKeyException::class);
 });
 
+it('refuses to re-seal a key row that vanished', function (): void {
+    expect(fn () => app(KeyStoreManager::class)->writableStore('http')->reseal('gone', false, static function (): void {}))
+        ->toThrow(UnknownKeyException::class);
+});
+
 it('misses cleanly across every chained driver', function (): void {
     config()->set('sentinel.keys.rings.default.driver', 'chain');
 

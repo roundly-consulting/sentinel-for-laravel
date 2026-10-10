@@ -18,6 +18,7 @@ use RoundlyConsulting\Sentinel\Commands\InstallCommand;
 use RoundlyConsulting\Sentinel\Commands\KeyGenerateCommand;
 use RoundlyConsulting\Sentinel\Commands\KeyImportCommand;
 use RoundlyConsulting\Sentinel\Commands\KeyListCommand;
+use RoundlyConsulting\Sentinel\Commands\KeyResealCommand;
 use RoundlyConsulting\Sentinel\Commands\KeyRetireCommand;
 use RoundlyConsulting\Sentinel\Commands\KeyRevokeCommand;
 use RoundlyConsulting\Sentinel\Commands\KeyRotateCommand;
@@ -89,6 +90,7 @@ final class SentinelServiceProvider extends PackageServiceProvider
                 KeyRevokeCommand::class,
                 KeyRetireCommand::class,
                 KeyListCommand::class,
+                KeyResealCommand::class,
             ])
             // Presence and flags only — never key material, never a database key's kid.
             ->contributesToAbout(static fn (): array => self::about());
