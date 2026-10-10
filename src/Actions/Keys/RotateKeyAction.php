@@ -90,7 +90,7 @@ final readonly class RotateKeyAction
         return new RotationResult(
             new KeyInfo($ring, $keyId, $algorithm, KeyStatus::Active, 'config', true),
             $current === null ? null : new KeyInfo($ring, $current->keyId, $current->algorithm(), KeyStatus::VerifyOnly, 'config', false),
-            EnvSnippet::forKey($ring, $keyId, $material)."\n".EnvSnippet::previous($ring, $entries),
+            EnvSnippet::forKey($ring, $keyId, $material, clearPublic: $current?->material()->encodedPublic() !== null)."\n".EnvSnippet::previous($ring, $entries),
         );
     }
 

@@ -27,7 +27,12 @@ final class EnvSnippet
         return $ring === 'http' ? 'SENTINEL_HTTP_KEYS' : self::prefix($ring).'PREVIOUS_KEYS';
     }
 
-    public static function forKey(string $ring, string $keyId, #[SensitiveParameter] KeyMaterial $material): string
+    /**
+     * @param  bool  $clearPublic  print an empty `PUBLIC_KEY=` for a key without a public half
+     *                             (a rotation away from an asymmetric key: the stale public
+     *                             key would make the ring refuse to load)
+     */
+    public static function forKey(string $ring, string $keyId, #[SensitiveParameter] KeyMaterial $material, bool $clearPublic = false): string
     {
         $prefix = self::prefix($ring);
         $lines = [
@@ -38,6 +43,8 @@ final class EnvSnippet
 
         if ($material->encodedPublic() !== null) {
             $lines[] = "{$prefix}PUBLIC_KEY=\"{$material->encodedPublic()}\"";
+        } elseif ($clearPublic) {
+            $lines[] = "{$prefix}PUBLIC_KEY=";
         }
 
         return implode("\n", $lines);

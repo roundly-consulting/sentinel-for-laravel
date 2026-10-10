@@ -59,6 +59,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   error). The key stayed `processing`, so a retry after the lease repeated the side effect; it is
   now completed as unreplayable (a repeat gets `IdempotentResponseUnavailableException`) and the
   error is rethrown.
+- Rotating a config ring from an Ed25519 or ECDSA key to HMAC prints an empty
+  `SENTINEL_PUBLIC_KEY=` line. Without it the old public key stayed in the environment, and the
+  ring refused to load ("an HMAC key is a single secret with no public half"), so applying the
+  printed lines took sealing down.
 
 ## 1.0.2 - 2026-10-07
 

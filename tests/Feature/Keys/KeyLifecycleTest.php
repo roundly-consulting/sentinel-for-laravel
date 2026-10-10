@@ -10,6 +10,7 @@ use RoundlyConsulting\Sentinel\Accessors\KeyRingHandle;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyDestination;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
+use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
 use RoundlyConsulting\Sentinel\Events\KeyGenerated;
 use RoundlyConsulting\Sentinel\Events\KeyRetired;
 use RoundlyConsulting\Sentinel\Events\KeyRevoked;
@@ -141,6 +142,43 @@ it('rotates a config ring by printing the new key and the verify-only list', fun
     app(KeyStoreManager::class)->flush();
 
     expect(Sentinel::keys()->ring()->rotate(Algorithm::Ed25519)->previous)->toBeNull();
+});
+
+/**
+ * Apply printed environment lines to the default ring's configuration, as an operator would.
+ */
+function applyEnvSnippet(string $snippet): void
+{
+    $keys = ['SENTINEL_KEY_ID' => 'key_id', 'SENTINEL_ALGORITHM' => 'algorithm', 'SENTINEL_KEY' => 'key', 'SENTINEL_PUBLIC_KEY' => 'public_key', 'SENTINEL_PREVIOUS_KEYS' => 'previous'];
+
+    foreach (explode("\n", $snippet) as $line) {
+        [$name, $value] = explode('=', $line, 2);
+        config()->set('sentinel.keys.rings.default.'.$keys[$name], trim($value, '"'));
+    }
+
+    app(KeyStoreManager::class)->flush();
+}
+
+/**
+ * Chat review C-9: an HMAC key has no public half, so the old one must be cleared.
+ */
+it('clears the public key when a config ring rotates from an asymmetric key to HMAC', function (): void {
+    $ed = KeyMaterial::generate(Algorithm::Ed25519);
+    config()->set('sentinel.keys.rings.default.key_id', 'ed-1');
+    config()->set('sentinel.keys.rings.default.algorithm', 'ed25519');
+    config()->set('sentinel.keys.rings.default.key', $ed->encodedPrivate());
+    config()->set('sentinel.keys.rings.default.public_key', $ed->encodedPublic());
+    app(KeyStoreManager::class)->flush();
+    $before = invoice();
+
+    $result = Sentinel::keys()->ring()->rotate(Algorithm::HmacSha256);
+    applyEnvSnippet((string) $result->envSnippet);
+
+    expect($result->envSnippet)->toContain("\nSENTINEL_PUBLIC_KEY=\n")
+        ->and(Sentinel::keys()->ring()->current()->keyId)->toBe($result->current->keyId)
+        ->and(Sentinel::keys()->ring()->current()->algorithm)->toBe(Algorithm::HmacSha256)
+        ->and(Sentinel::verify(invoice())->status)->toBe(VerificationStatus::Intact)
+        ->and(Sentinel::verify($before)->status)->toBe(VerificationStatus::Intact);
 });
 
 it('refuses to rotate into a disallowed algorithm', function (): void {
