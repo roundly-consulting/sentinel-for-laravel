@@ -6,7 +6,6 @@ use GuzzleHttp\Psr7\HttpFactory;
 use RoundlyConsulting\PackageToolkit\Concerns\RedactsSensitiveArguments;
 use RoundlyConsulting\Sentinel\Canonical\FieldTagger;
 use RoundlyConsulting\Sentinel\Http\Signatures\MessageSigner;
-use RoundlyConsulting\Sentinel\Keys\Hkdf;
 use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\Keys\SealingKey;
 use RoundlyConsulting\Sentinel\Keys\Signers;
@@ -27,7 +26,7 @@ ArchPresets::strictTypes('RoundlyConsulting\Sentinel');
 // manager still type-checks under Sentinel::fake().
 ArchPresets::finalByDefault('RoundlyConsulting\Sentinel', [SentinelManager::class]);
 // No exemptions: every primitive goes through crypto-for-laravel (hash_hkdf is not on the
-// list — it is pinned to Keys\Hkdf below instead).
+// list yet — it is banned outright below instead).
 ArchPresets::noLocalCryptoPrimitives('RoundlyConsulting\Sentinel');
 ArchPresets::morphColumnsUseTheSeam(__DIR__.'/../database/migrations');
 ArchPresets::runtimeRequireIsWhitelisted(__DIR__.'/../composer.json');
@@ -50,7 +49,7 @@ function eachSourceClass(Closure $check): int
     return count($classes);
 }
 
-it('(a) calls hash_hkdf only from Keys\Hkdf', function (): void {
+it('(a) never calls hash_hkdf: HKDF comes from crypto-for-laravel', function (): void {
     $calls = [];
 
     eachSourceClass(function (string $class, string $file) use (&$calls): void {
@@ -61,7 +60,7 @@ it('(a) calls hash_hkdf only from Keys\Hkdf', function (): void {
         }
     });
 
-    expect($calls)->toBe([Hkdf::class => 1]);
+    expect($calls)->toBe([]);
 });
 
 it('(b) reads the time only through Support\Clock', function (): void {

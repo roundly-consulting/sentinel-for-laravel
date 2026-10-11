@@ -5,14 +5,16 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Sentinel\Keys;
 
 use RoundlyConsulting\Crypto\Hash\HashAlgorithm;
+use RoundlyConsulting\Crypto\Hash\Hkdf as CryptoHkdf;
+use RoundlyConsulting\Crypto\Hash\InvalidHkdfParameterException;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidKeyMaterialException;
 use SensitiveParameter;
-use ValueError;
 
 /**
- * HKDF (RFC 5869) — the one primitive crypto-for-laravel lacks, isolated here: this is the
- * only caller of `hash_hkdf` in the package (arch-pinned).
+ * Sentinel's HKDF (RFC 5869) subkeys: the fixed salt, the per-purpose info strings and
+ * Sentinel's own errors around crypto-for-laravel's {@see CryptoHkdf}. Nothing in the package
+ * calls `hash_hkdf` itself (arch-pinned).
  *
  * Per-purpose subkeys keep one root secret from ever MACing two kinds of document under the
  * same key. The salt is a fixed, non-secret constant (RFC 5869 §3.1); the info strings are
@@ -46,8 +48,8 @@ final class Hkdf
         }
 
         try {
-            return hash_hkdf($hash->value, $ikm, $length, $info, $salt);
-        } catch (ValueError $error) {
+            return (new CryptoHkdf($hash))->derive($ikm, $length, $info, $salt);
+        } catch (InvalidHkdfParameterException $error) {
             throw InvalidKeyMaterialException::wrongType(Algorithm::HmacSha256, 'the requested subkey length is invalid', $error);
         }
     }
