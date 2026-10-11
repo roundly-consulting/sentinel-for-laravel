@@ -6,6 +6,11 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+### Changed
+
+- Maintenance: requires the latest roundly packages — crypto `^1.1.2`, enums `^1.1.0`,
+  package-toolkit `^1.3.0`; dev: testing `^1.2.1`.
+
 ## 1.2.0 - 2026-10-10
 
 **Upgrading from 1.1.** No migration, and nothing to do for keys to keep working: after
