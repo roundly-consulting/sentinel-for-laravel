@@ -6,11 +6,13 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+## 1.2.2 - 2026-10-11
+
 ### Changed
 
-- HKDF subkeys now come from crypto-for-laravel's `Hash\Hkdf` instead of a local `hash_hkdf`
-  call; output is byte-identical (RFC 5869 and frozen format vectors unchanged). Requires crypto
-  `^1.2.0`.
+- Maintenance: HKDF subkeys now come from crypto-for-laravel's `Hash\Hkdf` instead of a local
+  `hash_hkdf` call; output is byte-identical (RFC 5869 and frozen format vectors unchanged).
+  Requires crypto `^1.2.0`.
 
 ## 1.2.1 - 2026-10-11
 
