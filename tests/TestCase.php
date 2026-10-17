@@ -46,6 +46,16 @@ abstract class TestCase extends PackageTestCase
         return [SentinelServiceProvider::class, __DIR__.'/Fixtures/migrations'];
     }
 
+    /**
+     * Migrate once per worker and schema signature, then empty the tables after each test.
+     * The migrations read only config, which the signature covers; the racers in
+     * Support\Forks run on their own connection and end with SIGKILL, as this requires.
+     */
+    protected function keepsMigratedSchema(): bool
+    {
+        return true;
+    }
+
     /** @return array<string, mixed> */
     protected function configBeforeBoot(): array
     {

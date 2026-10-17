@@ -20,6 +20,15 @@ abstract class TransitiveHostTestCase extends TestCase
         return [];
     }
 
+    /**
+     * Nothing is migrated, so there is no schema to keep — and the kept-schema catalogue
+     * reads a migrations table this host never has.
+     */
+    protected function keepsMigratedSchema(): bool
+    {
+        return false;
+    }
+
     /** @return array<string, mixed> */
     protected function configBeforeBoot(): array
     {
