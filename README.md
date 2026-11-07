@@ -26,7 +26,7 @@ idempotency keys, single-use nonces and URLs, and RFC 9421 HTTP message signatur
 
 ## Installation
 
-Requires PHP 8.4+ (`ext-hash`, `ext-mbstring`; `ext-sodium` for Ed25519 keys), Laravel 12 or 13,
+Requires PHP 8.4+ (`ext-hash`, `ext-mbstring`; `ext-sodium` for Ed25519 keys), Laravel 13,
 and SQLite, PostgreSQL or MySQL.
 
 ```bash
