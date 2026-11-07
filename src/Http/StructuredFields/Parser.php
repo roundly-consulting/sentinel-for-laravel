@@ -370,7 +370,7 @@ final class Parser
                     $this->fail('an invalid percent-encoding in a display string');
                 }
 
-                $bytes .= chr((int) hexdec($hex));
+                $bytes .= chr((int) hexdec($hex) & 0xFF);
                 $this->position += 2;
             } elseif ($char === '"') {
                 return mb_check_encoding($bytes, 'UTF-8') ? new DisplayString($bytes) : $this->fail('a display string that is not UTF-8');
