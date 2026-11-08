@@ -51,6 +51,28 @@ final readonly class SignatureVerifier
      */
     public function verify(MessageView $message, SignatureProfile $profile, Closure $remember): VerifiedSignature
     {
+        return $this->authenticate($message, $profile, $remember)->signature;
+    }
+
+    /**
+     * The nonce scope of one key (internal purposes may exceed the public purpose grammar).
+     */
+    public static function nonceScope(string $ring, string $keyId): string
+    {
+        return 'http:'.substr((new Digest)->hex($ring."\0".$keyId), 0, 40);
+    }
+
+    /**
+     * Everything {@see verify()} does, returning the nonce's lifetime too — a deferred
+     * verification passes a `$remember` that only looks the nonce up, and commits it later
+     * under `nonceScope` until `nonceUntil`.
+     *
+     * @param  Closure(string $purpose, string $nonce, int $until): bool  $remember  false = replay
+     *
+     * @throws HttpSignatureException
+     */
+    public function authenticate(MessageView $message, SignatureProfile $profile, Closure $remember): Authenticated
+    {
         $selected = $this->select($message, $profile);
         $input = $selected->input;
         $components = SignatureBase::components($input);
@@ -92,19 +114,27 @@ final readonly class SignatureVerifier
 
         // The window accepts every instant of its last second (whole seconds, inclusive); the
         // nonce must outlive it, or a replay in that second finds it already forgotten.
-        if ($nonce !== null && ! $remember(self::noncePurpose($key), $nonce, $created + $profile->maxAge + $profile->clockSkew + 1)) {
+        $scope = self::nonceScope($key->ring, $key->keyId);
+        $until = self::nonceUntil($profile, $created);
+
+        if ($nonce !== null && ! $remember($scope, $nonce, $until)) {
             throw HttpSignatureException::rejected(SignatureRejection::Replayed, $keyId);
         }
 
-        return new VerifiedSignature($selected->label, $key->ring, $keyId, $key->algorithm(), $created, $expires, $nonce, $tag, $components, $key->ownerType, $key->ownerId);
+        return new Authenticated(
+            new VerifiedSignature($selected->label, $key->ring, $keyId, $key->algorithm(), $created, $expires, $nonce, $tag, $components, $key->ownerType, $key->ownerId),
+            $scope,
+            $until,
+        );
     }
 
     /**
-     * The nonce scope of one key (internal purposes may exceed the public purpose grammar).
+     * When a nonce signed at `created` may be forgotten: one second past the last instant the
+     * window accepts (Unix seconds).
      */
-    public static function noncePurpose(SealingKey $key): string
+    private static function nonceUntil(SignatureProfile $profile, int $created): int
     {
-        return 'http:'.substr((new Digest)->hex($key->ring."\0".$key->keyId), 0, 40);
+        return $created + $profile->maxAge + $profile->clockSkew + 1;
     }
 
     private function select(MessageView $message, SignatureProfile $profile): SelectedSignature

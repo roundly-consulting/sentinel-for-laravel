@@ -7,6 +7,7 @@ namespace RoundlyConsulting\Sentinel\Nonces\Stores;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use RoundlyConsulting\Sentinel\Contracts\InspectsNonces;
 use RoundlyConsulting\Sentinel\Contracts\NonceStore;
 use RoundlyConsulting\Sentinel\Enums\NonceKind;
 use RoundlyConsulting\Sentinel\Exceptions\CorruptRecordException;
@@ -23,7 +24,7 @@ use RoundlyConsulting\Sentinel\Support\CountsExpired;
  *
  * @internal
  */
-final class DatabaseNonceStore implements CountsExpired, NonceStore
+final class DatabaseNonceStore implements CountsExpired, InspectsNonces, NonceStore
 {
     public function issue(string $purpose, string $digest, CarbonImmutable $expiresAt, ?Model $subject): void
     {
@@ -71,14 +72,8 @@ final class DatabaseNonceStore implements CountsExpired, NonceStore
             $existing = Nonce::query()->where('purpose', $purpose)->where('digest', $digest)->lockForUpdate()->first();
 
             if ($existing !== null) {
-                try {
-                    $live = $existing->expires_at->gt($now);
-                } catch (CorruptRecordException) {
-                    $live = true;
-                }
-
                 // Still remembered: this is a replay.
-                if ($live) {
+                if (self::live($existing, $now)) {
                     return false;
                 }
 
@@ -89,6 +84,13 @@ final class DatabaseNonceStore implements CountsExpired, NonceStore
         });
     }
 
+    public function seen(string $purpose, string $digest, CarbonImmutable $now): bool
+    {
+        $existing = Nonce::query()->where('purpose', $purpose)->where('digest', $digest)->first();
+
+        return $existing !== null && self::live($existing, $now);
+    }
+
     public function prune(CarbonImmutable $now): int
     {
         return Nonce::query()->where('expires_at', '<=', Clock::database($now))->toBase()->delete();
@@ -97,6 +99,18 @@ final class DatabaseNonceStore implements CountsExpired, NonceStore
     public function countExpired(CarbonImmutable $now): int
     {
         return Nonce::query()->where('expires_at', '<=', Clock::database($now))->count();
+    }
+
+    /**
+     * A record whose expiry cannot be read counts as live: refusing a retry beats a replay.
+     */
+    private static function live(Nonce $nonce, CarbonImmutable $now): bool
+    {
+        try {
+            return $nonce->expires_at->gt($now);
+        } catch (CorruptRecordException) {
+            return true;
+        }
     }
 
     /**

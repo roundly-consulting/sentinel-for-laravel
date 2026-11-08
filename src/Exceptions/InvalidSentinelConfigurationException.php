@@ -63,4 +63,12 @@ final class InvalidSentinelConfigurationException extends SentinelException
 
         return self::invalidValue('signatures.profiles', "has no profile [{$shown}]");
     }
+
+    /**
+     * @param  class-string  $store
+     */
+    public static function nonceStoreCannotInspect(string $store): self
+    {
+        return new self("The bound nonce store [{$store}] cannot look a nonce up without recording it: implement RoundlyConsulting\\Sentinel\\Contracts\\InspectsNonces to verify signatures with the nonce deferred.");
+    }
 }

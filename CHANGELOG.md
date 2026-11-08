@@ -6,6 +6,29 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+### Added
+
+- Verify now, commit the nonce later: `Sentinel::signatures()->verifyDeferred($request, $profile)`
+  makes every check `verify()` makes (signature, covered components, time window, key, an already
+  recorded nonce is `replayed`) but leaves the nonce unrecorded, returning a `DeferredSignature`
+  (the `VerifiedSignature` plus when its nonce may be forgotten). A request you then refuse for
+  your own reasons (a 400, a 500) no longer burns the nonce, so the sender's identical retry still
+  verifies. `Sentinel::signatures()->commitNonce($deferred)` records it once you accept the
+  request: atomic on the configured nonce store with the eager path's scope and lifetime, so of
+  concurrent copies exactly one commits and the rest are `replayed`; a commit after the window
+  closed is `too_old`. Both throw `HttpSignatureException` (401) and fire `HttpSignatureRejected`.
+  Also as `Sentinel::verifyRequestSignatureDeferred()` / `Sentinel::commitSignatureNonce()` and
+  the `VerifyRequestSignatureDeferredAction` / `CommitSignatureNonceAction` actions. `verify()`
+  and the `sentinel.signed` middleware still record the nonce immediately.
+- `Contracts\InspectsNonces` — the optional nonce-store capability a deferred verification needs
+  (look a nonce up without recording it). The built-in `database` and `cache` stores implement it;
+  a custom `NonceStore` without it keeps working everywhere else, and `verifyDeferred()` refuses it
+  with `InvalidSentinelConfigurationException::nonceStoreCannotInspect()`.
+- `Sentinel::fake()` scripts deferred verifications like `verify()`, commits over its in-memory
+  store with the real once-only and window rules (no events), records commits without the nonce,
+  and adds `assertSignatureVerifiedDeferred()`, `assertNonceCommitted()` and
+  `assertNonceNotCommitted()`.
+
 ## 2.1.0 - 2026-11-08
 
 ### Added

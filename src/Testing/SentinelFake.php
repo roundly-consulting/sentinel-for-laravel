@@ -7,9 +7,11 @@ namespace RoundlyConsulting\Sentinel\Testing;
 use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Contracts\Container\Container;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Events\NullDispatcher;
 use Illuminate\Http\Client\Response as ClientResponse;
 use Illuminate\Http\Request;
 use PHPUnit\Framework\Assert as PHPUnit;
@@ -24,6 +26,7 @@ use RoundlyConsulting\Sentinel\Actions\Nonces\IssueNonceAction;
 use RoundlyConsulting\Sentinel\Actions\Nonces\IssueSingleUseUrlAction;
 use RoundlyConsulting\Sentinel\Actions\Nonces\RememberNonceAction;
 use RoundlyConsulting\Sentinel\Actions\PruneAction;
+use RoundlyConsulting\Sentinel\Actions\Signatures\CommitSignatureNonceAction;
 use RoundlyConsulting\Sentinel\Contracts\AcknowledgementPolicy;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgementResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgeRequest;
@@ -32,6 +35,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ConsumeNonceRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\DeferredSignature;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotencyDecision;
@@ -94,6 +98,7 @@ use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
 use RoundlyConsulting\Sentinel\Exceptions\UnknownKeyException;
 use RoundlyConsulting\Sentinel\Http\Signatures\ProfileResolver;
+use RoundlyConsulting\Sentinel\Http\Signatures\SignatureVerifier;
 use RoundlyConsulting\Sentinel\Keys\EnvSnippet;
 use RoundlyConsulting\Sentinel\Keys\ImportedMaterial;
 use RoundlyConsulting\Sentinel\Keys\KeyIds;
@@ -103,6 +108,7 @@ use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Sentinel\Keys\MacRules;
 use RoundlyConsulting\Sentinel\Keys\RingConfig;
 use RoundlyConsulting\Sentinel\Keys\SealingKey;
+use RoundlyConsulting\Sentinel\Nonces\NonceDigest;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Sentinel\Support\BulkQuery;
 use RoundlyConsulting\Sentinel\Support\Clock;
@@ -835,6 +841,64 @@ final class SentinelFake extends SentinelManager
     public function verifyResponseSignature(ResponseInterface|ClientResponse $response, ?string $profile = null): VerifiedSignature
     {
         return $this->fakedSignature('verifyResponseSignature', $response, $profile);
+    }
+
+    /**
+     * The scripted signature (or rejection), deferred: a nonce the fake already committed is
+     * `replayed`, as in production. Recorded with the request and the profile.
+     */
+    public function verifyRequestSignatureDeferred(Request $request, ?string $profile = null): DeferredSignature
+    {
+        $resolved = ProfileResolver::resolve($profile);
+        $arguments = [$request, $resolved->name];
+
+        if ($this->rejection !== null) {
+            $this->record('verifyRequestSignatureDeferred', $arguments, $this->rejection);
+
+            throw HttpSignatureException::rejected($this->rejection, 'fake');
+        }
+
+        $signature = $this->signature ?? $this->syntheticSignature($resolved->ring, $resolved->tag, $resolved->components);
+
+        $scope = SignatureVerifier::nonceScope($signature->ring, $signature->keyId);
+
+        if ($signature->nonce !== null && $this->nonceStore->seen($scope, NonceDigest::of($signature->nonce), Clock::now())) {
+            $this->record('verifyRequestSignatureDeferred', $arguments, SignatureRejection::Replayed);
+
+            throw HttpSignatureException::rejected(SignatureRejection::Replayed, $signature->keyId);
+        }
+
+        return $this->record('verifyRequestSignatureDeferred', $arguments, new DeferredSignature(
+            $signature,
+            $scope,
+            $signature->created + $resolved->maxAge + $resolved->clockSkew + 1,
+            $request->getMethod(),
+            '/'.ltrim($request->path(), '/'),
+        ));
+    }
+
+    /**
+     * Production's commit over the fake's in-memory store (once only, `too_old` past the
+     * window), firing no events. Recorded with the ring and key id — never the nonce.
+     */
+    public function commitSignatureNonce(DeferredSignature $deferred): VerifiedSignature
+    {
+        $arguments = [$deferred->signature->ring, $deferred->signature->keyId];
+
+        try {
+            $signature = $this->container->make(CommitSignatureNonceAction::class, [
+                'manager' => $this,
+                'events' => new NullDispatcher($this->container->make(Dispatcher::class)),
+            ])->execute($deferred);
+        } catch (HttpSignatureException $exception) {
+            $this->record('commitSignatureNonce', $arguments, $exception->reason());
+
+            throw $exception;
+        }
+
+        $this->record('commitSignatureNonce', $arguments, true);
+
+        return $signature;
     }
 
     // ── keys ──────────────────────────────────────────────────────────────────
@@ -1641,6 +1705,41 @@ final class SentinelFake extends SentinelManager
     }
 
     /**
+     * A request signature verified with its nonce deferred — against this profile, when given.
+     * Rejections do not count; neither does a plain `verify()`.
+     */
+    public function assertSignatureVerifiedDeferred(?string $profile = null): void
+    {
+        $matching = array_filter(
+            $this->recorded('verifyRequestSignatureDeferred'),
+            static fn (RecordedCall $call): bool => $call->result instanceof DeferredSignature
+                && ($profile === null || (is_array($call->arguments) && ($call->arguments[1] ?? null) === $profile)),
+        );
+
+        PHPUnit::assertNotEmpty($matching, $profile === null ? 'Expected a signature to be verified with its nonce deferred, but none was.' : "Expected a signature to be verified with its nonce deferred against profile [{$profile}], but none was.");
+    }
+
+    /**
+     * A deferred signature's nonce was committed — with this key id, when given. Refused
+     * commits (`replayed`, `too_old`) do not count.
+     */
+    public function assertNonceCommitted(?string $keyId = null): void
+    {
+        PHPUnit::assertNotEmpty($this->nonceCommits($keyId), 'Expected a signature nonce to be committed'.self::macScope(null, $keyId).', but none was.');
+    }
+
+    /**
+     * No deferred signature's nonce was committed — with this key id, when given: the request
+     * was refused and the sender may retry.
+     */
+    public function assertNonceNotCommitted(?string $keyId = null): void
+    {
+        $count = count($this->nonceCommits($keyId));
+
+        PHPUnit::assertSame(0, $count, 'Expected no signature nonce to be committed'.self::macScope(null, $keyId).", but {$count} ".($count === 1 ? 'was.' : 'were.'));
+    }
+
+    /**
      * A MAC verified — in this ring, with this kid, when given. Refusals, real or scripted, do
      * not count.
      */
@@ -1755,8 +1854,30 @@ final class SentinelFake extends SentinelManager
             throw HttpSignatureException::rejected($this->rejection, 'fake');
         }
 
-        return $this->record($method, [$message, $resolved->name], $this->signature ?? new VerifiedSignature(
-            'sig1', $resolved->ring, 'fake', Algorithm::HmacSha256, Clock::now()->getTimestamp(), null, null, $resolved->tag, $resolved->components,
+        return $this->record($method, [$message, $resolved->name], $this->signature ?? $this->syntheticSignature($resolved->ring, $resolved->tag, $resolved->components));
+    }
+
+    /**
+     * The signature the fake verifies when none was scripted: key `fake`, no nonce.
+     *
+     * @param  list<string>  $components
+     */
+    private function syntheticSignature(string $ring, ?string $tag, array $components): VerifiedSignature
+    {
+        return new VerifiedSignature('sig1', $ring, 'fake', Algorithm::HmacSha256, Clock::now()->getTimestamp(), null, null, $tag, $components);
+    }
+
+    /**
+     * The successful nonce commits of a key id (as recorded).
+     *
+     * @return list<RecordedCall>
+     */
+    private function nonceCommits(?string $keyId): array
+    {
+        return array_values(array_filter(
+            $this->recorded('commitSignatureNonce'),
+            static fn (RecordedCall $call): bool => $call->result === true && is_array($call->arguments)
+                && ($keyId === null || ($call->arguments[1] ?? null) === $keyId),
         ));
     }
 

@@ -55,8 +55,10 @@ use RoundlyConsulting\Sentinel\Actions\Seals\UpdateAndResealAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\VerifyModelAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\VerifyModelsAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\VerifyRetrievedModelAction;
+use RoundlyConsulting\Sentinel\Actions\Signatures\CommitSignatureNonceAction;
 use RoundlyConsulting\Sentinel\Actions\Signatures\SignRequestAction;
 use RoundlyConsulting\Sentinel\Actions\Signatures\VerifyRequestSignatureAction;
+use RoundlyConsulting\Sentinel\Actions\Signatures\VerifyRequestSignatureDeferredAction;
 use RoundlyConsulting\Sentinel\Actions\Signatures\VerifyResponseSignatureAction;
 use RoundlyConsulting\Sentinel\Casts\UtcDateTime;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgementResult;
@@ -66,6 +68,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ConsumeNonceRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\DeferredSignature;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\HealthReport;
@@ -571,6 +574,25 @@ class SentinelManager
     public function verifyRequestSignature(Request $request, ?string $profile = null): VerifiedSignature
     {
         return $this->container->make(VerifyRequestSignatureAction::class)->execute($request, $profile);
+    }
+
+    /**
+     * Verify an incoming request's signature like {@see verifyRequestSignature()} — a nonce
+     * already recorded is `replayed` — but leave its nonce unrecorded until
+     * {@see commitSignatureNonce()}: a request the caller then refuses keeps it for a retry.
+     */
+    public function verifyRequestSignatureDeferred(Request $request, ?string $profile = null): DeferredSignature
+    {
+        return $this->container->make(VerifyRequestSignatureDeferredAction::class)->execute($request, $profile);
+    }
+
+    /**
+     * Record a deferred signature's nonce, atomically and once: a concurrent or repeated
+     * commit is `replayed`, one after the window closed `too_old` (both 401).
+     */
+    public function commitSignatureNonce(DeferredSignature $deferred): VerifiedSignature
+    {
+        return $this->container->make(CommitSignatureNonceAction::class)->execute($deferred);
     }
 
     /**

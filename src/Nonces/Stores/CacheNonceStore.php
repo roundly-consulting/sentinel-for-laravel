@@ -7,6 +7,7 @@ namespace RoundlyConsulting\Sentinel\Nonces\Stores;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Database\Eloquent\Model;
+use RoundlyConsulting\Sentinel\Contracts\InspectsNonces;
 use RoundlyConsulting\Sentinel\Contracts\NonceStore;
 use RoundlyConsulting\Sentinel\Support\Clock;
 use RoundlyConsulting\Sentinel\Support\LockableCache;
@@ -17,7 +18,7 @@ use RoundlyConsulting\Sentinel\Support\LockableCache;
  *
  * @internal
  */
-final readonly class CacheNonceStore implements NonceStore
+final readonly class CacheNonceStore implements InspectsNonces, NonceStore
 {
     public function __construct(private Repository $cache)
     {
@@ -46,6 +47,11 @@ final readonly class CacheNonceStore implements NonceStore
     public function remember(string $purpose, string $digest, CarbonImmutable $until, CarbonImmutable $now): bool
     {
         return $this->cache->add(self::key($purpose, $digest, 'used'), 1, max(1, $until->getTimestamp() - $now->getTimestamp()));
+    }
+
+    public function seen(string $purpose, string $digest, CarbonImmutable $now): bool
+    {
+        return $this->cache->has(self::key($purpose, $digest, 'used'));
     }
 
     public function prune(CarbonImmutable $now): int

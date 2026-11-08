@@ -24,6 +24,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointRecord;
 use RoundlyConsulting\Sentinel\DataTransferObjects\CheckpointResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ConsumeNonceRequest;
+use RoundlyConsulting\Sentinel\DataTransferObjects\DeferredSignature;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GeneratedKey;
 use RoundlyConsulting\Sentinel\DataTransferObjects\GenerateKeyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\HealthReport;
@@ -123,6 +124,8 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static SignaturesAccessor signatures()
  * @method static RequestInterface signRequest(RequestInterface $request, string $keyId, SigningOptions|null $options = null)
  * @method static VerifiedSignature verifyRequestSignature(Request $request, string|null $profile = null)
+ * @method static DeferredSignature verifyRequestSignatureDeferred(Request $request, string|null $profile = null)
+ * @method static VerifiedSignature commitSignatureNonce(DeferredSignature $deferred)
  * @method static VerifiedSignature verifyResponseSignature(ResponseInterface|ClientResponse $response, string|null $profile = null)
  * @method static VerifiedSignature|null verifiedSignature(Request $request)
  * @method static Model|null signatureOwner(Request|VerifiedSignature $from)
@@ -170,6 +173,9 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static void assertRequestSigned(string|null $keyId = null)
  * @method static void assertNothingSigned()
  * @method static void assertSignatureVerified(string|null $profile = null)
+ * @method static void assertSignatureVerifiedDeferred(string|null $profile = null)
+ * @method static void assertNonceCommitted(string|null $keyId = null)
+ * @method static void assertNonceNotCommitted(string|null $keyId = null)
  * @method static void assertMacVerified(string|null $ring = null, string|null $keyId = null)
  * @method static void assertMacNotVerified(string|null $ring = null, string|null $keyId = null)
  * @method static void assertMacComputed(string|null $ring = null)
