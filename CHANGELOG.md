@@ -6,6 +6,8 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+## 2.2.0 - 2026-11-08
+
 ### Added
 
 - Verify now, commit the nonce later: `Sentinel::signatures()->verifyDeferred($request, $profile)`
