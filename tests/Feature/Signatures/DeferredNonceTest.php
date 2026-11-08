@@ -235,7 +235,8 @@ it('treats a corrupt remembered record as live', function (): void {
     $deferred = Sentinel::signatures()->verifyDeferred(received($signed));
     Sentinel::signatures()->commitNonce($deferred);
 
-    Nonce::query()->toBase()->update(['expires_at' => 'not a date']);
+    // PostgreSQL and MySQL refuse the corruption itself; the nonce stays recorded and live.
+    corrupt(fn () => Nonce::query()->toBase()->update(['expires_at' => 'not a date']));
 
     expect(deferredRejection(fn () => Sentinel::signatures()->verifyDeferred(received($signed))))->toBe(SignatureRejection::Replayed);
 });
