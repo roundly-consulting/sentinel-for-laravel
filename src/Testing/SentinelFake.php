@@ -154,6 +154,9 @@ final class SentinelFake extends SentinelManager
 
     private ?KeyInfo $macKey = null;
 
+    /** rejectMacsWithSecrets() was called: every `verifyWithSecrets()` returns null */
+    private bool $rejectMacsWithSecrets = false;
+
     /** @var array<string, KeyInfo> keys the fake generated or imported, by "ring\0kid" */
     private array $keys = [];
 
@@ -254,6 +257,17 @@ final class SentinelFake extends SentinelManager
     public function rejectMacs(MacRejection $reason): static
     {
         $this->macRejection = $reason;
+
+        return $this;
+    }
+
+    /**
+     * Every `Sentinel::macs()->verify()` matches no secret (null) — test a 401 path without
+     * forging a MAC. The production rules still apply (and still throw).
+     */
+    public function rejectMacsWithSecrets(): static
+    {
+        $this->rejectMacsWithSecrets = true;
 
         return $this;
     }
@@ -1169,6 +1183,29 @@ final class SentinelFake extends SentinelManager
     }
 
     /**
+     * The real MAC, through the real action: nothing here needs key material Sentinel holds, so
+     * a host test gets byte-correct signatures. Recorded without the secret.
+     */
+    public function signWithSecret(string $message, #[SensitiveParameter] string $secret, Algorithm $algorithm = Algorithm::HmacSha256): string
+    {
+        return $this->record('signWithSecret', [$message, $algorithm], parent::signWithSecret($message, $secret, $algorithm));
+    }
+
+    /**
+     * The real index, through the real action (every production rule, the same exceptions),
+     * or null after `rejectMacsWithSecrets()`. Recorded with the number of secrets — never the
+     * secrets or the MAC.
+     *
+     * @param  non-empty-list<string>  $secrets
+     */
+    public function verifyWithSecrets(string $message, #[SensitiveParameter] string $mac, #[SensitiveParameter] array $secrets, Algorithm $algorithm = Algorithm::HmacSha256): ?int
+    {
+        $index = parent::verifyWithSecrets($message, $mac, $secrets, $algorithm);
+
+        return $this->record('verifyWithSecrets', [$message, $algorithm, count($secrets)], $this->rejectMacsWithSecrets ? null : $index);
+    }
+
+    /**
      * As production: the keys the fake generated or imported too (they shadow the real store's).
      */
     public function findKey(string $ring, string $keyId): ?KeyInfo
@@ -1643,6 +1680,54 @@ final class SentinelFake extends SentinelManager
     }
 
     /**
+     * A MAC was signed with a caller-held secret — over this message, with this algorithm, when
+     * given.
+     */
+    public function assertMacSigned(?string $message = null, ?Algorithm $algorithm = null): void
+    {
+        $matching = array_filter(
+            $this->recorded('signWithSecret'),
+            static fn (RecordedCall $call): bool => is_array($call->arguments)
+                && ($message === null || ($call->arguments[0] ?? null) === $message)
+                && ($algorithm === null || ($call->arguments[1] ?? null) === $algorithm),
+        );
+
+        PHPUnit::assertNotEmpty($matching, 'Expected a MAC to be signed with a caller-held secret'.self::secretMacScope($message, $algorithm).', but none was.');
+    }
+
+    /**
+     * A MAC was verified against caller-held secrets — over this message, and that matched
+     * (true) or matched none (false), when given.
+     */
+    public function assertMacsVerified(?string $message = null, ?bool $matched = null): void
+    {
+        $matching = array_filter(
+            $this->recorded('verifyWithSecrets'),
+            static fn (RecordedCall $call): bool => is_array($call->arguments)
+                && ($message === null || ($call->arguments[0] ?? null) === $message)
+                && ($matched === null || ($call->result !== null) === $matched),
+        );
+
+        $scope = self::secretMacScope($message, null).match ($matched) {
+            true => ' that matched a secret',
+            false => ' that matched no secret',
+            null => '',
+        };
+
+        PHPUnit::assertNotEmpty($matching, "Expected a MAC to be verified against caller-held secrets{$scope}, but none was.");
+    }
+
+    /**
+     * No MAC was signed or verified with caller-held secrets.
+     */
+    public function assertNoMacsWithSecrets(): void
+    {
+        $count = count($this->recorded('signWithSecret')) + count($this->recorded('verifyWithSecrets'));
+
+        PHPUnit::assertSame(0, $count, "Expected no MAC with caller-held secrets, but {$count} ".($count === 1 ? 'was.' : 'were.'));
+    }
+
+    /**
      * The recorded calls, optionally of one manager method.
      *
      * @return list<RecordedCall>
@@ -1818,6 +1903,11 @@ final class SentinelFake extends SentinelManager
                 && ($ring === null || ($call->arguments[0] ?? null) === $ring)
                 && ($keyId === null || ($call->arguments[1] ?? null) === $keyId),
         ));
+    }
+
+    private static function secretMacScope(?string $message, ?Algorithm $algorithm): string
+    {
+        return ($message === null ? '' : " over [{$message}]").($algorithm === null ? '' : " with [{$algorithm->value}]");
     }
 
     private static function macScope(?string $ring, ?string $keyId): string

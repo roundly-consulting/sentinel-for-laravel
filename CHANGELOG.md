@@ -6,6 +6,23 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+### Added
+
+- `Sentinel::macs()` — HMAC with secrets your application holds (a webhook endpoint's secret, a
+  partner's), next to the key-ring MACs: `sign($message, $secret, Algorithm)` returns the raw MAC
+  and `verify($message, $mac, $secrets, Algorithm)` returns the index of the matching secret or
+  `null`. Any non-empty secret length, up to 8 secrets per check (rotate by passing
+  `[$current, $previous]`), constant time over every secret with no early exit, built on
+  crypto-for-laravel's `Hash\Hmac`. Also as `Sentinel::signWithSecret()` /
+  `Sentinel::verifyWithSecrets()` and the `SignWithSecretAction` / `VerifyWithSecretsAction`
+  actions.
+- `Sentinel::fake()` returns the real MACs and indexes for these calls, records them without the
+  secrets, and adds `rejectMacsWithSecrets()`, `assertMacSigned()`, `assertMacsVerified()` and
+  `assertNoMacsWithSecrets()`.
+- New refusals: `AlgorithmNotAllowedException::notHmacForMacs()`,
+  `InvalidKeyMaterialException::emptySecret()`, `::noSecrets()` and `::tooManySecrets()`, with
+  English and Slovak messages.
+
 ## 2.0.0 - 2026-11-07
 
 ### Changed

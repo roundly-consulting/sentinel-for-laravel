@@ -92,3 +92,38 @@ it('keeps secret material out of json_encode and log context (dual-review O-32)'
     expect((string) json_encode($nonce))->not->toContain($nonce->value)->toContain('[redacted]')
         ->and((string) json_encode(new ConsumeNonceRequest('password-reset', $nonce->value)))->not->toContain($nonce->value);
 });
+
+it('keeps caller-held MAC secrets out of recorded calls and refusals', function (): void {
+    $fake = Sentinel::fake();
+    $vectors = macsVectors();
+    $secrets = array_values(array_unique(array_map(static fn (array $vector): string => $vector['secret'], $vectors)));
+    $thrown = [];
+
+    foreach ($vectors as $vector) {
+        Sentinel::macs()->sign($vector['message'], $vector['secret'], $vector['algorithm']);
+        Sentinel::macs()->verify($vector['message'], $vector['mac'], [$vector['secret']], $vector['algorithm']);
+    }
+
+    foreach ([
+        static fn () => Sentinel::macs()->verify('m', 'mac', [...$secrets, '']),
+        static fn () => Sentinel::macs()->verify('m', 'mac', [...$secrets, 'x', 'y', 'z']),
+        static fn () => Sentinel::macs()->sign('m', $secrets[0], Algorithm::Ed25519),
+        static fn () => Sentinel::verifyWithSecrets('m', 'mac', [$secrets[0] => $secrets[0]]),
+    ] as $call) {
+        try {
+            $call();
+        } catch (Throwable $exception) {
+            $thrown[] = $exception->getMessage();
+        }
+    }
+
+    $recorded = $fake->recorded();
+    $dumps = serialize($recorded).var_export($recorded, true).json_encode($recorded, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE).implode("\n", $thrown);
+
+    expect($recorded)->toHaveCount(16)->and($thrown)->toHaveCount(4);
+
+    // The 1-byte `k` (M-5) is too short to search for; every other vector secret is not.
+    foreach (array_filter($secrets, static fn (string $secret): bool => strlen($secret) >= 4) as $secret) {
+        expect($dumps)->not->toContain($secret)->not->toContain(bin2hex($secret))->not->toContain(base64_encode($secret));
+    }
+});

@@ -66,4 +66,22 @@ final class InvalidKeyMaterialException extends SentinelException
     {
         return new self("The key [{$ring}:{$keyId}] holds only public material and cannot sign.");
     }
+
+    /**
+     * A caller-held MAC secret is empty: anyone can compute a MAC under the empty key.
+     */
+    public static function emptySecret(): self
+    {
+        return new self(self::translated('messages.macs.empty_secret'));
+    }
+
+    public static function noSecrets(): self
+    {
+        return new self(self::translated('messages.macs.no_secrets'));
+    }
+
+    public static function tooManySecrets(int $maximum): self
+    {
+        return new self(self::translated('messages.macs.too_many_secrets', ['max' => $maximum]));
+    }
 }

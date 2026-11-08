@@ -15,6 +15,7 @@ use RoundlyConsulting\PackageToolkit\Concerns\RedactsSensitiveArguments;
 use RoundlyConsulting\Sentinel\Accessors\IdempotencyAccessor;
 use RoundlyConsulting\Sentinel\Accessors\KeysAccessor;
 use RoundlyConsulting\Sentinel\Accessors\LedgerAccessor;
+use RoundlyConsulting\Sentinel\Accessors\MacsAccessor;
 use RoundlyConsulting\Sentinel\Accessors\NoncesAccessor;
 use RoundlyConsulting\Sentinel\Accessors\SignaturesAccessor;
 use RoundlyConsulting\Sentinel\DataTransferObjects\AcknowledgementResult;
@@ -55,6 +56,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\UpdateAndResealRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationReport;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerificationResult;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerifiedSignature;
+use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\MacRejection;
 use RoundlyConsulting\Sentinel\Enums\SignatureRejection;
 use RoundlyConsulting\Sentinel\Enums\VerificationStatus;
@@ -100,6 +102,9 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static KeyInfo currentKey(string|null $ring = null)
  * @method static KeyInfo verifyMac(string $ring, string $keyId, string $message, string $mac)
  * @method static IssuedMac mac(string $ring, string $message)
+ * @method static MacsAccessor macs()
+ * @method static string signWithSecret(string $message, string $secret, Algorithm $algorithm = Algorithm::HmacSha256)
+ * @method static int|null verifyWithSecrets(string $message, string $mac, non-empty-list<string> $secrets, Algorithm $algorithm = Algorithm::HmacSha256)
  * @method static SentinelManager extend(string $driver, Closure $factory)
  * @method static LedgerAccessor ledger()
  * @method static CheckpointResult|null checkpoint(CheckpointOptions|null $options = null)
@@ -128,6 +133,7 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static SentinelFake fakeLedgerFindings(LedgerFinding ...$findings)
  * @method static SentinelFake fakeVerifiedMac(KeyInfo|null $key = null)
  * @method static SentinelFake rejectMacs(MacRejection $reason)
+ * @method static SentinelFake rejectMacsWithSecrets()
  * @method static void assertSealed(Model $model, string|null $seal = null, Closure|null $callback = null)
  * @method static void assertNotSealed(Model $model, string|null $seal = null)
  * @method static void assertNothingSealed()
@@ -168,6 +174,9 @@ use RoundlyConsulting\Sentinel\Testing\SentinelFake;
  * @method static void assertMacNotVerified(string|null $ring = null, string|null $keyId = null)
  * @method static void assertMacComputed(string|null $ring = null)
  * @method static void assertNoMacsComputed()
+ * @method static void assertMacSigned(string|null $message = null, Algorithm|null $algorithm = null)
+ * @method static void assertMacsVerified(string|null $message = null, bool|null $matched = null)
+ * @method static void assertNoMacsWithSecrets()
  * @method static list<RecordedCall> recorded(string|null $method = null)
  *
  * @see SentinelManager

@@ -35,4 +35,11 @@ return [
             'detail' => 'Požiadavka nemá platný podpis HTTP správy.',
         ],
     ],
+
+    'macs' => [
+        'not_hmac' => 'Algoritmus [:algorithm] nevytvára MAC; použite hmac-sha256, hmac-sha384 alebo hmac-sha512.',
+        'empty_secret' => 'Tajný kľúč pre MAC nesmie byť prázdny.',
+        'no_secrets' => 'Overenie MAC vyžaduje aspoň jeden tajný kľúč.',
+        'too_many_secrets' => 'MAC sa overuje najviac voči :max tajným kľúčom.',
+    ],
 ];

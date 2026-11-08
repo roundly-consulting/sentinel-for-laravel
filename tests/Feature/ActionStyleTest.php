@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use GuzzleHttp\Psr7\Response as PsrResponse;
 use Illuminate\Support\Facades\DB;
+use RoundlyConsulting\Sentinel\Actions\Macs\SignWithSecretAction;
+use RoundlyConsulting\Sentinel\Actions\Macs\VerifyWithSecretsAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\SealModelAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\VerifyModelAction;
 use RoundlyConsulting\Sentinel\Actions\Seals\VerifyModelsAction;
@@ -19,6 +21,7 @@ use RoundlyConsulting\Sentinel\Exceptions\HttpSignatureException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidSentinelConfigurationException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingMisconfiguredException;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\SentinelManager;
 
 /**
  * I-6: the third calling style — the raw action — takes only public inputs: request DTOs with
@@ -104,3 +107,19 @@ it('throws exactly what the facade throws for an unknown seal or profile', funct
         static fn () => Sentinel::signatures()->verifyResponse(new PsrResponse(200), 'nope'),
     ],
 ]);
+
+it('signs and verifies M-7 with caller-held secrets alike through all three styles', function (): void {
+    $vector = macsVector('M-7');
+    $secrets = [macsVector('M-8')['secret'], $vector['secret']];
+
+    expect([
+        Sentinel::macs()->sign($vector['message'], $vector['secret']),
+        app(SentinelManager::class)->macs()->sign($vector['message'], $vector['secret']),
+        app(SignWithSecretAction::class)->execute($vector['message'], $vector['secret']),
+    ])->toBe(array_fill(0, 3, $vector['mac']))
+        ->and([
+            Sentinel::macs()->verify($vector['message'], $vector['mac'], $secrets),
+            app(SentinelManager::class)->macs()->verify($vector['message'], $vector['mac'], $secrets),
+            app(VerifyWithSecretsAction::class)->execute($vector['message'], $vector['mac'], $secrets),
+        ])->toBe([1, 1, 1]);
+});

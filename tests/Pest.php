@@ -150,6 +150,39 @@ function macVector(): array
 }
 
 /**
+ * The caller-held-secret MAC vectors (M-1…M-8), decoded: the secret and the MAC as raw bytes.
+ *
+ * @return array<string, array{algorithm: Algorithm, secret: string, message: string, mac: string}>
+ */
+function macsVectors(): array
+{
+    /** @var array{vectors: list<array{id: string, algorithm: string, secret_hex: string, message: string, mac_hex?: string, mac_base64?: string}>} $fixture */
+    $fixture = json_decode((string) file_get_contents(__DIR__.'/Fixtures/macs-vectors.json'), true, flags: JSON_THROW_ON_ERROR);
+    $vectors = [];
+
+    foreach ($fixture['vectors'] as $vector) {
+        $vectors[$vector['id']] = [
+            'algorithm' => Algorithm::from($vector['algorithm']),
+            'secret' => (string) hex2bin($vector['secret_hex']),
+            'message' => $vector['message'],
+            'mac' => isset($vector['mac_hex']) ? (string) hex2bin($vector['mac_hex']) : (string) base64_decode($vector['mac_base64'] ?? '', true),
+        ];
+    }
+
+    return $vectors;
+}
+
+/**
+ * One caller-held-secret MAC vector by id (`M-7`).
+ *
+ * @return array{algorithm: Algorithm, secret: string, message: string, mac: string}
+ */
+function macsVector(string $id): array
+{
+    return macsVectors()[$id];
+}
+
+/**
  * A ring of its own for MACs over arbitrary bytes (`logs`): the vector's secret is its config
  * key, and a database store behind it takes imported per-service keys.
  *

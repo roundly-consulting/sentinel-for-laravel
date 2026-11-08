@@ -35,4 +35,11 @@ return [
             'detail' => 'The request does not carry a valid HTTP message signature.',
         ],
     ],
+
+    'macs' => [
+        'not_hmac' => 'The algorithm [:algorithm] computes no MAC; use hmac-sha256, hmac-sha384 or hmac-sha512.',
+        'empty_secret' => 'A MAC secret must not be empty.',
+        'no_secrets' => 'Verifying a MAC needs at least one secret.',
+        'too_many_secrets' => 'A MAC is verified against at most :max secrets.',
+    ],
 ];

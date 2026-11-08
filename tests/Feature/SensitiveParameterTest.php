@@ -3,8 +3,15 @@
 declare(strict_types=1);
 
 use RoundlyConsulting\Sentinel\Accessors\KeyRingHandle;
+use RoundlyConsulting\Sentinel\Accessors\MacsAccessor;
+use RoundlyConsulting\Sentinel\Actions\Macs\SignWithSecretAction;
+use RoundlyConsulting\Sentinel\Actions\Macs\VerifyWithSecretsAction;
 use RoundlyConsulting\Sentinel\DataTransferObjects\ImportKeyRequest;
 use RoundlyConsulting\Sentinel\Keys\ImportedMaterial;
+use RoundlyConsulting\Sentinel\Keys\SecretMacRules;
+use RoundlyConsulting\Sentinel\Keys\Signers;
+use RoundlyConsulting\Sentinel\SentinelManager;
+use RoundlyConsulting\Sentinel\Testing\SentinelFake;
 use RoundlyConsulting\Sentinel\Tests\Support\SourceScan;
 
 /**
@@ -55,4 +62,28 @@ it('marks imported key material as sensitive on every path into the import', fun
     [ImportKeyRequest::class, '__construct'],
     [KeyRingHandle::class, 'import'],
     [ImportedMaterial::class, 'parse'],
+]);
+
+it('marks the secrets and the MAC of Sentinel::macs() as sensitive on every layer', function (string $class, string $method, array $sensitive): void {
+    $marked = array_values(array_map(
+        static fn (ReflectionParameter $parameter): string => $parameter->getName(),
+        array_filter(
+            (new ReflectionMethod($class, $method))->getParameters(),
+            static fn (ReflectionParameter $parameter): bool => $parameter->getAttributes(SensitiveParameter::class) !== [],
+        ),
+    ));
+
+    expect($marked)->toBe($sensitive);
+})->with([
+    [SentinelManager::class, 'signWithSecret', ['secret']],
+    [SentinelManager::class, 'verifyWithSecrets', ['mac', 'secrets']],
+    [SentinelFake::class, 'signWithSecret', ['secret']],
+    [SentinelFake::class, 'verifyWithSecrets', ['mac', 'secrets']],
+    [MacsAccessor::class, 'sign', ['secret']],
+    [MacsAccessor::class, 'verify', ['mac', 'secrets']],
+    [SignWithSecretAction::class, 'execute', ['secret']],
+    [VerifyWithSecretsAction::class, 'execute', ['mac', 'secrets']],
+    [Signers::class, 'macWithSecret', ['secret']],
+    [SecretMacRules::class, 'secret', ['secret']],
+    [SecretMacRules::class, 'secrets', ['secrets']],
 ]);

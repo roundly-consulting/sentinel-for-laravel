@@ -11,11 +11,13 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Client\Response as ClientResponse;
 use Illuminate\Http\Request;
+use InvalidArgumentException;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use RoundlyConsulting\Sentinel\Accessors\IdempotencyAccessor;
 use RoundlyConsulting\Sentinel\Accessors\KeysAccessor;
 use RoundlyConsulting\Sentinel\Accessors\LedgerAccessor;
+use RoundlyConsulting\Sentinel\Accessors\MacsAccessor;
 use RoundlyConsulting\Sentinel\Accessors\NoncesAccessor;
 use RoundlyConsulting\Sentinel\Accessors\SignaturesAccessor;
 use RoundlyConsulting\Sentinel\Actions\CheckInstallationAction;
@@ -33,6 +35,8 @@ use RoundlyConsulting\Sentinel\Actions\Keys\RotateKeyAction;
 use RoundlyConsulting\Sentinel\Actions\Keys\VerifyMacAction;
 use RoundlyConsulting\Sentinel\Actions\Ledger\CreateCheckpointAction;
 use RoundlyConsulting\Sentinel\Actions\Ledger\VerifyLedgerAction;
+use RoundlyConsulting\Sentinel\Actions\Macs\SignWithSecretAction;
+use RoundlyConsulting\Sentinel\Actions\Macs\VerifyWithSecretsAction;
 use RoundlyConsulting\Sentinel\Actions\Nonces\ConsumeNonceAction;
 use RoundlyConsulting\Sentinel\Actions\Nonces\IssueNonceAction;
 use RoundlyConsulting\Sentinel\Actions\Nonces\IssueSingleUseUrlAction;
@@ -100,12 +104,15 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\VerifiedSignature;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerifyManyRequest;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerifyRequest;
 use RoundlyConsulting\Sentinel\Definition\DefinitionRegistry;
+use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\PersistOperation;
 use RoundlyConsulting\Sentinel\Enums\SealEvent;
 use RoundlyConsulting\Sentinel\Enums\VerificationContext;
 use RoundlyConsulting\Sentinel\Events\SealingSuspended;
+use RoundlyConsulting\Sentinel\Exceptions\AlgorithmNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\CorruptRecordException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidIdempotencyKeyException;
+use RoundlyConsulting\Sentinel\Exceptions\InvalidKeyMaterialException;
 use RoundlyConsulting\Sentinel\Exceptions\MacVerificationException;
 use RoundlyConsulting\Sentinel\Exceptions\SealingSuspensionNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\TamperedModelException;
@@ -713,6 +720,39 @@ class SentinelManager
     public function mac(string $ring, string $message): IssuedMac
     {
         return $this->container->make(ComputeMacAction::class)->execute($ring, $message);
+    }
+
+    // ── MACs with caller-held secrets ─────────────────────────────────────────
+
+    public function macs(): MacsAccessor
+    {
+        return new MacsAccessor($this);
+    }
+
+    /**
+     * The raw HMAC of the message under a secret the caller holds (any non-empty length).
+     *
+     * @throws AlgorithmNotAllowedException for Ed25519 / ECDSA
+     * @throws InvalidKeyMaterialException for an empty secret
+     */
+    public function signWithSecret(string $message, #[SensitiveParameter] string $secret, Algorithm $algorithm = Algorithm::HmacSha256): string
+    {
+        return $this->container->make(SignWithSecretAction::class)->execute($message, $secret, $algorithm);
+    }
+
+    /**
+     * The index of the lowest of 1–8 caller-held secrets the raw MAC matches, or null —
+     * constant time over every secret, no early exit.
+     *
+     * @param  non-empty-list<string>  $secrets
+     *
+     * @throws AlgorithmNotAllowedException for Ed25519 / ECDSA
+     * @throws InvalidKeyMaterialException for no secrets, more than 8, or an empty one
+     * @throws InvalidArgumentException for a non-list or a non-string secret
+     */
+    public function verifyWithSecrets(string $message, #[SensitiveParameter] string $mac, #[SensitiveParameter] array $secrets, Algorithm $algorithm = Algorithm::HmacSha256): ?int
+    {
+        return $this->container->make(VerifyWithSecretsAction::class)->execute($message, $mac, $secrets, $algorithm);
     }
 
     /**

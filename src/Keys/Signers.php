@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Sentinel\Keys;
 
+use Closure;
 use RoundlyConsulting\Crypto\Hash\Hmac;
 use RoundlyConsulting\Crypto\Signature\EdDSA;
 use RoundlyConsulting\Crypto\Signature\Es;
@@ -20,14 +21,37 @@ use SensitiveParameter;
  * algorithm can never reproduce a MAC. HTTP signatures and raw MACs use the shared secret as
  * the peer holds it. Signatures: Ed25519 (64 bytes) and raw ECDSA `r‖s` (64 / 96 bytes).
  *
+ * `macWithSecret()` MACs with a secret the caller holds (`Sentinel::macs()`) — the plain
+ * secret, never a ring key.
+ *
  * @internal
  */
 final readonly class Signers
 {
     /**
      * @param  bool|null  $sodium  null = probe the runtime; a seam for the "no ext-sodium" path
+     * @param  (Closure(): void)|null  $onSecretMac  called once per `macWithSecret()`; a seam that
+     *                                               pins `Sentinel::macs()->verify()`'s no-early-exit loop
      */
-    public function __construct(private ?bool $sodium = null) {}
+    public function __construct(
+        private ?bool $sodium = null,
+        private ?Closure $onSecretMac = null,
+    ) {}
+
+    /**
+     * The raw HMAC of the message under a caller-held secret (any non-empty length).
+     */
+    public function macWithSecret(Algorithm $algorithm, string $message, #[SensitiveParameter] string $secret): string
+    {
+        SecretMacRules::algorithm($algorithm);
+        SecretMacRules::secret($secret);
+
+        if ($this->onSecretMac !== null) {
+            ($this->onSecretMac)();
+        }
+
+        return (new Hmac($algorithm->hashAlgorithm()))->sign($message, $secret);
+    }
 
     /**
      * The raw MAC/signature bytes over the message.

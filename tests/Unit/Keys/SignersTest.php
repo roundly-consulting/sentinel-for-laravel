@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\KeyStatus;
+use RoundlyConsulting\Sentinel\Exceptions\AlgorithmNotAllowedException;
 use RoundlyConsulting\Sentinel\Exceptions\InvalidKeyMaterialException;
 use RoundlyConsulting\Sentinel\Keys\KeyMaterial;
 use RoundlyConsulting\Sentinel\Keys\Purpose;
@@ -97,4 +98,13 @@ it('reports a sealing key status and keeps its material out of dumps and seriali
         ->and(print_r($key, true))->toContain('[redacted]')->not->toContain(substr((string) $key->material()->encodedPrivate(), 7, 20))
         ->and(fn () => serialize($key))->toThrow(LogicException::class)
         ->and(fn () => unserialize('O:'.strlen(SealingKey::class).':"'.SealingKey::class.'":0:{}'))->toThrow(LogicException::class);
+});
+
+it('MACs with a caller-held secret of any non-empty length, and only with hmac-*', function (): void {
+    $signers = new Signers;
+
+    expect($signers->macWithSecret(Algorithm::HmacSha256, 'hello', 'k'))->toBe(hash_hmac('sha256', 'hello', 'k', true))
+        ->and($signers->macWithSecret(Algorithm::HmacSha384, 'hello', str_repeat('x', 200)))->toBe(hash_hmac('sha384', 'hello', str_repeat('x', 200), true))
+        ->and(fn () => $signers->macWithSecret(Algorithm::Ed25519, 'hello', 'k'))->toThrow(AlgorithmNotAllowedException::class)
+        ->and(fn () => $signers->macWithSecret(Algorithm::HmacSha256, 'hello', ''))->toThrow(InvalidKeyMaterialException::class);
 });

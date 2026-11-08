@@ -176,6 +176,11 @@ it('behaves exactly like the real manager', function (Closure $scenario): void {
         ->and(app(SentinelManager::class))->toBeInstanceOf(SentinelFake::class);
 })->with([
     'unknown seal' => [static fn (): mixed => Sentinel::verify(invoice(), 'nope')],
+    'caller-held secret MAC' => [static fn (): string => bin2hex(Sentinel::macs()->sign(macsVector('M-6')['message'], macsVector('M-6')['secret']))],
+    'caller-held secret rotation' => [static fn (): ?int => Sentinel::macs()->verify(macsVector('M-7')['message'], macsVector('M-7')['mac'], [macsVector('M-8')['secret'], macsVector('M-7')['secret']])],
+    'caller-held secret mismatch' => [static fn (): ?int => Sentinel::macs()->verify('m', str_repeat("\0", 32), ['k'])],
+    'caller-held secret empty' => [static fn (): mixed => Sentinel::macs()->verify('m', 'mac', ['k', ''])],
+    'caller-held secret not hmac' => [static fn (): mixed => Sentinel::macs()->sign('m', 'k', Algorithm::Ed25519)],
     'not sealable' => [static fn (): mixed => Sentinel::verify(new InvoiceLine)],
     'unsaved model' => [static fn (): mixed => Sentinel::seal(new Invoice)],
     'acknowledge without a reason' => [static fn (): mixed => Sentinel::acknowledge(invoice(), '   ')],
