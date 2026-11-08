@@ -6,6 +6,8 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+## 2.1.0 - 2026-11-08
+
 ### Added
 
 - `Sentinel::macs()` — HMAC with secrets your application holds (a webhook endpoint's secret, a
